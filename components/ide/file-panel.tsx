@@ -4,7 +4,7 @@ import * as React from "react"
 import { ChevronRight, ChevronDown, Folder, FolderOpen, FileCode, Filter, Files } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import type { Session, FileNode } from "@/lib/mock-data"
+import type { Session, FileNode } from "@/lib/api-types"
 
 interface FilePanelProps {
   session: Session | null
@@ -13,9 +13,10 @@ interface FilePanelProps {
   className?: string
 }
 
+// ... existing code (unchanged) ...
 export function FilePanel({ session, onFileSelect, selectedFileId, className }: FilePanelProps) {
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set())
-  const [showChangedOnly, setShowChangedOnly] = React.useState(true) // Default to changed files only
+  const [showChangedOnly, setShowChangedOnly] = React.useState(true)
 
   const toggleExpand = (id: string) => {
     const next = new Set(expandedIds)
@@ -74,7 +75,6 @@ export function FilePanel({ session, onFileSelect, selectedFileId, className }: 
 
   return (
     <div className={cn("flex flex-col h-full bg-sidebar border-l border-border", className)}>
-      {/* Header with toggle */}
       <div className="px-3 py-2 border-b border-sidebar-border flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Files</span>
         <div className="flex items-center gap-1">
@@ -99,7 +99,6 @@ export function FilePanel({ session, onFileSelect, selectedFileId, className }: 
         </div>
       </div>
 
-      {/* File tree */}
       <div className="flex-1 overflow-y-auto py-1">
         {filteredFiles.length === 0 ? (
           <div className="text-muted-foreground text-sm p-4 text-center">

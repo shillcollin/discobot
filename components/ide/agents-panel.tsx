@@ -1,37 +1,40 @@
 "use client"
 
 import * as React from "react"
-import { Bot, Circle, Plus, MoreHorizontal, ChevronUp, ChevronDown } from "lucide-react"
+import { Bot, Plus, MoreHorizontal, ChevronUp, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Agent } from "@/lib/mock-data"
+import type { Agent, Icon, SupportedAgentType } from "@/lib/api-types"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { useAgents } from "@/lib/hooks/use-agents"
+import { IconRenderer } from "@/components/ide/icon-renderer"
 
 interface AgentsPanelProps {
   agents: Agent[]
+  agentTypes?: SupportedAgentType[]
   selectedAgentId: string | null
   onAgentSelect: (agent: Agent) => void
   onAddAgent?: () => void
+  onConfigureAgent?: (agent: Agent) => void
   isMinimized: boolean
   onToggleMinimize: () => void
   className?: string
-  style?: React.CSSProperties // Add style prop
+  style?: React.CSSProperties
 }
 
 export function AgentsPanel({
   agents,
+  agentTypes,
   selectedAgentId,
   onAgentSelect,
   onAddAgent,
+  onConfigureAgent,
   isMinimized,
   onToggleMinimize,
   className,
-  style, // Accept style prop
+  style,
 }: AgentsPanelProps) {
   return (
-    <div
-      className={cn("flex flex-col overflow-hidden border-t border-sidebar-border", className)}
-      style={style} // Apply style
-    >
+    <div className={cn("flex flex-col overflow-hidden border-t border-sidebar-border", className)} style={style}>
       <div
         className="px-3 py-2 flex items-center justify-between cursor-pointer hover:bg-sidebar-accent"
         onClick={onToggleMinimize}
@@ -61,14 +64,19 @@ export function AgentsPanel({
       </div>
       {!isMinimized && (
         <div className="flex-1 overflow-y-auto py-1">
-          {agents.map((agent) => (
-            <AgentNode
-              key={agent.id}
-              agent={agent}
-              isSelected={selectedAgentId === agent.id}
-              onSelect={() => onAgentSelect(agent)}
-            />
-          ))}
+          {agents.map((agent) => {
+            const agentType = agentTypes?.find((t) => t.id === agent.agentType)
+            return (
+              <AgentNode
+                key={agent.id}
+                agent={agent}
+                icons={agentType?.icons}
+                isSelected={selectedAgentId === agent.id}
+                onSelect={() => onAgentSelect(agent)}
+                onConfigure={onConfigureAgent ? () => onConfigureAgent(agent) : undefined}
+              />
+            )
+          })}
         </div>
       )}
     </div>
@@ -77,34 +85,50 @@ export function AgentsPanel({
 
 function AgentNode({
   agent,
+  icons,
   isSelected,
   onSelect,
+  onConfigure,
 }: {
   agent: Agent
+  icons?: Icon[]
   isSelected: boolean
   onSelect: () => void
+  onConfigure?: () => void
 }) {
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const { deleteAgent, duplicateAgent } = useAgents()
+
+  const handleConfigure = () => {
+    if (onConfigure) {
+      onConfigure()
+    }
+  }
+
+  const handleDuplicate = async () => {
+    await duplicateAgent(agent.id)
+  }
+
+  const handleDelete = async () => {
+    await deleteAgent(agent.id)
+  }
 
   return (
     <div
       className={cn(
         "group flex items-center gap-1.5 px-2 py-1 hover:bg-sidebar-accent cursor-pointer transition-colors",
         isSelected && "bg-sidebar-accent",
-        agent.status === "inactive" && "opacity-60",
       )}
       onClick={onSelect}
     >
-      <Bot className="h-4 w-4 text-muted-foreground shrink-0" />
+      {icons && icons.length > 0 ? (
+        <IconRenderer icons={icons} size={16} className="shrink-0" />
+      ) : (
+        <Bot className="h-4 w-4 text-muted-foreground shrink-0" />
+      )}
       <div className="flex-1 min-w-0">
         <span className="text-sm truncate block">{agent.name}</span>
       </div>
-      <Circle
-        className={cn(
-          "h-2 w-2 shrink-0",
-          agent.status === "active" ? "fill-green-500 text-green-500" : "fill-muted-foreground text-muted-foreground",
-        )}
-      />
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button
@@ -118,9 +142,11 @@ function AgentNode({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-32">
-          <DropdownMenuItem>Configure</DropdownMenuItem>
-          <DropdownMenuItem>Duplicate</DropdownMenuItem>
-          <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
+          <DropdownMenuItem onClick={handleConfigure}>Configure</DropdownMenuItem>
+          <DropdownMenuItem onClick={handleDuplicate}>Duplicate</DropdownMenuItem>
+          <DropdownMenuItem onClick={handleDelete} className="text-destructive">
+            Delete
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

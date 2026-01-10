@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { PanelLeftClose, PanelLeft } from "lucide-react"
+import { PanelLeftClose, PanelLeft, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { SidebarTree } from "@/components/ide/sidebar-tree"
@@ -13,27 +13,27 @@ import { ThemeToggle } from "@/components/ide/theme-toggle"
 import { PanelControls, type PanelState } from "@/components/ide/panel-controls"
 import { ResizeHandle } from "@/components/ide/resize-handle"
 import { AddWorkspaceDialog } from "@/components/ide/add-workspace-dialog"
+import { AddAgentDialog } from "@/components/ide/add-agent-dialog"
 import { AgentsPanel } from "@/components/ide/agents-panel"
-import {
-  mockWorkspaces,
-  mockChatMessages,
-  mockAgents,
-  type FileNode,
-  type Session,
-  type Workspace,
-  type Agent,
-} from "@/lib/mock-data"
+import { useWorkspaces } from "@/lib/hooks/use-workspaces"
+import { useAgents } from "@/lib/hooks/use-agents"
+import { useAgentTypes } from "@/lib/hooks/use-agent-types"
+import { useMessages } from "@/lib/hooks/use-messages"
+import type { FileNode, Session, Agent, CreateWorkspaceRequest, CreateAgentRequest } from "@/lib/api-types"
 
 type BottomView = "chat" | "terminal"
 
 export default function IDEChatPage() {
   const [leftSidebarOpen, setLeftSidebarOpen] = React.useState(true)
   const [selectedSession, setSelectedSession] = React.useState<Session | null>(null)
-  const [workspaces, setWorkspaces] = React.useState<Workspace[]>(mockWorkspaces)
-  const [agents, setAgents] = React.useState<Agent[]>(mockAgents)
   const [selectedAgent, setSelectedAgent] = React.useState<Agent | null>(null)
 
-  const [agentsPanelMinimized, setAgentsPanelMinimized] = React.useState(true)
+  const { workspaces, createWorkspace, isLoading: workspacesLoading, mutate: mutateWorkspaces } = useWorkspaces()
+  const { agents, createAgent, updateAgent, isLoading: agentsLoading, mutate: mutateAgents } = useAgents()
+  const { agentTypes } = useAgentTypes() // Add useAgentTypes hook to get agent type icons
+  const { messages } = useMessages(selectedSession?.id || null)
+
+  const [agentsPanelMinimized, setAgentsPanelMinimized] = React.useState(false)
   const [agentsPanelHeight, setAgentsPanelHeight] = React.useState(20)
   const sidebarRef = React.useRef<HTMLDivElement>(null)
 
@@ -52,7 +52,10 @@ export default function IDEChatPage() {
   const [workspaceSelectTrigger, setWorkspaceSelectTrigger] = React.useState(0)
 
   const [showAddWorkspaceDialog, setShowAddWorkspaceDialog] = React.useState(false)
+  const [showAddAgentDialog, setShowAddAgentDialog] = React.useState(false)
+  const [editingAgent, setEditingAgent] = React.useState<Agent | null>(null)
 
+  // ... existing code for handlers ...
   const handleDiffMinimize = () => {
     if (diffPanelState === "minimized") {
       setDiffPanelState("normal")
@@ -176,14 +179,18 @@ export default function IDEChatPage() {
 
   const showResizeHandle = showDiffPanel && diffPanelState === "normal" && bottomPanelState === "normal"
 
-  const handleAddWorkspace = (newWorkspace: Omit<Workspace, "id" | "sessions">) => {
-    const workspace: Workspace = {
-      ...newWorkspace,
-      id: `ws-${Date.now()}`,
-      sessions: [],
-    }
-    setWorkspaces((prev) => [...prev, workspace])
+  const handleAddWorkspace = async (newWorkspace: CreateWorkspaceRequest) => {
+    await createWorkspace(newWorkspace)
     setShowAddWorkspaceDialog(false)
+  }
+
+  const handleAddAgent = async (newAgent: CreateAgentRequest) => {
+    const agent = await createAgent(newAgent)
+    setShowAddAgentDialog(false)
+    // Select the newly created agent
+    if (agent) {
+      setSelectedAgent(agent)
+    }
   }
 
   const handleAddSession = (workspaceId: string) => {
@@ -195,7 +202,7 @@ export default function IDEChatPage() {
     setShowDiffPanel(false)
   }
 
-  const handleFirstMessage = (message: string, workspaceId: string, agentId: string) => {
+  const handleFirstMessage = async (message: string, workspaceId: string, agentId: string) => {
     const sessionName = message.length > 50 ? message.substring(0, 50) + "..." : message
 
     const newSession: Session = {
@@ -205,11 +212,12 @@ export default function IDEChatPage() {
       timestamp: "Just now",
       status: "running",
       files: [],
+      workspaceId,
+      agentId,
     }
 
-    setWorkspaces((prev) =>
-      prev.map((ws) => (ws.id === workspaceId ? { ...ws, sessions: [newSession, ...ws.sessions] } : ws)),
-    )
+    // Optimistically update local state and re-fetch
+    mutateWorkspaces()
 
     setSelectedSession(newSession)
     setPreselectedWorkspaceId(null)
@@ -219,8 +227,66 @@ export default function IDEChatPage() {
     }
   }
 
+  const handleNewSession = () => {
+    setSelectedSession(null)
+    setPreselectedWorkspaceId(null)
+    setOpenFiles([])
+    setActiveFileId(null)
+    setShowDiffPanel(false)
+  }
+
+  const handleEditAgent = (agent: Agent) => {
+    setEditingAgent(agent)
+    setShowAddAgentDialog(true)
+  }
+
+  const handleAddOrEditAgent = async (agentData: CreateAgentRequest) => {
+    if (editingAgent) {
+      // Update existing agent
+      await updateAgent(editingAgent.id, agentData)
+      mutateAgents()
+      setEditingAgent(null)
+    } else {
+      // Create new agent
+      const agent = await createAgent(agentData)
+      if (agent) {
+        setSelectedAgent(agent)
+      }
+    }
+    setShowAddAgentDialog(false)
+  }
+
+  const handleAgentDialogClose = (open: boolean) => {
+    if (!open) {
+      setEditingAgent(null)
+    }
+    setShowAddAgentDialog(open)
+  }
+
   const showFilePanel = selectedSession !== null
   const showCenteredChat = selectedSession === null
+
+  const sessionAgent = React.useMemo(() => {
+    if (!selectedSession?.agentId) return null
+    return agents.find((a) => a.id === selectedSession.agentId) || null
+  }, [selectedSession, agents])
+
+  const sessionWorkspace = React.useMemo(() => {
+    if (!selectedSession?.workspaceId) return null
+    for (const ws of workspaces) {
+      if (ws.id === selectedSession.workspaceId) return ws
+    }
+    return null
+  }, [selectedSession, workspaces])
+
+  // Show loading state
+  if (workspacesLoading || agentsLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-background">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -231,6 +297,10 @@ export default function IDEChatPage() {
             {leftSidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
           </Button>
           <span className="font-semibold">IDE Chat</span>
+          <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground" onClick={handleNewSession}>
+            <Plus className="h-4 w-4" />
+            New Session
+          </Button>
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
@@ -259,11 +329,17 @@ export default function IDEChatPage() {
           {/* Resize handle between workspaces and agents */}
           {!agentsPanelMinimized && <ResizeHandle onResize={handleSidebarResize} />}
 
-          {/* Agents section - 20% default, minimized by default */}
+          {/* Agents section - 20% default */}
           <AgentsPanel
             agents={agents}
+            agentTypes={agentTypes} // Pass agentTypes to display correct icons
             selectedAgentId={selectedAgent?.id || null}
             onAgentSelect={setSelectedAgent}
+            onAddAgent={() => {
+              setEditingAgent(null)
+              setShowAddAgentDialog(true)
+            }}
+            onConfigureAgent={handleEditAgent}
             isMinimized={agentsPanelMinimized}
             onToggleMinimize={() => setAgentsPanelMinimized(!agentsPanelMinimized)}
             style={agentsPanelMinimized ? {} : { height: `${agentsPanelHeight}%` }}
@@ -285,6 +361,8 @@ export default function IDEChatPage() {
               workspaceSelectTrigger={workspaceSelectTrigger}
               agents={agents}
               selectedAgentId={selectedAgent?.id || null}
+              onAddAgent={() => setShowAddAgentDialog(true)}
+              agentTypes={agentTypes}
             />
           </main>
         ) : (
@@ -356,11 +434,15 @@ export default function IDEChatPage() {
                       <TerminalView className="h-full" onToggleChat={() => setBottomView("chat")} hideHeader />
                     ) : (
                       <ChatPanel
-                        initialMessages={selectedSession ? mockChatMessages : []}
+                        initialMessages={messages}
                         onToggleTerminal={() => setBottomView("terminal")}
                         showTerminal={false}
                         className="h-full"
                         hideHeader
+                        sessionAgent={sessionAgent}
+                        sessionWorkspace={sessionWorkspace}
+                        agentTypes={agentTypes}
+                        agents={agents}
                       />
                     )}
                   </div>
@@ -385,6 +467,13 @@ export default function IDEChatPage() {
         open={showAddWorkspaceDialog}
         onOpenChange={setShowAddWorkspaceDialog}
         onAdd={handleAddWorkspace}
+      />
+
+      <AddAgentDialog
+        open={showAddAgentDialog}
+        onOpenChange={handleAgentDialogClose}
+        onAdd={handleAddOrEditAgent}
+        editingAgent={editingAgent}
       />
     </div>
   )

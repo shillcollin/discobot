@@ -6,8 +6,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import type { Workspace } from "@/lib/mock-data"
+import type { CreateWorkspaceRequest } from "@/lib/api-types"
+import { useSuggestions } from "@/lib/hooks/use-suggestions"
 
+// ... existing code (GitHubIcon, InputType, ValidationResult, detectInputType, validateInput, getInputIcon) ...
 function GitHubIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -24,31 +26,11 @@ interface ValidationResult {
   error?: string
 }
 
-// Mock suggestions for autocomplete
-const mockGitHubSuggestions = [
-  "github.com/vercel/next.js",
-  "github.com/vercel/ai",
-  "github.com/facebook/react",
-  "github.com/microsoft/typescript",
-  "github.com/tailwindlabs/tailwindcss",
-  "github.com/shadcn-ui/ui",
-]
-
-const mockLocalSuggestions = [
-  "~/projects/my-app",
-  "~/projects/website",
-  "~/code/api-server",
-  "/home/user/dev/dashboard",
-  "/var/www/production",
-  "C:\\Users\\dev\\projects\\app",
-]
-
 function detectInputType(input: string): InputType {
   if (!input.trim()) return "unknown"
 
   const trimmed = input.trim()
 
-  // GitHub patterns
   if (
     trimmed.match(/^(https?:\/\/)?(www\.)?github\.com\//) ||
     trimmed.match(/^git@github\.com:/) ||
@@ -57,7 +39,6 @@ function detectInputType(input: string): InputType {
     return "github"
   }
 
-  // Generic git patterns
   if (
     trimmed.match(/^(https?:\/\/|git@|ssh:\/\/|git:\/\/)/) ||
     trimmed.match(/\.git$/) ||
@@ -66,12 +47,11 @@ function detectInputType(input: string): InputType {
     return "git"
   }
 
-  // Local path patterns
   if (
     trimmed.startsWith("~") ||
     trimmed.startsWith("/") ||
     trimmed.startsWith("./") ||
-    trimmed.match(/^[A-Z]:\\/) || // Windows path
+    trimmed.match(/^[A-Z]:\\/) ||
     trimmed.match(/^\.\.\//)
   ) {
     return "local"
@@ -96,7 +76,6 @@ function validateInput(input: string): ValidationResult {
   }
 
   if (type === "github") {
-    // Validate GitHub URL format
     const match = input.match(/github\.com[/:]([\w-]+)\/([\w.-]+)/)
     if (!match) {
       return {
@@ -109,7 +88,6 @@ function validateInput(input: string): ValidationResult {
   }
 
   if (type === "git") {
-    // Basic git URL validation
     if (!input.match(/[\w-]+\/[\w.-]+/) && !input.match(/\.git$/)) {
       return {
         isValid: false,
@@ -121,7 +99,6 @@ function validateInput(input: string): ValidationResult {
   }
 
   if (type === "local") {
-    // Basic path validation
     if (input.length < 2) {
       return {
         isValid: false,
@@ -151,7 +128,7 @@ function getInputIcon(type: InputType, className?: string) {
 interface AddWorkspaceDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onAdd: (workspace: Omit<Workspace, "id" | "sessions">) => void
+  onAdd: (workspace: CreateWorkspaceRequest) => void
 }
 
 export function AddWorkspaceDialog({ open, onOpenChange, onAdd }: AddWorkspaceDialogProps) {
@@ -163,15 +140,11 @@ export function AddWorkspaceDialog({ open, onOpenChange, onAdd }: AddWorkspaceDi
   const validation = validateInput(input)
   const inputType = detectInputType(input)
 
-  // Filter suggestions based on input
+  const { suggestions: apiSuggestions } = useSuggestions(input)
+
   const suggestions = React.useMemo(() => {
-    if (!input.trim()) return []
-
-    const lower = input.toLowerCase()
-    const allSuggestions = [...mockGitHubSuggestions, ...mockLocalSuggestions]
-
-    return allSuggestions.filter((s) => s.toLowerCase().includes(lower)).slice(0, 6)
-  }, [input])
+    return apiSuggestions.map((s) => s.value).slice(0, 6)
+  }, [apiSuggestions])
 
   React.useEffect(() => {
     setSelectedIndex(-1)
@@ -182,7 +155,6 @@ export function AddWorkspaceDialog({ open, onOpenChange, onAdd }: AddWorkspaceDi
 
     const sourceType = inputType === "local" ? "local" : "git"
     onAdd({
-      name: input.split("/").pop() || input,
       path: input.trim(),
       sourceType,
     })
@@ -256,7 +228,6 @@ export function AddWorkspaceDialog({ open, onOpenChange, onAdd }: AddWorkspaceDi
                   )}
                   onKeyDown={handleKeyDown}
                 />
-                {/* Suggestions dropdown */}
                 {showSuggestions && suggestions.length > 0 && (
                   <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg max-h-48 overflow-y-auto">
                     {suggestions.map((suggestion, index) => {

@@ -1,0 +1,36 @@
+"use client"
+
+import useSWR from "swr"
+import { api } from "../api-client"
+import type { Workspace, CreateWorkspaceRequest } from "../api-types"
+
+export function useWorkspaces() {
+  const { data, error, isLoading, mutate } = useSWR("workspaces", () => api.getWorkspaces())
+
+  const createWorkspace = async (data: CreateWorkspaceRequest) => {
+    const workspace = await api.createWorkspace(data)
+    mutate()
+    return workspace
+  }
+
+  const deleteWorkspace = async (id: string) => {
+    await api.deleteWorkspace(id)
+    mutate()
+  }
+
+  const updateWorkspace = async (id: string, data: Partial<Workspace>) => {
+    const workspace = await api.updateWorkspace(id, data)
+    mutate()
+    return workspace
+  }
+
+  return {
+    workspaces: data || [],
+    isLoading,
+    error,
+    createWorkspace,
+    deleteWorkspace,
+    updateWorkspace,
+    mutate,
+  }
+}

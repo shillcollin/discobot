@@ -6,6 +6,20 @@
 /* Add streamdown source for MessageResponse component */
 @source "../node_modules/streamdown/dist/*.js";
 
+/* Add animate-spin keyframe manually to ensure it's always available */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
 /* IDE-inspired dark theme with neutral grays */
 :root {
   --background: oklch(0.98 0 0);

@@ -3,7 +3,7 @@
 import * as React from "react"
 import { X, FileCode } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { FileNode } from "@/lib/mock-data"
+import type { FileNode } from "@/lib/api-types"
 
 interface TabbedDiffViewProps {
   openFiles: FileNode[]
@@ -78,11 +78,9 @@ function DiffContent({ file }: { file: FileNode }) {
   const originalLines = (file.originalContent || file.content || "").split("\n")
   const currentLines = (file.content || "").split("\n")
 
-  // Simple diff algorithm
   const diffLines = React.useMemo(() => {
     const result: { type: "unchanged" | "added" | "removed"; lineNumber: number; content: string }[] = []
 
-    // If no originalContent, show all as unchanged
     if (!file.originalContent) {
       return currentLines.map((line, i) => ({
         type: "unchanged" as const,
@@ -114,7 +112,6 @@ function DiffContent({ file }: { file: FileNode }) {
 
   return (
     <>
-      {/* Diff content */}
       <div className="flex-1 overflow-auto font-mono text-sm">
         <table className="w-full border-collapse">
           <tbody>
@@ -137,7 +134,6 @@ function DiffContent({ file }: { file: FileNode }) {
         </table>
       </div>
 
-      {/* Footer stats */}
       <div className="px-4 py-2 border-t border-border text-xs text-muted-foreground">
         <span className="text-green-500 mr-4">+{diffLines.filter((l) => l.type === "added").length} additions</span>
         <span className="text-red-500">-{diffLines.filter((l) => l.type === "removed").length} deletions</span>

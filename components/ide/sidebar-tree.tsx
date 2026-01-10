@@ -15,10 +15,9 @@ import {
   Plus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Workspace, Session } from "@/lib/mock-data"
+import type { Workspace, Session } from "@/lib/api-types"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-
-// ... existing code (GitHubIcon, parseWorkspacePath) ...
+import { useDeleteSession } from "@/lib/hooks/use-sessions"
 
 function GitHubIcon({ className }: { className?: string }) {
   return (
@@ -51,9 +50,9 @@ interface SidebarTreeProps {
   workspaces: Workspace[]
   onSessionSelect: (session: Session) => void
   selectedSessionId: string | null
-  onAddWorkspace: () => void // Changed from callback to void - dialog handled externally
+  onAddWorkspace: () => void
   onAddSession: (workspaceId: string) => void
-  className?: string // Added className prop
+  className?: string
 }
 
 export function SidebarTree({
@@ -119,8 +118,6 @@ export function SidebarTree({
     </div>
   )
 }
-
-// ... existing code (WorkspaceNode, getStatusIndicator, SessionNode) ...
 
 function WorkspaceNode({
   workspace,
@@ -215,13 +212,14 @@ function SessionNode({
   isSelected: boolean
 }) {
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const { deleteSession } = useDeleteSession()
 
   const handleRename = () => {
     console.log("Rename session:", session.id)
   }
 
-  const handleDelete = () => {
-    console.log("Delete session:", session.id)
+  const handleDelete = async () => {
+    await deleteSession(session.id)
   }
 
   return (
