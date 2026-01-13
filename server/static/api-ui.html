@@ -259,6 +259,8 @@
         .section {
             margin-bottom: 24px;
             flex-shrink: 0;
+            overflow: visible;
+            position: relative;
         }
 
         .section.response-section {
@@ -282,16 +284,22 @@
             width: 100%;
             border: 1px solid var(--border);
             border-radius: 6px;
-            overflow: hidden;
+            overflow: visible;
         }
 
         .param-row {
             display: flex;
             border-bottom: 1px solid var(--border);
+            position: relative;
         }
 
         .param-row:last-child {
             border-bottom: none;
+        }
+
+        /* Ensure combobox rows can overflow */
+        .param-row:has(.param-combobox) {
+            overflow: visible;
         }
 
         .param-name {
@@ -412,6 +420,106 @@
 
         .response-body.error {
             border-color: var(--error);
+        }
+
+        /* Combobox */
+        .param-combobox {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: stretch;
+        }
+
+        .param-combobox .param-input {
+            width: 100%;
+            padding-right: 32px;
+        }
+
+        .combobox-toggle {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 32px;
+            background: var(--bg-tertiary);
+            border: none;
+            border-left: 1px solid var(--border);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .combobox-toggle:hover {
+            background: var(--bg-secondary);
+            color: var(--text);
+        }
+
+        .combobox-toggle svg {
+            width: 14px;
+            height: 14px;
+            transition: transform 0.2s;
+        }
+
+        .param-combobox.open .combobox-toggle svg {
+            transform: rotate(180deg);
+        }
+
+        .combobox-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent);
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            max-height: 250px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        .combobox-dropdown.open {
+            display: block;
+        }
+
+        .combobox-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .combobox-option:hover,
+        .combobox-option.highlighted {
+            background: var(--bg-tertiary);
+        }
+
+        .combobox-option-id {
+            font-family: monospace;
+            color: var(--text);
+        }
+
+        .combobox-option-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .combobox-loading,
+        .combobox-empty {
+            padding: 8px 12px;
+            color: var(--text-muted);
+            font-size: 13px;
+            font-style: italic;
         }
 
         /* Tabs */
@@ -651,6 +759,93 @@
         let _paramValues = {};
         let defaultProjectId = localStorage.getItem('octobot_default_project_id') || 'local';
 
+        // Resource cache for comboboxes
+        const resourceCache = {
+            workspaces: { data: null, loading: false, error: null },
+            sessions: { data: null, loading: false, error: null },
+            agents: { data: null, loading: false, error: null },
+        };
+
+        // Combobox configuration - maps param names to resource types
+        const COMBOBOX_PARAMS = {
+            workspaceId: {
+                resourceType: 'workspaces',
+                fetchFn: fetchWorkspaces,
+                getLabel: (item) => item.path || item.name || item.id,
+                getId: (item) => item.id,
+            },
+            sessionId: {
+                resourceType: 'sessions',
+                fetchFn: fetchSessions,
+                getLabel: (item) => item.name || item.id,
+                getId: (item) => item.id,
+                // Sessions need workspaceId context
+                getDependentParams: () => {
+                    const wsInput = document.querySelector('.param-input[data-param="workspaceId"]');
+                    return wsInput ? { workspaceId: wsInput.value } : {};
+                },
+            },
+            agentId: {
+                resourceType: 'agents',
+                fetchFn: fetchAgents,
+                getLabel: (item) => item.name || item.agent_type || item.id,
+                getId: (item) => item.id,
+            },
+        };
+
+        // Fetch functions for each resource type
+        async function fetchWorkspaces() {
+            if (!defaultProjectId) return [];
+            const response = await fetch(`/api/projects/${encodeURIComponent(defaultProjectId)}/workspaces`, {
+                credentials: 'include',
+            });
+            if (!response.ok) throw new Error(`Failed to fetch workspaces: ${response.status}`);
+            const data = await response.json();
+            // Handle wrapped response: { workspaces: [...] } or direct array
+            return Array.isArray(data) ? data : (data.workspaces || []);
+        }
+
+        async function fetchSessions(params = {}) {
+            if (!defaultProjectId) return [];
+            const workspaceId = params.workspaceId;
+            if (!workspaceId) {
+                // Fetch sessions from all workspaces
+                const workspaces = await fetchWorkspaces();
+                const allSessions = [];
+                for (const ws of workspaces) {
+                    try {
+                        const response = await fetch(`/api/projects/${encodeURIComponent(defaultProjectId)}/workspaces/${encodeURIComponent(ws.id)}/sessions`, {
+                            credentials: 'include',
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            const sessions = Array.isArray(data) ? data : (data.sessions || []);
+                            allSessions.push(...sessions);
+                        }
+                    } catch (_e) {
+                        // Skip workspaces we can't fetch sessions from
+                    }
+                }
+                return allSessions;
+            }
+            const response = await fetch(`/api/projects/${encodeURIComponent(defaultProjectId)}/workspaces/${encodeURIComponent(workspaceId)}/sessions`, {
+                credentials: 'include',
+            });
+            if (!response.ok) throw new Error(`Failed to fetch sessions: ${response.status}`);
+            const data = await response.json();
+            return Array.isArray(data) ? data : (data.sessions || []);
+        }
+
+        async function fetchAgents() {
+            if (!defaultProjectId) return [];
+            const response = await fetch(`/api/projects/${encodeURIComponent(defaultProjectId)}/agents`, {
+                credentials: 'include',
+            });
+            if (!response.ok) throw new Error(`Failed to fetch agents: ${response.status}`);
+            const data = await response.json();
+            return Array.isArray(data) ? data : (data.agents || []);
+        }
+
         // Initialize default project ID input
         (function initProjectId() {
             const input = document.getElementById('defaultProjectId');
@@ -728,6 +923,41 @@
             });
         }
 
+        // Helper to render param input (plain input or combobox)
+        function renderParamInput(p, dataIn) {
+            const comboboxConfig = COMBOBOX_PARAMS[p.name];
+            const defaultValue = getDefaultParamValue(p);
+
+            if (comboboxConfig) {
+                // Render as combobox
+                return `
+                    <div class="param-combobox" data-combobox="${p.name}">
+                        <input class="param-input" type="text"
+                            data-param="${p.name}" data-in="${dataIn}"
+                            placeholder="${p.example || p.name}"
+                            value="${defaultValue}"
+                            autocomplete="off">
+                        <button type="button" class="combobox-toggle" tabindex="-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                        <div class="combobox-dropdown">
+                            <div class="combobox-loading">Loading...</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Render as plain input
+            return `
+                <input class="param-input" type="text"
+                    data-param="${p.name}" data-in="${dataIn}"
+                    placeholder="${p.example || p.name}"
+                    value="${defaultValue}">
+            `;
+        }
+
         // Select endpoint
         function selectEndpoint(endpoint) {
             currentEndpoint = endpoint;
@@ -750,10 +980,7 @@
                                 ${pathParams.map(p => `
                                     <div class="param-row">
                                         <div class="param-name">${p.name}${p.required ? '*' : ''}</div>
-                                        <input class="param-input" type="text"
-                                            data-param="${p.name}" data-in="path"
-                                            placeholder="${p.example || p.name}"
-                                            value="${getDefaultParamValue(p)}">
+                                        ${renderParamInput(p, 'path')}
                                     </div>
                                 `).join('')}
                             </div>
@@ -818,6 +1045,179 @@
                     document.getElementById('responseBody').style.display = tab.dataset.tab === 'body' ? 'block' : 'none';
                     document.getElementById('responseHeaders').style.display = tab.dataset.tab === 'headers' ? 'block' : 'none';
                 };
+            });
+
+            // Initialize comboboxes
+            initializeComboboxes();
+        }
+
+        // Initialize all comboboxes in the current view
+        function initializeComboboxes() {
+            document.querySelectorAll('.param-combobox').forEach(container => {
+                const paramName = container.dataset.combobox;
+                const config = COMBOBOX_PARAMS[paramName];
+                if (!config) return;
+
+                const input = container.querySelector('.param-input');
+                const dropdown = container.querySelector('.combobox-dropdown');
+                const toggleBtn = container.querySelector('.combobox-toggle');
+                let items = [];
+                let highlightedIndex = -1;
+                let isOpen = false;
+
+                // Load data when input is focused
+                async function loadData() {
+                    dropdown.innerHTML = '<div class="combobox-loading">Loading...</div>';
+
+                    try {
+                        const params = config.getDependentParams ? config.getDependentParams() : {};
+                        const result = await config.fetchFn(params);
+                        items = Array.isArray(result) ? result : [];
+
+                        // Auto-select first value if input is empty and we have items
+                        if (!input.value && items.length > 0) {
+                            input.value = config.getId(items[0]);
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+
+                        renderDropdown(input.value);
+                    } catch (e) {
+                        items = [];
+                        dropdown.innerHTML = `<div class="combobox-empty">Error: ${e.message}</div>`;
+                    }
+                }
+
+                // Render dropdown options
+                function renderDropdown(filter = '') {
+                    const filterLower = filter.toLowerCase();
+                    const filtered = items.filter(item => {
+                        const id = config.getId(item);
+                        const label = config.getLabel(item);
+                        return id.toLowerCase().includes(filterLower) ||
+                               label.toLowerCase().includes(filterLower);
+                    });
+
+                    if (filtered.length === 0) {
+                        dropdown.innerHTML = '<div class="combobox-empty">No matches found</div>';
+                        return;
+                    }
+
+                    dropdown.innerHTML = filtered.map((item, idx) => `
+                        <div class="combobox-option${idx === highlightedIndex ? ' highlighted' : ''}" data-idx="${idx}" data-value="${config.getId(item)}">
+                            <span class="combobox-option-id">${config.getId(item)}</span>
+                            <span class="combobox-option-label">${config.getLabel(item)}</span>
+                        </div>
+                    `).join('');
+
+                    // Bind click handlers
+                    dropdown.querySelectorAll('.combobox-option').forEach(option => {
+                        option.onclick = (e) => {
+                            e.stopPropagation();
+                            input.value = option.dataset.value;
+                            closeDropdown();
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        };
+                    });
+                }
+
+                function openDropdown() {
+                    if (isOpen) return;
+                    isOpen = true;
+                    container.classList.add('open');
+                    dropdown.classList.add('open');
+                    loadData();
+                }
+
+                function closeDropdown() {
+                    isOpen = false;
+                    container.classList.remove('open');
+                    dropdown.classList.remove('open');
+                    highlightedIndex = -1;
+                }
+
+                function toggleDropdown() {
+                    if (isOpen) {
+                        closeDropdown();
+                    } else {
+                        openDropdown();
+                        input.focus();
+                    }
+                }
+
+                // Event handlers
+                input.addEventListener('focus', openDropdown);
+
+                toggleBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleDropdown();
+                });
+
+                input.addEventListener('blur', (e) => {
+                    // Delay to allow click on option
+                    setTimeout(() => {
+                        if (!container.contains(document.activeElement)) {
+                            closeDropdown();
+                        }
+                    }, 150);
+                });
+
+                input.addEventListener('input', (e) => {
+                    openDropdown();
+                    renderDropdown(e.target.value);
+                });
+
+                input.addEventListener('keydown', (e) => {
+                    if (!isOpen) return;
+
+                    const options = dropdown.querySelectorAll('.combobox-option');
+                    if (options.length === 0) return;
+
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        highlightedIndex = Math.min(highlightedIndex + 1, options.length - 1);
+                        updateHighlight(options);
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        highlightedIndex = Math.max(highlightedIndex - 1, 0);
+                        updateHighlight(options);
+                    } else if (e.key === 'Enter' && highlightedIndex >= 0) {
+                        e.preventDefault();
+                        const selected = options[highlightedIndex];
+                        if (selected) {
+                            input.value = selected.dataset.value;
+                            closeDropdown();
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    } else if (e.key === 'Escape') {
+                        closeDropdown();
+                    }
+                });
+
+                function updateHighlight(options) {
+                    options.forEach((opt, idx) => {
+                        opt.classList.toggle('highlighted', idx === highlightedIndex);
+                    });
+                    if (highlightedIndex >= 0 && options[highlightedIndex]) {
+                        options[highlightedIndex].scrollIntoView({ block: 'nearest' });
+                    }
+                }
+
+                // Auto-load and select first value on init if input is empty
+                if (!input.value) {
+                    (async () => {
+                        try {
+                            const params = config.getDependentParams ? config.getDependentParams() : {};
+                            const result = await config.fetchFn(params);
+                            items = Array.isArray(result) ? result : [];
+                            if (items.length > 0) {
+                                input.value = config.getId(items[0]);
+                            }
+                        } catch (_e) {
+                            // Silently fail on init
+                        }
+                    })();
+                }
             });
         }
 
