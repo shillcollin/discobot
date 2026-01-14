@@ -23,6 +23,7 @@ import (
 	"github.com/anthropics/octobot/server/internal/handler"
 	"github.com/anthropics/octobot/server/internal/jobs"
 	"github.com/anthropics/octobot/server/internal/middleware"
+	"github.com/anthropics/octobot/server/internal/routes"
 	"github.com/anthropics/octobot/server/internal/sandbox"
 	"github.com/anthropics/octobot/server/internal/sandbox/docker"
 	"github.com/anthropics/octobot/server/internal/service"
@@ -142,10 +143,31 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	// Health check endpoint
-	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	// Initialize handlers
+	h := handler.New(s, cfg, gitProvider, sandboxProvider, eventBroker)
+
+	// Wire up job queue notification to dispatcher for immediate execution
+	if disp != nil {
+		h.JobQueue().SetNotifyFunc(disp.NotifyNewJob)
+	}
+
+	// Route registry for metadata
+	reg := routes.GetRegistry()
+
+	// ===== Health & Status (no auth) =====
+	reg.Register(r, routes.Route{
+		Method: "GET", Pattern: "/health",
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		},
+		Meta: routes.Meta{Group: "Health", Description: "Health check"},
+	})
+
+	reg.Register(r, routes.Route{
+		Method: "GET", Pattern: "/api/status",
+		Handler: h.GetSystemStatus,
+		Meta:    routes.Meta{Group: "Health", Description: "System status (Docker, Git checks)"},
 	})
 
 	// API UI - serve the embedded static HTML file
@@ -159,133 +181,685 @@ func main() {
 		_, _ = w.Write(content)
 	})
 
-	// Initialize handlers
-	h := handler.New(s, cfg, gitProvider, sandboxProvider, eventBroker)
+	// API Routes endpoint (returns route metadata for API UI)
+	r.Get("/api/routes", h.GetRoutes)
 
-	// Wire up job queue notification to dispatcher for immediate execution
-	if disp != nil {
-		h.JobQueue().SetNotifyFunc(disp.NotifyNewJob)
-	}
-
-	// System status endpoint (checks for required dependencies, no auth required)
-	r.Get("/api/status", h.GetSystemStatus)
-
-	// Auth routes (no auth required)
+	// ===== Auth routes (no auth required) =====
 	r.Route("/auth", func(r chi.Router) {
-		r.Get("/login/{provider}", h.AuthLogin)
-		r.Get("/callback/{provider}", h.AuthCallback)
-		r.Post("/logout", h.AuthLogout)
-		r.Get("/me", h.AuthMe)
+		authReg := reg.WithPrefix("/auth")
+
+		authReg.Register(r, routes.Route{
+			Method: "GET", Pattern: "/login/{provider}",
+			Handler: h.AuthLogin,
+			Meta: routes.Meta{
+				Group:       "Auth",
+				Description: "Start OAuth login",
+				Params:      []routes.Param{{Name: "provider", Example: "github"}},
+			},
+		})
+
+		authReg.Register(r, routes.Route{
+			Method: "GET", Pattern: "/callback/{provider}",
+			Handler: h.AuthCallback,
+			Meta: routes.Meta{
+				Group:       "Auth",
+				Description: "OAuth callback",
+				Params:      []routes.Param{{Name: "code", In: "query"}, {Name: "state", In: "query"}},
+			},
+		})
+
+		authReg.Register(r, routes.Route{
+			Method: "POST", Pattern: "/logout",
+			Handler: h.AuthLogout,
+			Meta:    routes.Meta{Group: "Auth", Description: "Logout"},
+		})
+
+		authReg.Register(r, routes.Route{
+			Method: "GET", Pattern: "/me",
+			Handler: h.AuthMe,
+			Meta:    routes.Meta{Group: "Auth", Description: "Get current user"},
+		})
 	})
 
-	// API routes (auth required)
+	// ===== API routes (auth required) =====
 	r.Route("/api", func(r chi.Router) {
-		// Auth middleware
 		r.Use(middleware.Auth(s, cfg))
+		apiReg := reg.WithPrefix("/api")
 
-		// Project list (user's projects)
-		r.Get("/projects", h.ListProjects)
-		r.Post("/projects", h.CreateProject)
+		// Project list
+		apiReg.Register(r, routes.Route{
+			Method: "GET", Pattern: "/projects",
+			Handler: h.ListProjects,
+			Meta:    routes.Meta{Group: "Projects", Description: "List projects"},
+		})
+
+		apiReg.Register(r, routes.Route{
+			Method: "POST", Pattern: "/projects",
+			Handler: h.CreateProject,
+			Meta: routes.Meta{
+				Group:       "Projects",
+				Description: "Create project",
+				Body:        map[string]any{"name": "My Project", "slug": "my-project"},
+			},
+		})
 
 		// Project-specific routes
 		r.Route("/projects/{projectId}", func(r chi.Router) {
-			// Project membership middleware
 			r.Use(middleware.ProjectMember(s))
+			projReg := apiReg.WithPrefix("/projects/{projectId}")
 
-			// SSE events endpoint (must be before other routes to avoid timeout middleware)
-			r.Get("/events", h.Events)
+			// SSE events
+			projReg.Register(r, routes.Route{
+				Method: "GET", Pattern: "/events",
+				Handler: h.Events,
+				Meta: routes.Meta{
+					Group:       "Events",
+					Description: "SSE event stream",
+					Params: []routes.Param{
+						{Name: "projectId", Example: "local"},
+						{Name: "since", In: "query", Example: "2024-01-15T10:30:00Z"},
+						{Name: "after", In: "query"},
+					},
+				},
+			})
 
-			r.Get("/", h.GetProject)
-			r.Put("/", h.UpdateProject)
-			r.Delete("/", h.DeleteProject)
+			// Project CRUD
+			projReg.Register(r, routes.Route{
+				Method: "GET", Pattern: "/",
+				Handler: h.GetProject,
+				Meta: routes.Meta{
+					Group:       "Projects",
+					Description: "Get project",
+					Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+				},
+			})
+
+			projReg.Register(r, routes.Route{
+				Method: "PUT", Pattern: "/",
+				Handler: h.UpdateProject,
+				Meta: routes.Meta{
+					Group:       "Projects",
+					Description: "Update project",
+					Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					Body:        map[string]any{"name": "Updated Name"},
+				},
+			})
+
+			projReg.Register(r, routes.Route{
+				Method: "DELETE", Pattern: "/",
+				Handler: h.DeleteProject,
+				Meta: routes.Meta{
+					Group:       "Projects",
+					Description: "Delete project",
+					Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+				},
+			})
 
 			// Members
-			r.Get("/members", h.ListProjectMembers)
-			r.Delete("/members/{userId}", h.RemoveProjectMember)
+			projReg.Register(r, routes.Route{
+				Method: "GET", Pattern: "/members",
+				Handler: h.ListProjectMembers,
+				Meta: routes.Meta{
+					Group:       "Members",
+					Description: "List members",
+					Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+				},
+			})
+
+			projReg.Register(r, routes.Route{
+				Method: "DELETE", Pattern: "/members/{userId}",
+				Handler: h.RemoveProjectMember,
+				Meta: routes.Meta{
+					Group:       "Members",
+					Description: "Remove member",
+					Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+				},
+			})
 
 			// Invitations
-			r.Post("/invitations", h.CreateInvitation)
-			r.Post("/invitations/{token}/accept", h.AcceptInvitation)
+			projReg.Register(r, routes.Route{
+				Method: "POST", Pattern: "/invitations",
+				Handler: h.CreateInvitation,
+				Meta: routes.Meta{
+					Group:       "Members",
+					Description: "Create invitation",
+					Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					Body:        map[string]any{"email": "user@example.com", "role": "member"},
+				},
+			})
+
+			projReg.Register(r, routes.Route{
+				Method: "POST", Pattern: "/invitations/{token}/accept",
+				Handler: h.AcceptInvitation,
+				Meta: routes.Meta{
+					Group:       "Members",
+					Description: "Accept invitation",
+					Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+				},
+			})
 
 			// Workspaces
 			r.Route("/workspaces", func(r chi.Router) {
-				r.Get("/", h.ListWorkspaces)
-				r.Post("/", h.CreateWorkspace)
-				r.Get("/{workspaceId}", h.GetWorkspace)
-				r.Put("/{workspaceId}", h.UpdateWorkspace)
-				r.Delete("/{workspaceId}", h.DeleteWorkspace)
+				wsReg := projReg.WithPrefix("/workspaces")
 
-				// Sessions within workspace (list only - creation via /chat endpoint)
-				r.Get("/{workspaceId}/sessions", h.ListSessionsByWorkspace)
+				wsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/",
+					Handler: h.ListWorkspaces,
+					Meta: routes.Meta{
+						Group:       "Workspaces",
+						Description: "List workspaces",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/",
+					Handler: h.CreateWorkspace,
+					Meta: routes.Meta{
+						Group:       "Workspaces",
+						Description: "Create workspace",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"name": "My Workspace", "path": "/home/user/code", "source_type": "local"},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{workspaceId}",
+					Handler: h.GetWorkspace,
+					Meta: routes.Meta{
+						Group:       "Workspaces",
+						Description: "Get workspace",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "PUT", Pattern: "/{workspaceId}",
+					Handler: h.UpdateWorkspace,
+					Meta: routes.Meta{
+						Group:       "Workspaces",
+						Description: "Update workspace",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"name": "Updated Name"},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "DELETE", Pattern: "/{workspaceId}",
+					Handler: h.DeleteWorkspace,
+					Meta: routes.Meta{
+						Group:       "Workspaces",
+						Description: "Delete workspace",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				// Sessions within workspace
+				wsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{workspaceId}/sessions",
+					Handler: h.ListSessionsByWorkspace,
+					Meta: routes.Meta{
+						Group:       "Sessions",
+						Description: "List sessions",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
 
 				// Git operations
-				r.Get("/{workspaceId}/git/status", h.GetWorkspaceGitStatus)
-				r.Post("/{workspaceId}/git/fetch", h.FetchWorkspace)
-				r.Post("/{workspaceId}/git/checkout", h.CheckoutWorkspace)
-				r.Get("/{workspaceId}/git/branches", h.GetWorkspaceBranches)
-				r.Get("/{workspaceId}/git/diff", h.GetWorkspaceDiff)
-				r.Get("/{workspaceId}/git/files", h.GetWorkspaceFileTree)
-				r.Get("/{workspaceId}/git/file", h.GetWorkspaceFileContent)
-				r.Post("/{workspaceId}/git/file", h.WriteWorkspaceFile)
-				r.Post("/{workspaceId}/git/stage", h.StageWorkspaceFiles)
-				r.Post("/{workspaceId}/git/commit", h.CommitWorkspace)
-				r.Get("/{workspaceId}/git/log", h.GetWorkspaceLog)
+				wsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{workspaceId}/git/status",
+					Handler: h.GetWorkspaceGitStatus,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "Get git status",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{workspaceId}/git/fetch",
+					Handler: h.FetchWorkspace,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "Fetch from remote",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{workspaceId}/git/checkout",
+					Handler: h.CheckoutWorkspace,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "Checkout branch/ref",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"ref": "main"},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{workspaceId}/git/branches",
+					Handler: h.GetWorkspaceBranches,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "List branches",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{workspaceId}/git/diff",
+					Handler: h.GetWorkspaceDiff,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "Get diff",
+						Params: []routes.Param{
+							{Name: "projectId", Example: "local"},
+							{Name: "base", In: "query", Example: "HEAD~1"},
+							{Name: "target", In: "query", Example: "HEAD"},
+						},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{workspaceId}/git/files",
+					Handler: h.GetWorkspaceFileTree,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "Get file tree",
+						Params: []routes.Param{
+							{Name: "projectId", Example: "local"},
+							{Name: "ref", In: "query", Example: "HEAD"},
+						},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{workspaceId}/git/file",
+					Handler: h.GetWorkspaceFileContent,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "Get file content",
+						Params: []routes.Param{
+							{Name: "projectId", Example: "local"},
+							{Name: "path", In: "query", Required: true, Example: "README.md"},
+							{Name: "ref", In: "query", Example: "HEAD"},
+						},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{workspaceId}/git/file",
+					Handler: h.WriteWorkspaceFile,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "Write file",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"path": "README.md", "content": "# Hello"},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{workspaceId}/git/stage",
+					Handler: h.StageWorkspaceFiles,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "Stage files",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"paths": []string{"README.md"}},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{workspaceId}/git/commit",
+					Handler: h.CommitWorkspace,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "Commit changes",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"message": "Initial commit"},
+					},
+				})
+
+				wsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{workspaceId}/git/log",
+					Handler: h.GetWorkspaceLog,
+					Meta: routes.Meta{
+						Group:       "Git",
+						Description: "Get commit log",
+						Params: []routes.Param{
+							{Name: "projectId", Example: "local"},
+							{Name: "limit", In: "query", Example: "10"},
+						},
+					},
+				})
 			})
 
 			// Sessions (direct access)
 			r.Route("/sessions", func(r chi.Router) {
-				r.Get("/{sessionId}", h.GetSession)
-				r.Put("/{sessionId}", h.UpdateSession)
-				r.Delete("/{sessionId}", h.DeleteSession)
-				r.Get("/{sessionId}/files", h.GetSessionFiles)
-				r.Get("/{sessionId}/messages", h.ListMessages)
+				sessReg := projReg.WithPrefix("/sessions")
+
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}",
+					Handler: h.GetSession,
+					Meta: routes.Meta{
+						Group:       "Sessions",
+						Description: "Get session",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "PUT", Pattern: "/{sessionId}",
+					Handler: h.UpdateSession,
+					Meta: routes.Meta{
+						Group:       "Sessions",
+						Description: "Update session",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"name": "Updated Session", "status": "closed"},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "DELETE", Pattern: "/{sessionId}",
+					Handler: h.DeleteSession,
+					Meta: routes.Meta{
+						Group:       "Sessions",
+						Description: "Delete session",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/files",
+					Handler: h.GetSessionFiles,
+					Meta: routes.Meta{
+						Group:       "Sessions",
+						Description: "Get session files",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/messages",
+					Handler: h.ListMessages,
+					Meta: routes.Meta{
+						Group:       "Sessions",
+						Description: "List messages",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				// Terminal (session-specific)
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/terminal/ws",
+					Handler: h.TerminalWebSocket,
+					Meta: routes.Meta{
+						Group:       "Terminal",
+						Description: "Terminal WebSocket",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/terminal/history",
+					Handler: h.GetTerminalHistory,
+					Meta: routes.Meta{
+						Group:       "Terminal",
+						Description: "Terminal history",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/terminal/status",
+					Handler: h.GetTerminalStatus,
+					Meta: routes.Meta{
+						Group:       "Terminal",
+						Description: "Terminal status",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
 			})
 
 			// Agents
 			r.Route("/agents", func(r chi.Router) {
-				r.Get("/", h.ListAgents)
-				r.Post("/", h.CreateAgent)
-				r.Get("/types", h.GetAgentTypes)
-				r.Get("/auth-providers", h.GetAuthProviders)
-				r.Post("/default", h.SetDefaultAgent)
-				r.Get("/{agentId}", h.GetAgent)
-				r.Put("/{agentId}", h.UpdateAgent)
-				r.Delete("/{agentId}", h.DeleteAgent)
+				agentReg := projReg.WithPrefix("/agents")
+
+				agentReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/",
+					Handler: h.ListAgents,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "List agents",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/",
+					Handler: h.CreateAgent,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Create agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"name": "My Agent", "agent_type": "claude-code"},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/types",
+					Handler: h.GetAgentTypes,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Get agent types",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/auth-providers",
+					Handler: h.GetAuthProviders,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Get auth providers",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/default",
+					Handler: h.SetDefaultAgent,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Set default agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"agent_id": ""},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{agentId}",
+					Handler: h.GetAgent,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Get agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "PUT", Pattern: "/{agentId}",
+					Handler: h.UpdateAgent,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Update agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"name": "Updated Agent"},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "DELETE", Pattern: "/{agentId}",
+					Handler: h.DeleteAgent,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Delete agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
 			})
 
 			// Files
-			r.Get("/files/{fileId}", h.GetFile)
+			projReg.Register(r, routes.Route{
+				Method: "GET", Pattern: "/files/{fileId}",
+				Handler: h.GetFile,
+				Meta: routes.Meta{
+					Group:       "Files",
+					Description: "Get file",
+					Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+				},
+			})
 
 			// Suggestions
-			r.Get("/suggestions", h.GetSuggestions)
+			projReg.Register(r, routes.Route{
+				Method: "GET", Pattern: "/suggestions",
+				Handler: h.GetSuggestions,
+				Meta: routes.Meta{
+					Group:       "Other",
+					Description: "Get suggestions",
+					Params: []routes.Param{
+						{Name: "projectId", Example: "local"},
+						{Name: "q", In: "query", Example: "/home"},
+					},
+				},
+			})
 
 			// Credentials
 			r.Route("/credentials", func(r chi.Router) {
-				r.Get("/", h.ListCredentials)
-				r.Post("/", h.CreateCredential)
-				r.Get("/{provider}", h.GetCredential)
-				r.Delete("/{provider}", h.DeleteCredential)
+				credReg := projReg.WithPrefix("/credentials")
+
+				credReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/",
+					Handler: h.ListCredentials,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "List credentials",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/",
+					Handler: h.CreateCredential,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "Create credential",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"provider": "anthropic", "name": "My API Key", "api_key": "sk-..."},
+					},
+				})
+
+				credReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{provider}",
+					Handler: h.GetCredential,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "Get credential",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "provider", Example: "anthropic"}},
+					},
+				})
+
+				credReg.Register(r, routes.Route{
+					Method: "DELETE", Pattern: "/{provider}",
+					Handler: h.DeleteCredential,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "Delete credential",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
 
 				// Anthropic OAuth
-				r.Post("/anthropic/authorize", h.AnthropicAuthorize)
-				r.Post("/anthropic/exchange", h.AnthropicExchange)
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/anthropic/authorize",
+					Handler: h.AnthropicAuthorize,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "Anthropic OAuth authorize",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"redirect_uri": "http://localhost:3000/callback"},
+					},
+				})
+
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/anthropic/exchange",
+					Handler: h.AnthropicExchange,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "Anthropic OAuth exchange",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"code": "", "redirect_uri": "", "code_verifier": ""},
+					},
+				})
 
 				// GitHub Copilot OAuth
-				r.Post("/github-copilot/device-code", h.GitHubCopilotDeviceCode)
-				r.Post("/github-copilot/poll", h.GitHubCopilotPoll)
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/github-copilot/device-code",
+					Handler: h.GitHubCopilotDeviceCode,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "GitHub Copilot device code",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/github-copilot/poll",
+					Handler: h.GitHubCopilotPoll,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "GitHub Copilot poll",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"device_code": ""},
+					},
+				})
 
 				// Codex OAuth
-				r.Post("/codex/authorize", h.CodexAuthorize)
-				r.Post("/codex/exchange", h.CodexExchange)
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/codex/authorize",
+					Handler: h.CodexAuthorize,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "Codex OAuth authorize",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"redirect_uri": "http://localhost:3000/callback"},
+					},
+				})
+
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/codex/exchange",
+					Handler: h.CodexExchange,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "Codex OAuth exchange",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"code": "", "redirect_uri": "", "code_verifier": ""},
+					},
+				})
 			})
 
-			// Terminal (session-specific)
-			r.Get("/sessions/{sessionId}/terminal/ws", h.TerminalWebSocket)
-			r.Get("/sessions/{sessionId}/terminal/history", h.GetTerminalHistory)
-			r.Get("/sessions/{sessionId}/terminal/status", h.GetTerminalStatus)
-
-			// AI Chat endpoint (streaming)
-			r.Post("/chat", h.Chat)
+			// Chat endpoint
+			projReg.Register(r, routes.Route{
+				Method: "POST", Pattern: "/chat",
+				Handler: h.Chat,
+				Meta: routes.Meta{
+					Group:       "Chat",
+					Description: "AI Chat (streaming)",
+					Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					Body:        map[string]any{"messages": []map[string]any{{"role": "user", "content": "Hello"}}},
+				},
+			})
 		})
 	})
 

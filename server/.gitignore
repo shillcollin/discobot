@@ -3,7 +3,7 @@ bin/
 tmp/
 build/
 __debug_bin*
-server
+/server
 
 # Database
 *.db

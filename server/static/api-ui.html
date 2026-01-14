@@ -2,9 +2,8 @@
 <!--
     Octobot API Explorer
 
-    NOTE: This file must be kept in sync with API changes.
-    When adding, modifying, or removing API endpoints, update the
-    API_ENDPOINTS array in this file to reflect those changes.
+    Routes are loaded dynamically from /api/routes.
+    Route metadata is defined in server/cmd/server/main.go using routes.Register().
 -->
 <html lang="en">
 <head>
@@ -653,105 +652,27 @@
     </div>
 
     <script>
-        // API endpoint definitions
-        const API_ENDPOINTS = [
-            // Health & Status
-            { group: 'Health', method: 'GET', path: '/health', description: 'Health check' },
-            { group: 'Health', method: 'GET', path: '/api/status', description: 'System status (Docker, Git checks)' },
+        // API endpoints - loaded dynamically from /api/routes
+        let API_ENDPOINTS = [];
 
-            // Auth
-            { group: 'Auth', method: 'GET', path: '/auth/login/{provider}', description: 'Start OAuth login', params: [{ name: 'provider', in: 'path', required: true, example: 'github' }] },
-            { group: 'Auth', method: 'GET', path: '/auth/callback/{provider}', description: 'OAuth callback', params: [{ name: 'provider', in: 'path', required: true }, { name: 'code', in: 'query' }, { name: 'state', in: 'query' }] },
-            { group: 'Auth', method: 'GET', path: '/auth/me', description: 'Get current user' },
-            { group: 'Auth', method: 'POST', path: '/auth/logout', description: 'Logout' },
-
-            // Projects
-            { group: 'Projects', method: 'GET', path: '/api/projects', description: 'List projects' },
-            { group: 'Projects', method: 'POST', path: '/api/projects', description: 'Create project', body: { name: 'My Project', slug: 'my-project' } },
-            { group: 'Projects', method: 'GET', path: '/api/projects/{projectId}', description: 'Get project', params: [{ name: 'projectId', in: 'path', required: true }] },
-            { group: 'Projects', method: 'PUT', path: '/api/projects/{projectId}', description: 'Update project', params: [{ name: 'projectId', in: 'path', required: true }], body: { name: 'Updated Name' } },
-            { group: 'Projects', method: 'DELETE', path: '/api/projects/{projectId}', description: 'Delete project', params: [{ name: 'projectId', in: 'path', required: true }] },
-
-            // Project Members
-            { group: 'Members', method: 'GET', path: '/api/projects/{projectId}/members', description: 'List members', params: [{ name: 'projectId', in: 'path', required: true }] },
-            { group: 'Members', method: 'DELETE', path: '/api/projects/{projectId}/members/{userId}', description: 'Remove member', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'userId', in: 'path', required: true }] },
-            { group: 'Members', method: 'POST', path: '/api/projects/{projectId}/invitations', description: 'Create invitation', params: [{ name: 'projectId', in: 'path', required: true }], body: { email: 'user@example.com', role: 'member' } },
-            { group: 'Members', method: 'POST', path: '/api/projects/{projectId}/invitations/{token}/accept', description: 'Accept invitation', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'token', in: 'path', required: true }] },
-
-            // Workspaces
-            { group: 'Workspaces', method: 'GET', path: '/api/projects/{projectId}/workspaces', description: 'List workspaces', params: [{ name: 'projectId', in: 'path', required: true }] },
-            { group: 'Workspaces', method: 'POST', path: '/api/projects/{projectId}/workspaces', description: 'Create workspace', params: [{ name: 'projectId', in: 'path', required: true }], body: { name: 'My Workspace', path: '/home/user/code', source_type: 'local' } },
-            { group: 'Workspaces', method: 'GET', path: '/api/projects/{projectId}/workspaces/{workspaceId}', description: 'Get workspace', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }] },
-            { group: 'Workspaces', method: 'PUT', path: '/api/projects/{projectId}/workspaces/{workspaceId}', description: 'Update workspace', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }], body: { name: 'Updated Name' } },
-            { group: 'Workspaces', method: 'DELETE', path: '/api/projects/{projectId}/workspaces/{workspaceId}', description: 'Delete workspace', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }] },
-
-            // Sessions
-            { group: 'Sessions', method: 'GET', path: '/api/projects/{projectId}/workspaces/{workspaceId}/sessions', description: 'List sessions', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }] },
-            { group: 'Sessions', method: 'POST', path: '/api/projects/{projectId}/workspaces/{workspaceId}/sessions', description: 'Create session', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }], body: { name: 'New Session', agentId: '' } },
-            { group: 'Sessions', method: 'GET', path: '/api/projects/{projectId}/sessions/{sessionId}', description: 'Get session', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'sessionId', in: 'path', required: true }] },
-            { group: 'Sessions', method: 'PUT', path: '/api/projects/{projectId}/sessions/{sessionId}', description: 'Update session', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'sessionId', in: 'path', required: true }], body: { name: 'Updated Session', status: 'closed' } },
-            { group: 'Sessions', method: 'DELETE', path: '/api/projects/{projectId}/sessions/{sessionId}', description: 'Delete session', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'sessionId', in: 'path', required: true }] },
-            { group: 'Sessions', method: 'GET', path: '/api/projects/{projectId}/sessions/{sessionId}/files', description: 'Get session files', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'sessionId', in: 'path', required: true }] },
-            { group: 'Sessions', method: 'GET', path: '/api/projects/{projectId}/sessions/{sessionId}/messages', description: 'List messages', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'sessionId', in: 'path', required: true }] },
-
-            // Agents
-            { group: 'Agents', method: 'GET', path: '/api/projects/{projectId}/agents', description: 'List agents', params: [{ name: 'projectId', in: 'path', required: true }] },
-            { group: 'Agents', method: 'POST', path: '/api/projects/{projectId}/agents', description: 'Create agent', params: [{ name: 'projectId', in: 'path', required: true }], body: { name: 'My Agent', agent_type: 'claude-code' } },
-            { group: 'Agents', method: 'GET', path: '/api/projects/{projectId}/agents/types', description: 'Get agent types', params: [{ name: 'projectId', in: 'path', required: true }] },
-            { group: 'Agents', method: 'GET', path: '/api/projects/{projectId}/agents/auth-providers', description: 'Get auth providers', params: [{ name: 'projectId', in: 'path', required: true }] },
-            { group: 'Agents', method: 'POST', path: '/api/projects/{projectId}/agents/default', description: 'Set default agent', params: [{ name: 'projectId', in: 'path', required: true }], body: { agent_id: '' } },
-            { group: 'Agents', method: 'GET', path: '/api/projects/{projectId}/agents/{agentId}', description: 'Get agent', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'agentId', in: 'path', required: true }] },
-            { group: 'Agents', method: 'PUT', path: '/api/projects/{projectId}/agents/{agentId}', description: 'Update agent', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'agentId', in: 'path', required: true }], body: { name: 'Updated Agent' } },
-            { group: 'Agents', method: 'DELETE', path: '/api/projects/{projectId}/agents/{agentId}', description: 'Delete agent', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'agentId', in: 'path', required: true }] },
-
-            // Credentials
-            { group: 'Credentials', method: 'GET', path: '/api/projects/{projectId}/credentials', description: 'List credentials', params: [{ name: 'projectId', in: 'path', required: true }] },
-            { group: 'Credentials', method: 'POST', path: '/api/projects/{projectId}/credentials', description: 'Create credential', params: [{ name: 'projectId', in: 'path', required: true }], body: { provider: 'anthropic', name: 'My API Key', api_key: 'sk-...' } },
-            { group: 'Credentials', method: 'GET', path: '/api/projects/{projectId}/credentials/{provider}', description: 'Get credential', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'provider', in: 'path', required: true, example: 'anthropic' }] },
-            { group: 'Credentials', method: 'DELETE', path: '/api/projects/{projectId}/credentials/{provider}', description: 'Delete credential', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'provider', in: 'path', required: true }] },
-
-            // Anthropic OAuth
-            { group: 'Credentials', method: 'POST', path: '/api/projects/{projectId}/credentials/anthropic/authorize', description: 'Anthropic OAuth authorize', params: [{ name: 'projectId', in: 'path', required: true }], body: { redirect_uri: 'http://localhost:3000/callback' } },
-            { group: 'Credentials', method: 'POST', path: '/api/projects/{projectId}/credentials/anthropic/exchange', description: 'Anthropic OAuth exchange', params: [{ name: 'projectId', in: 'path', required: true }], body: { code: '', redirect_uri: '', code_verifier: '' } },
-
-            // GitHub Copilot
-            { group: 'Credentials', method: 'POST', path: '/api/projects/{projectId}/credentials/github-copilot/device-code', description: 'GitHub Copilot device code', params: [{ name: 'projectId', in: 'path', required: true }] },
-            { group: 'Credentials', method: 'POST', path: '/api/projects/{projectId}/credentials/github-copilot/poll', description: 'GitHub Copilot poll', params: [{ name: 'projectId', in: 'path', required: true }], body: { device_code: '' } },
-
-            // Codex OAuth
-            { group: 'Credentials', method: 'POST', path: '/api/projects/{projectId}/credentials/codex/authorize', description: 'Codex OAuth authorize', params: [{ name: 'projectId', in: 'path', required: true }], body: { redirect_uri: 'http://localhost:3000/callback' } },
-            { group: 'Credentials', method: 'POST', path: '/api/projects/{projectId}/credentials/codex/exchange', description: 'Codex OAuth exchange', params: [{ name: 'projectId', in: 'path', required: true }], body: { code: '', redirect_uri: '', code_verifier: '' } },
-
-            // Files
-            { group: 'Files', method: 'GET', path: '/api/projects/{projectId}/files/{fileId}', description: 'Get file', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'fileId', in: 'path', required: true }] },
-
-            // Suggestions
-            { group: 'Other', method: 'GET', path: '/api/projects/{projectId}/suggestions', description: 'Get suggestions', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'q', in: 'query', example: '/home' }] },
-
-            // Events (SSE)
-            { group: 'Events', method: 'GET', path: '/api/projects/{projectId}/events', description: 'SSE event stream', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'since', in: 'query', example: '2024-01-15T10:30:00Z' }, { name: 'after', in: 'query', example: '' }] },
-
-            // Git Operations
-            { group: 'Git', method: 'GET', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/status', description: 'Get git status', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }] },
-            { group: 'Git', method: 'POST', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/fetch', description: 'Fetch from remote', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }] },
-            { group: 'Git', method: 'POST', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/checkout', description: 'Checkout branch/ref', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }], body: { ref: 'main' } },
-            { group: 'Git', method: 'GET', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/branches', description: 'List branches', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }] },
-            { group: 'Git', method: 'GET', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/diff', description: 'Get diff', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }, { name: 'base', in: 'query', example: 'HEAD~1' }, { name: 'target', in: 'query', example: 'HEAD' }] },
-            { group: 'Git', method: 'GET', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/files', description: 'Get file tree', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }, { name: 'ref', in: 'query', example: 'HEAD' }] },
-            { group: 'Git', method: 'GET', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/file', description: 'Get file content', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }, { name: 'path', in: 'query', required: true, example: 'README.md' }, { name: 'ref', in: 'query', example: 'HEAD' }] },
-            { group: 'Git', method: 'POST', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/file', description: 'Write file', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }], body: { path: 'README.md', content: '# Hello' } },
-            { group: 'Git', method: 'POST', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/stage', description: 'Stage files', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }], body: { paths: ['README.md'] } },
-            { group: 'Git', method: 'POST', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/commit', description: 'Commit changes', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }], body: { message: 'Initial commit' } },
-            { group: 'Git', method: 'GET', path: '/api/projects/{projectId}/workspaces/{workspaceId}/git/log', description: 'Get commit log', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'workspaceId', in: 'path', required: true }, { name: 'limit', in: 'query', example: '10' }] },
-
-            // Terminal (session-scoped)
-            { group: 'Terminal', method: 'GET', path: '/api/projects/{projectId}/sessions/{sessionId}/terminal/ws', description: 'Terminal WebSocket', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'sessionId', in: 'path', required: true }] },
-            { group: 'Terminal', method: 'GET', path: '/api/projects/{projectId}/sessions/{sessionId}/terminal/history', description: 'Terminal history', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'sessionId', in: 'path', required: true }] },
-            { group: 'Terminal', method: 'GET', path: '/api/projects/{projectId}/sessions/{sessionId}/terminal/status', description: 'Terminal status', params: [{ name: 'projectId', in: 'path', required: true }, { name: 'sessionId', in: 'path', required: true }] },
-
-            // Chat
-            { group: 'Chat', method: 'POST', path: '/api/chat', description: 'AI Chat (streaming)', body: { messages: [{ role: 'user', content: 'Hello' }] } },
-        ];
+        // Load routes from server
+        async function loadRoutes() {
+            try {
+                const response = await fetch('/api/routes');
+                if (!response.ok) {
+                    throw new Error(`Failed to load routes: ${response.status}`);
+                }
+                API_ENDPOINTS = await response.json();
+                renderSidebar();
+            } catch (error) {
+                console.error('Failed to load API routes:', error);
+                document.getElementById('endpointList').innerHTML = `
+                    <div style="padding: 16px; color: var(--error);">
+                        Failed to load routes: ${error.message}
+                    </div>
+                `;
+            }
+        }
 
         // State
         let currentEndpoint = null;
@@ -1389,7 +1310,8 @@
             renderSidebar(e.target.value);
         };
 
-        renderSidebar();
+        // Load routes dynamically then check auth
+        loadRoutes();
         checkAuth();
     </script>
 </body>
