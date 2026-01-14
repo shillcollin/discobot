@@ -9,7 +9,8 @@
 		"build": "tsc",
 		"start": "node dist/index.js",
 		"typecheck": "tsc --noEmit",
-		"test": "node --import tsx --test test/**/*.test.ts"
+		"test": "node --import tsx --test test/**/*.test.ts",
+		"docker:build": "docker build -t octobot-agent:dev ."
 	},
 	"keywords": [],
 	"author": "",
