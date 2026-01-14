@@ -1,11 +1,9 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -305,47 +303,44 @@ func (s *SessionService) initializeSync(
 		return fmt.Errorf("failed to check sandbox: %w", err)
 	}
 
+	needsCreation := true
 	if existingSandbox != nil {
-		// Sandbox already exists from a previous attempt
 		log.Printf("Sandbox already exists for session %s (status: %s)", sessionID, existingSandbox.Status)
 
-		// If already running, skip to agent start
-		if existingSandbox.Status == sandbox.StatusRunning {
-			log.Printf("Sandbox for session %s is already running, continuing with agent start", sessionID)
-			goto agentStart
-		}
+		switch existingSandbox.Status {
+		case sandbox.StatusRunning:
+			log.Printf("Sandbox for session %s is already running", sessionID)
+			needsCreation = false
 
-		// If stopped or created, try to start it
-		if existingSandbox.Status == sandbox.StatusCreated || existingSandbox.Status == sandbox.StatusStopped {
+		case sandbox.StatusCreated, sandbox.StatusStopped:
 			s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusCreatingSandbox, nil)
 			if err := s.sandboxProvider.Start(ctx, sessionID); err != nil {
-				// If already running, that's fine
 				if !errors.Is(err, sandbox.ErrAlreadyRunning) {
 					log.Printf("Sandbox start failed for session %s: %v", sessionID, err)
 					s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("sandbox start failed: "+err.Error()))
 					return fmt.Errorf("sandbox start failed: %w", err)
 				}
 			}
-			goto agentStart
-		}
+			needsCreation = false
 
-		// Sandbox is in failed state - remove and recreate
-		log.Printf("Removing failed sandbox for session %s", sessionID)
-		if err := s.sandboxProvider.Remove(ctx, sessionID); err != nil {
-			log.Printf("Warning: failed to remove old sandbox for session %s: %v", sessionID, err)
+		default:
+			// Sandbox is in failed state - remove and recreate
+			log.Printf("Removing failed sandbox for session %s", sessionID)
+			if err := s.sandboxProvider.Remove(ctx, sessionID); err != nil {
+				log.Printf("Warning: failed to remove old sandbox for session %s: %v", sessionID, err)
+			}
 		}
 	}
 
-	// Create new sandbox
-	// Check if image needs to be pulled and notify if so
-	if !s.sandboxProvider.ImageExists(ctx) {
-		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusPullingImage, nil)
-		log.Printf("Pulling sandbox image %s for session %s", s.sandboxProvider.Image(), sessionID)
-	} else {
-		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusCreatingSandbox, nil)
-	}
+	if needsCreation {
+		// Check if image needs to be pulled and notify if so
+		if !s.sandboxProvider.ImageExists(ctx) {
+			s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusPullingImage, nil)
+			log.Printf("Pulling sandbox image %s for session %s", s.sandboxProvider.Image(), sessionID)
+		} else {
+			s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusCreatingSandbox, nil)
+		}
 
-	{
 		sandboxSecret := generateSecret(32)
 		opts := sandbox.CreateOptions{
 			SharedSecret: sandboxSecret,
@@ -364,60 +359,13 @@ func (s *SessionService) initializeSync(
 			s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("sandbox creation failed: "+err.Error()))
 			return fmt.Errorf("sandbox creation failed: %w", err)
 		}
-	}
 
-	// Start the sandbox
-	if err := s.sandboxProvider.Start(ctx, sessionID); err != nil {
-		log.Printf("Sandbox start failed for session %s: %v", sessionID, err)
-		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("sandbox start failed: "+err.Error()))
-		return fmt.Errorf("sandbox start failed: %w", err)
-	}
-
-agentStart:
-
-	// Update status to starting_agent
-	s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusStartingAgent, nil)
-
-	// Prepare session config to send to agent
-	config := SessionConfig{
-		Session: session,
-		Workspace: &Workspace{
-			ID:         workspace.ID,
-			Path:       workspacePath, // Use the resolved workspace path
-			SourceType: workspace.SourceType,
-		},
-	}
-	if agent != nil {
-		config.Agent = &Agent{
-			ID:          agent.ID,
-			Name:        agent.Name,
-			AgentType:   agent.AgentType,
-			Description: derefString(agent.Description),
+		// Start the sandbox
+		if err := s.sandboxProvider.Start(ctx, sessionID); err != nil {
+			log.Printf("Sandbox start failed for session %s: %v", sessionID, err)
+			s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("sandbox start failed: "+err.Error()))
+			return fmt.Errorf("sandbox start failed: %w", err)
 		}
-	}
-
-	// Run agent start command ("cat" for now) with config as stdin
-	configJSON, err := json.Marshal(config)
-	if err != nil {
-		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("failed to marshal config: "+err.Error()))
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	execOpts := sandbox.ExecOptions{
-		WorkDir: "/workspace",
-		Stdin:   bytes.NewReader(configJSON),
-	}
-
-	result, err := s.sandboxProvider.Exec(ctx, sessionID, []string{"cat"}, execOpts)
-	if err != nil {
-		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("agent start failed: "+err.Error()))
-		return fmt.Errorf("agent start failed: %w", err)
-	}
-
-	if result.ExitCode != 0 {
-		errMsg := fmt.Sprintf("agent start exited with code %d: %s", result.ExitCode, string(result.Stderr))
-		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString(errMsg))
-		return fmt.Errorf("%s", errMsg)
 	}
 
 	// Success! Update status to running
