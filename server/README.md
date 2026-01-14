@@ -84,7 +84,7 @@ golangci-lint run
 | `DATABASE_DSN` | `octobot.db` | Database connection string |
 | `AUTH_ENABLED` | `false` | Enable authentication |
 | `WORKSPACE_DIR` | `/tmp/workspaces` | Base directory for workspaces |
-| `SANDBOX_IMAGE` | `ubuntu:24.04` | Default sandbox image |
+| `SANDBOX_IMAGE` | `octobot-agent:dev` | Default sandbox image |
 | `ENCRYPTION_KEY` | (required) | Key for credential encryption |
 
 ### Building
