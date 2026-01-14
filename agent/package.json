@@ -9,7 +9,9 @@
 		"build": "tsc",
 		"start": "node dist/index.js",
 		"typecheck": "tsc --noEmit",
-		"test": "node --import tsx --test test/**/*.test.ts",
+		"test": "npm run test:unit && npm run test:integration",
+		"test:unit": "node --import tsx --test src/**/*.test.ts",
+		"test:integration": "node --import tsx --test test/integration/**/*.test.ts",
 		"docker:build": "docker build -t octobot-agent:dev ."
 	},
 	"keywords": [],
@@ -18,11 +20,12 @@
 	"dependencies": {
 		"@agentclientprotocol/sdk": "^0.13.0",
 		"@hono/node-server": "^1.19.9",
-		"ai": "^6.0.26",
+		"ai": "^6.0.34",
 		"hono": "^4.11.4"
 	},
 	"devDependencies": {
-		"@types/node": "^22.19.5",
+		"@types/bun": "^1.2.17",
+		"@types/node": "^22.19.6",
 		"tsx": "^4.21.0",
 		"typescript": "^5.9.3"
 	}
