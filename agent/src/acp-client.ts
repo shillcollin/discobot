@@ -10,15 +10,15 @@ import {
 	type RequestPermissionResponse,
 	type SessionNotification,
 } from "@agentclientprotocol/sdk";
+import type { UIMessage } from "ai";
 import {
 	addMessage,
 	clearMessages,
 	loadSession,
 	type SessionData,
-	type SimpleMessage,
 	saveSession,
 } from "./session.js";
-import { createSimpleMessage, sessionUpdateToSimplePart } from "./translate.js";
+import { createUIMessage, sessionUpdateToUIPart } from "./translate.js";
 
 export interface ACPClientOptions {
 	command: string;
@@ -114,8 +114,8 @@ export class ACPClient {
 			// Try to load existing session (which replays messages)
 			try {
 				// Set up callback to capture replayed messages during load
-				const replayedMessages: SimpleMessage[] = [];
-				let currentMessage: SimpleMessage | null = null;
+				const replayedMessages: UIMessage[] = [];
+				let currentMessage: UIMessage | null = null;
 
 				const originalCallback = this.updateCallback;
 				this.updateCallback = (params: SessionNotification) => {
@@ -127,9 +127,9 @@ export class ACPClient {
 							if (currentMessage) {
 								replayedMessages.push(currentMessage);
 							}
-							currentMessage = createSimpleMessage("user");
+							currentMessage = createUIMessage("user");
 						}
-						const part = sessionUpdateToSimplePart(update);
+						const part = sessionUpdateToUIPart(update);
 						if (part) {
 							currentMessage.parts.push(part);
 						}
@@ -145,9 +145,9 @@ export class ACPClient {
 							if (currentMessage) {
 								replayedMessages.push(currentMessage);
 							}
-							currentMessage = createSimpleMessage("assistant");
+							currentMessage = createUIMessage("assistant");
 						}
-						const part = sessionUpdateToSimplePart(update);
+						const part = sessionUpdateToUIPart(update);
 						if (part) {
 							currentMessage.parts.push(part);
 						}

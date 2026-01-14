@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { UIMessage } from "ai";
 
 const SESSION_FILE = process.env.SESSION_FILE || "/tmp/agent-session.json";
 
@@ -10,68 +11,26 @@ export interface SessionData {
 	createdAt: string;
 }
 
-// Simple message format that we control
-export interface SimpleMessage {
-	id: string;
-	role: "user" | "assistant" | "system";
-	parts: SimplePart[];
-}
-
-export interface TextPart {
-	type: "text";
-	text: string;
-}
-
-export interface ReasoningPart {
-	type: "reasoning";
-	text: string;
-}
-
-export interface ToolInvocationPart {
-	type: "tool-invocation";
-	toolCallId: string;
-	toolName: string;
-	args: unknown;
-	state: "partial-call" | "call" | "result";
-	result?: unknown;
-}
-
-export interface FilePart {
-	type: "file";
-	url: string;
-	mediaType: string;
-	filename?: string;
-}
-
-export type SimplePart =
-	| TextPart
-	| ReasoningPart
-	| ToolInvocationPart
-	| FilePart;
-
-// In-memory message store
-let messages: SimpleMessage[] = [];
+// In-memory message store using AI SDK's UIMessage type
+let messages: UIMessage[] = [];
 let sessionData: SessionData | null = null;
 
-export function getMessages(): SimpleMessage[] {
+export function getMessages(): UIMessage[] {
 	return messages;
 }
 
-export function addMessage(message: SimpleMessage): void {
+export function addMessage(message: UIMessage): void {
 	messages.push(message);
 }
 
-export function updateMessage(
-	id: string,
-	updates: Partial<SimpleMessage>,
-): void {
+export function updateMessage(id: string, updates: Partial<UIMessage>): void {
 	const index = messages.findIndex((m) => m.id === id);
 	if (index !== -1) {
 		messages[index] = { ...messages[index], ...updates };
 	}
 }
 
-export function getLastAssistantMessage(): SimpleMessage | undefined {
+export function getLastAssistantMessage(): UIMessage | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		if (messages[i].role === "assistant") {
 			return messages[i];

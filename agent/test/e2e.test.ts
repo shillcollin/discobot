@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import type { UIMessage } from "ai";
 import { createApp } from "../src/app.js";
-import {
-	clearMessages,
-	clearSession,
-	type SimpleMessage,
-} from "../src/session.js";
+import { clearMessages, clearSession } from "../src/session.js";
 
 // Response types
 interface StatusResponse {
@@ -23,7 +20,7 @@ interface ErrorResponse {
 }
 
 interface MessagesResponse {
-	messages: SimpleMessage[];
+	messages: UIMessage[];
 }
 
 interface DeleteResponse {

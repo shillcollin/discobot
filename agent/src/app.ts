@@ -1,5 +1,5 @@
 import type { SessionNotification } from "@agentclientprotocol/sdk";
-import type { UIMessage } from "ai";
+import type { DynamicToolUIPart, UIMessage } from "ai";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
@@ -9,15 +9,13 @@ import {
 	clearSession,
 	getLastAssistantMessage,
 	getMessages,
-	type ToolInvocationPart,
 	updateMessage,
 } from "./session.js";
 import {
-	createSimpleMessage,
+	createUIMessage,
 	generateMessageId,
-	sessionUpdateToSimplePart,
-	simpleMessageToContentBlocks,
-	uiMessageToSimple,
+	sessionUpdateToUIPart,
+	uiMessageToContentBlocks,
 } from "./translate.js";
 
 export interface AppOptions {
@@ -85,17 +83,19 @@ export function createApp(options: AppOptions) {
 		}
 		await acpClient.ensureSession();
 
-		// Convert to our simple format and add to store
-		const userMessage = uiMessageToSimple(lastUserMessage);
-		userMessage.id = lastUserMessage.id || generateMessageId();
+		// Use the incoming UIMessage directly, ensuring it has an ID
+		const userMessage: UIMessage = {
+			...lastUserMessage,
+			id: lastUserMessage.id || generateMessageId(),
+		};
 		addMessage(userMessage);
 
 		// Create assistant message placeholder
-		const assistantMessage = createSimpleMessage("assistant");
+		const assistantMessage = createUIMessage("assistant");
 		addMessage(assistantMessage);
 
 		// Convert to ACP format
-		const contentBlocks = simpleMessageToContentBlocks(userMessage);
+		const contentBlocks = uiMessageToContentBlocks(userMessage);
 
 		// Stream SSE response
 		return streamSSE(c, async (stream) => {
@@ -104,7 +104,7 @@ export function createApp(options: AppOptions) {
 			// Set up update callback to stream responses
 			acpClient.setUpdateCallback((params: SessionNotification) => {
 				const update = params.update;
-				const part = sessionUpdateToSimplePart(update);
+				const part = sessionUpdateToUIPart(update);
 
 				if (part) {
 					// Update the assistant message in store
@@ -123,12 +123,12 @@ export function createApp(options: AppOptions) {
 							} else {
 								currentMsg.parts.push({ type: "text", text: textBuffer });
 							}
-						} else if (part.type === "tool-invocation") {
+						} else if (part.type === "dynamic-tool") {
 							// Update or add tool invocation
-							const toolPart = part as ToolInvocationPart;
+							const toolPart = part as DynamicToolUIPart;
 							const existingToolPart = currentMsg.parts.find(
-								(p): p is ToolInvocationPart =>
-									p.type === "tool-invocation" &&
+								(p): p is DynamicToolUIPart =>
+									p.type === "dynamic-tool" &&
 									p.toolCallId === toolPart.toolCallId,
 							);
 							if (existingToolPart) {
@@ -149,7 +149,7 @@ export function createApp(options: AppOptions) {
 							event: "text-delta",
 							data: JSON.stringify({ text: part.text }),
 						});
-					} else if (part.type === "tool-invocation") {
+					} else if (part.type === "dynamic-tool") {
 						stream.writeSSE({
 							event: "tool-invocation",
 							data: JSON.stringify(part),

@@ -4,57 +4,20 @@ import type {
 	ToolCall,
 	ToolCallUpdate,
 } from "@agentclientprotocol/sdk";
-import type { UIMessage } from "ai";
 import type {
-	ReasoningPart,
-	SimpleMessage,
-	SimplePart,
-	TextPart,
-	ToolInvocationPart,
-} from "./session.js";
+	DynamicToolUIPart,
+	ReasoningUIPart,
+	TextUIPart,
+	UIMessage,
+} from "ai";
 
-// Re-export types from session
-export type {
-	SimpleMessage,
-	SimplePart,
-	TextPart,
-	ReasoningPart,
-	ToolInvocationPart,
-};
+// Union of the part types we actually produce
+type ProducedUIPart = TextUIPart | ReasoningUIPart | DynamicToolUIPart;
 
 /**
- * Convert incoming UIMessage to our SimpleMessage format
+ * Convert UIMessage parts to ACP ContentBlock array
  */
-export function uiMessageToSimple(message: UIMessage): SimpleMessage {
-	const parts: SimplePart[] = [];
-
-	for (const part of message.parts) {
-		if (part.type === "text") {
-			parts.push({ type: "text", text: part.text });
-		} else if (part.type === "file") {
-			parts.push({
-				type: "file",
-				url: part.url,
-				mediaType: part.mediaType,
-				filename: part.filename,
-			});
-		}
-		// Skip other part types for user messages
-	}
-
-	return {
-		id: message.id,
-		role: message.role as "user" | "assistant" | "system",
-		parts,
-	};
-}
-
-/**
- * Convert SimpleMessage parts to ACP ContentBlock array
- */
-export function simpleMessageToContentBlocks(
-	message: SimpleMessage,
-): ContentBlock[] {
+export function uiMessageToContentBlocks(message: UIMessage): ContentBlock[] {
 	const blocks: ContentBlock[] = [];
 
 	for (const part of message.parts) {
@@ -77,18 +40,18 @@ export function simpleMessageToContentBlocks(
 }
 
 /**
- * Convert ACP SessionUpdate to a SimplePart
+ * Convert ACP SessionUpdate to a UIMessagePart
  */
-export function sessionUpdateToSimplePart(
+export function sessionUpdateToUIPart(
 	update: SessionUpdate,
-): SimplePart | null {
+): ProducedUIPart | null {
 	switch (update.sessionUpdate) {
 		case "agent_message_chunk":
 			if (update.content.type === "text") {
 				return {
 					type: "text",
 					text: update.content.text,
-				};
+				} satisfies TextUIPart;
 			}
 			break;
 
@@ -97,61 +60,130 @@ export function sessionUpdateToSimplePart(
 				return {
 					type: "reasoning",
 					text: update.content.text,
-				};
+				} satisfies ReasoningUIPart;
 			}
 			break;
 
 		case "tool_call":
-			return toolCallToSimplePart(update);
+			return toolCallToUIPart(update);
 
 		case "tool_call_update":
-			return toolCallUpdateToSimplePart(update);
+			return toolCallUpdateToUIPart(update);
 	}
 
 	return null;
 }
 
 /**
- * Convert ACP ToolCall to SimplePart
+ * Convert ACP ToolCall to DynamicToolUIPart
  */
-export function toolCallToSimplePart(toolCall: ToolCall): ToolInvocationPart {
+export function toolCallToUIPart(toolCall: ToolCall): DynamicToolUIPart {
+	const state = toolCallStatusToState(toolCall.status);
+
+	if (state === "output-error") {
+		return {
+			type: "dynamic-tool",
+			toolCallId: toolCall.toolCallId,
+			toolName: toolCall.title,
+			state: "output-error",
+			input: toolCall.rawInput || {},
+			errorText: String(toolCall.rawOutput || "Tool call failed"),
+		};
+	}
+
+	if (state === "output-available") {
+		return {
+			type: "dynamic-tool",
+			toolCallId: toolCall.toolCallId,
+			toolName: toolCall.title,
+			state: "output-available",
+			input: toolCall.rawInput || {},
+			output: toolCall.rawOutput,
+		};
+	}
+
+	if (state === "input-available") {
+		return {
+			type: "dynamic-tool",
+			toolCallId: toolCall.toolCallId,
+			toolName: toolCall.title,
+			state: "input-available",
+			input: toolCall.rawInput || {},
+		};
+	}
+
+	// input-streaming
 	return {
-		type: "tool-invocation",
+		type: "dynamic-tool",
 		toolCallId: toolCall.toolCallId,
 		toolName: toolCall.title,
-		args: toolCall.rawInput || {},
-		state: toolCallStatusToState(toolCall.status),
-		result: toolCall.rawOutput,
+		state: "input-streaming",
+		input: toolCall.rawInput,
 	};
 }
 
 /**
- * Convert ACP ToolCallUpdate to SimplePart
+ * Convert ACP ToolCallUpdate to DynamicToolUIPart
  */
-export function toolCallUpdateToSimplePart(
+export function toolCallUpdateToUIPart(
 	update: ToolCallUpdate,
-): ToolInvocationPart {
+): DynamicToolUIPart {
+	const state = toolCallStatusToState(update.status);
+
+	if (state === "output-error") {
+		return {
+			type: "dynamic-tool",
+			toolCallId: update.toolCallId,
+			toolName: update.title || "unknown",
+			state: "output-error",
+			input: update.rawInput || {},
+			errorText: String(update.rawOutput || "Tool call failed"),
+		};
+	}
+
+	if (state === "output-available") {
+		return {
+			type: "dynamic-tool",
+			toolCallId: update.toolCallId,
+			toolName: update.title || "unknown",
+			state: "output-available",
+			input: update.rawInput || {},
+			output: update.rawOutput,
+		};
+	}
+
+	if (state === "input-available") {
+		return {
+			type: "dynamic-tool",
+			toolCallId: update.toolCallId,
+			toolName: update.title || "unknown",
+			state: "input-available",
+			input: update.rawInput || {},
+		};
+	}
+
+	// input-streaming
 	return {
-		type: "tool-invocation",
+		type: "dynamic-tool",
 		toolCallId: update.toolCallId,
 		toolName: update.title || "unknown",
-		args: update.rawInput || {},
-		state: toolCallStatusToState(update.status),
-		result: update.rawOutput,
+		state: "input-streaming",
+		input: update.rawInput,
 	};
 }
 
 function toolCallStatusToState(
 	status?: "pending" | "in_progress" | "completed" | "failed" | null,
-): "partial-call" | "call" | "result" {
+): "input-streaming" | "input-available" | "output-available" | "output-error" {
 	switch (status) {
 		case "completed":
+			return "output-available";
 		case "failed":
-			return "result";
+			return "output-error";
 		case "in_progress":
-			return "call";
+			return "input-available";
 		default:
-			return "partial-call";
+			return "input-streaming";
 	}
 }
 
@@ -163,12 +195,12 @@ export function generateMessageId(): string {
 }
 
 /**
- * Create a new SimpleMessage
+ * Create a new UIMessage
  */
-export function createSimpleMessage(
+export function createUIMessage(
 	role: "user" | "assistant",
-	parts: SimplePart[] = [],
-): SimpleMessage {
+	parts: ProducedUIPart[] = [],
+): UIMessage {
 	return {
 		id: generateMessageId(),
 		role,
