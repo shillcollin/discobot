@@ -10,9 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  # Build VZ assets (kernel + rootfs) on Linux using Docker
-  # These are needed for macOS Virtualization.framework builds
-  build-vz-assets:
+  # Build VZ disk image on Linux using Docker
+  build-vz-image:
     strategy:
       fail-fast: false
       matrix:
@@ -28,6 +27,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -35,31 +47,69 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build VZ disk image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./agent
-          platforms: ${{ matrix.platform }}
-          target: vz-disk-image
-          outputs: type=local,dest=./vz-assets-${{ matrix.arch }}
+        env:
+          DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
+        run: pnpm build:vz-image --force
 
-      - name: Build VZ kernel
-        uses: docker/build-push-action@v6
-        with:
-          context: ./agent
-          platforms: ${{ matrix.platform }}
-          target: vz-kernel
-          outputs: type=local,dest=./vz-assets-${{ matrix.arch }}
-
-      - name: Upload VZ assets
+      - name: Upload VZ image
         uses: actions/upload-artifact@v4
         with:
-          name: vz-assets-${{ matrix.arch }}
-          path: ./vz-assets-${{ matrix.arch }}/
+          name: vz-image-${{ matrix.arch }}
+          path: ./src-tauri/resources/octobot-rootfs.img.zst
           retention-days: 1
-          include-hidden-files: true
+
+  # Build VZ kernel on Linux using Docker
+  build-vz-kernel:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build VZ kernel
+        env:
+          DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
+        run: pnpm build:vz-kernel --force
+
+      - name: Upload VZ kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: vz-kernel-${{ matrix.arch }}
+          path: |
+            ./src-tauri/resources/vmlinuz.zst
+            ./src-tauri/resources/kernel-version
+          retention-days: 1
 
   build:
-    needs: build-vz-assets
+    needs: [build-vz-image, build-vz-kernel]
     strategy:
       fail-fast: false
       matrix:
@@ -86,11 +136,18 @@ jobs:
         uses: actions/checkout@v6
 
       # Download pre-built VZ assets for macOS
-      - name: Download VZ assets
+      - name: Download VZ image
         if: startsWith(matrix.platform, 'macos')
         uses: actions/download-artifact@v4
         with:
-          name: vz-assets-${{ matrix.vz-arch }}
+          name: vz-image-${{ matrix.vz-arch }}
+          path: ./src-tauri/resources/
+
+      - name: Download VZ kernel
+        if: startsWith(matrix.platform, 'macos')
+        uses: actions/download-artifact@v4
+        with:
+          name: vz-kernel-${{ matrix.vz-arch }}
           path: ./src-tauri/resources/
 
       - name: Setup Node.js

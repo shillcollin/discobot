@@ -70,12 +70,14 @@ COPY --from=agentfs-builder /build/agentfs-bin /usr/local/bin/agentfs
 RUN chmod +x /usr/local/bin/agentfs
 
 # Install claude-code-acp
-# We need Node.js for this npm package - install minimal Node runtime
+# We need Node.js 20+ for this npm package (uses import attributes syntax)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nodejs \
-    npm \
+    ca-certificates \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && npm install -g @zed-industries/claude-code-acp \
-    && apt-get purge -y npm \
+    && apt-get purge -y curl \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
