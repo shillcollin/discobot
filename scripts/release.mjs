@@ -116,6 +116,23 @@ async function main() {
 
 	rl.close();
 
+	// Refresh models data
+	console.log("\nRefreshing models data...");
+	try {
+		exec("pnpm run refresh-models", { stdio: "inherit" });
+	} catch (e) {
+		console.error("Failed to refresh models:", e.message);
+		process.exit(1);
+	}
+
+	// Check if models data changed and commit if so
+	const modelsStatus = exec("git status --porcelain public/data/models-dev/");
+	if (modelsStatus) {
+		console.log("\nModels data updated, committing changes...");
+		exec("git add public/data/models-dev/");
+		exec('git commit -m "chore: refresh models data"');
+	}
+
 	// Run npm version (updates package.json, commits, and tags)
 	console.log("\nUpdating version...");
 	try {
