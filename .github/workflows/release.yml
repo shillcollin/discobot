@@ -15,23 +15,15 @@ jobs:
           # macOS ARM64 (Apple Silicon)
           - platform: macos-latest
             target: aarch64-apple-darwin
-            go_os: darwin
-            go_arch: arm64
           # macOS x64 (Intel)
           - platform: macos-latest
             target: x86_64-apple-darwin
-            go_os: darwin
-            go_arch: amd64
           # Windows x64
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            go_os: windows
-            go_arch: amd64
           # Linux x64
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            go_os: linux
-            go_arch: amd64
 
     runs-on: ${{ matrix.platform }}
 
@@ -58,7 +50,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.23'
+          go-version: '1.25'
 
       # Linux dependencies
       - name: Install Linux dependencies
@@ -69,29 +61,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
-
-      # Build Go server for target platform
-      - name: Build Go server (Unix)
-        if: matrix.platform != 'windows-latest'
-        env:
-          GOOS: ${{ matrix.go_os }}
-          GOARCH: ${{ matrix.go_arch }}
-          CGO_ENABLED: '0'
-        run: |
-          mkdir -p src-tauri/binaries
-          cd server
-          go build -o ../src-tauri/binaries/octobot-server-${{ matrix.target }} ./cmd/server
-
-      - name: Build Go server (Windows)
-        if: matrix.platform == 'windows-latest'
-        env:
-          GOOS: ${{ matrix.go_os }}
-          GOARCH: ${{ matrix.go_arch }}
-          CGO_ENABLED: '0'
-        run: |
-          mkdir -p src-tauri/binaries
-          cd server
-          go build -o ../src-tauri/binaries/octobot-server-${{ matrix.target }}.exe ./cmd/server
 
       # Build Tauri app and create release
       - name: Build and Release
