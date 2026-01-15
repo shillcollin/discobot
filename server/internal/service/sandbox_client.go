@@ -112,6 +112,12 @@ func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 
+	// Add Authorization header with Bearer token
+	secret, err := c.provider.GetSecret(ctx, sessionID)
+	if err == nil && secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+
 	// Add credentials header if provided
 	if opts != nil && len(opts.Credentials) > 0 {
 		credJSON, err := json.Marshal(opts.Credentials)
@@ -187,6 +193,12 @@ func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string) (
 	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/chat", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add Authorization header with Bearer token
+	secret, err := c.provider.GetSecret(ctx, sessionID)
+	if err == nil && secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 
 	resp, err := c.client.Do(req)
