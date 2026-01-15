@@ -71,7 +71,7 @@ jobs:
       # macOS Docker
       - name: Setup Docker (macOS)
         if: startsWith(matrix.platform, 'macos')
-        uses: docker-practice/actions-setup-docker@master
+        uses: docker/setup-docker-action@v4
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
