@@ -57,7 +57,7 @@ type vmInstance struct {
 	diskPath     string
 	sessionID    string
 	secret       string
-	status       sandbox.SandboxStatus
+	status       sandbox.Status
 	createdAt    time.Time
 	startedAt    *time.Time
 	stoppedAt    *time.Time

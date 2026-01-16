@@ -116,7 +116,7 @@ type AnthropicExchangeRequest struct {
 }
 
 // AnthropicAuthorize generates PKCE and returns OAuth URL
-func (h *Handler) AnthropicAuthorize(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) AnthropicAuthorize(w http.ResponseWriter, _ *http.Request) {
 	provider := oauth.NewAnthropicProvider(h.cfg.AnthropicClientID)
 	authResp, err := provider.Authorize()
 	if err != nil {

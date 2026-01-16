@@ -21,6 +21,7 @@ import (
 
 // testLogger creates a test logger
 func testLogger(t *testing.T) *logger.Logger {
+	t.Helper()
 	log, err := logger.New(config.LoggingConfig{
 		Level:  "error",
 		Format: "text",
@@ -105,7 +106,7 @@ func TestIntegration_HTTPProxy_HeaderInjection(t *testing.T) {
 
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = false
-	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+	proxy.OnRequest().DoFunc(func(req *http.Request, _ *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		inj.Apply(req)
 		return req, nil
 	})
@@ -157,7 +158,7 @@ func TestIntegration_HTTPProxy_HeaderAppend(t *testing.T) {
 
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = false
-	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+	proxy.OnRequest().DoFunc(func(req *http.Request, _ *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		inj.Apply(req)
 		return req, nil
 	})

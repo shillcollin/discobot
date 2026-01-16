@@ -173,12 +173,12 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetAgentTypes returns supported agent types
-func (h *Handler) GetAgentTypes(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetAgentTypes(w http.ResponseWriter, _ *http.Request) {
 	h.JSON(w, http.StatusOK, map[string]any{"agentTypes": agentTypes})
 }
 
 // GetAuthProviders returns available auth providers from models.dev data
-func (h *Handler) GetAuthProviders(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetAuthProviders(w http.ResponseWriter, _ *http.Request) {
 	h.JSON(w, http.StatusOK, map[string]any{"authProviders": providers.GetAll()})
 }
 

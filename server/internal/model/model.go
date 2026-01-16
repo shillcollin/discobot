@@ -24,7 +24,7 @@ type User struct {
 
 func (User) TableName() string { return "users" }
 
-func (u *User) BeforeCreate(tx *gorm.DB) error {
+func (u *User) BeforeCreate(_ *gorm.DB) error {
 	if u.ID == "" {
 		u.ID = uuid.New().String()
 	}
@@ -44,7 +44,7 @@ type UserSession struct {
 
 func (UserSession) TableName() string { return "user_sessions" }
 
-func (s *UserSession) BeforeCreate(tx *gorm.DB) error {
+func (s *UserSession) BeforeCreate(_ *gorm.DB) error {
 	if s.ID == "" {
 		s.ID = uuid.New().String()
 	}
@@ -66,7 +66,7 @@ type Project struct {
 
 func (Project) TableName() string { return "projects" }
 
-func (p *Project) BeforeCreate(tx *gorm.DB) error {
+func (p *Project) BeforeCreate(_ *gorm.DB) error {
 	if p.ID == "" {
 		p.ID = uuid.New().String()
 	}
@@ -89,7 +89,7 @@ type ProjectMember struct {
 
 func (ProjectMember) TableName() string { return "project_members" }
 
-func (m *ProjectMember) BeforeCreate(tx *gorm.DB) error {
+func (m *ProjectMember) BeforeCreate(_ *gorm.DB) error {
 	if m.ID == "" {
 		m.ID = uuid.New().String()
 	}
@@ -112,7 +112,7 @@ type ProjectInvitation struct {
 
 func (ProjectInvitation) TableName() string { return "project_invitations" }
 
-func (i *ProjectInvitation) BeforeCreate(tx *gorm.DB) error {
+func (i *ProjectInvitation) BeforeCreate(_ *gorm.DB) error {
 	if i.ID == "" {
 		i.ID = uuid.New().String()
 	}
@@ -137,7 +137,7 @@ type Agent struct {
 
 func (Agent) TableName() string { return "agents" }
 
-func (a *Agent) BeforeCreate(tx *gorm.DB) error {
+func (a *Agent) BeforeCreate(_ *gorm.DB) error {
 	if a.ID == "" {
 		a.ID = uuid.New().String()
 	}
@@ -158,7 +158,7 @@ type AgentMCPServer struct {
 
 func (AgentMCPServer) TableName() string { return "agent_mcp_servers" }
 
-func (s *AgentMCPServer) BeforeCreate(tx *gorm.DB) error {
+func (s *AgentMCPServer) BeforeCreate(_ *gorm.DB) error {
 	if s.ID == "" {
 		s.ID = uuid.New().String()
 	}
@@ -191,7 +191,7 @@ type Workspace struct {
 
 func (Workspace) TableName() string { return "workspaces" }
 
-func (w *Workspace) BeforeCreate(tx *gorm.DB) error {
+func (w *Workspace) BeforeCreate(_ *gorm.DB) error {
 	if w.ID == "" {
 		w.ID = uuid.New().String()
 	}
@@ -235,7 +235,7 @@ type Session struct {
 
 func (Session) TableName() string { return "sessions" }
 
-func (s *Session) BeforeCreate(tx *gorm.DB) error {
+func (s *Session) BeforeCreate(_ *gorm.DB) error {
 	if s.ID == "" {
 		s.ID = uuid.New().String()
 	}
@@ -256,7 +256,7 @@ type Message struct {
 
 func (Message) TableName() string { return "messages" }
 
-func (m *Message) BeforeCreate(tx *gorm.DB) error {
+func (m *Message) BeforeCreate(_ *gorm.DB) error {
 	if m.ID == "" {
 		m.ID = uuid.New().String()
 	}
@@ -293,7 +293,7 @@ type Credential struct {
 
 func (Credential) TableName() string { return "credentials" }
 
-func (c *Credential) BeforeCreate(tx *gorm.DB) error {
+func (c *Credential) BeforeCreate(_ *gorm.DB) error {
 	if c.ID == "" {
 		c.ID = uuid.New().String()
 	}
@@ -314,7 +314,7 @@ type TerminalHistory struct {
 
 func (TerminalHistory) TableName() string { return "terminal_history" }
 
-func (t *TerminalHistory) BeforeCreate(tx *gorm.DB) error {
+func (t *TerminalHistory) BeforeCreate(_ *gorm.DB) error {
 	if t.ID == "" {
 		t.ID = uuid.New().String()
 	}
@@ -341,7 +341,7 @@ type ProjectEvent struct {
 
 func (ProjectEvent) TableName() string { return "project_events" }
 
-func (e *ProjectEvent) BeforeCreate(tx *gorm.DB) error {
+func (e *ProjectEvent) BeforeCreate(_ *gorm.DB) error {
 	if e.ID == "" {
 		e.ID = uuid.New().String()
 	}

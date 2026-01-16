@@ -57,7 +57,7 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetSessionFiles returns files for a session
-func (h *Handler) GetSessionFiles(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetSessionFiles(w http.ResponseWriter, _ *http.Request) {
 	// TODO: Implement - this will use git service to get file diffs
 	h.JSON(w, http.StatusOK, map[string]any{"files": []any{}})
 }

@@ -53,7 +53,7 @@ func NewProviderWithImage(image string) *Provider {
 }
 
 // ImageExists always returns true for mock provider (no pulling needed).
-func (p *Provider) ImageExists(ctx context.Context) bool {
+func (p *Provider) ImageExists(_ context.Context) bool {
 	return true
 }
 
@@ -248,11 +248,11 @@ func (p *Provider) Attach(ctx context.Context, sessionID string, opts sandbox.At
 		return nil, sandbox.ErrNotRunning
 	}
 
-	return &MockPTY{}, nil
+	return &PTY{}, nil
 }
 
 // List returns all sandboxes managed by this mock provider.
-func (p *Provider) List(ctx context.Context) ([]*sandbox.Sandbox, error) {
+func (p *Provider) List(_ context.Context) ([]*sandbox.Sandbox, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -266,7 +266,7 @@ func (p *Provider) List(ctx context.Context) ([]*sandbox.Sandbox, error) {
 
 // HTTPClient returns an HTTP client configured to communicate with the sandbox.
 // For mock provider, this creates a client that connects to the mock's mapped TCP port.
-func (p *Provider) HTTPClient(ctx context.Context, sessionID string) (*http.Client, error) {
+func (p *Provider) HTTPClient(_ context.Context, sessionID string) (*http.Client, error) {
 	p.mu.RLock()
 	s, exists := p.sandboxes[sessionID]
 	p.mu.RUnlock()
@@ -299,7 +299,7 @@ func (p *Provider) HTTPClient(ctx context.Context, sessionID string) (*http.Clie
 	// Create a custom transport that always dials to the sandbox's mapped port
 	baseURL := fmt.Sprintf("%s:%d", hostIP, httpPort.HostPort)
 	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "tcp", baseURL)
 		},
@@ -321,8 +321,8 @@ func (p *Provider) GetSandboxes() map[string]*sandbox.Sandbox {
 	return result
 }
 
-// MockPTY is a mock PTY for testing.
-type MockPTY struct {
+// PTY is a mock PTY for testing.
+type PTY struct {
 	InputBuffer  []byte
 	OutputBuffer []byte
 	Closed       bool
@@ -330,7 +330,7 @@ type MockPTY struct {
 	mu           sync.Mutex
 }
 
-func (p *MockPTY) Read(b []byte) (int, error) {
+func (p *PTY) Read(b []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -348,7 +348,7 @@ func (p *MockPTY) Read(b []byte) (int, error) {
 	return n, nil
 }
 
-func (p *MockPTY) Write(b []byte) (int, error) {
+func (p *PTY) Write(b []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -362,7 +362,7 @@ func (p *MockPTY) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (p *MockPTY) Resize(ctx context.Context, rows, cols int) error {
+func (p *PTY) Resize(_ context.Context, rows, cols int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -370,7 +370,7 @@ func (p *MockPTY) Resize(ctx context.Context, rows, cols int) error {
 	return nil
 }
 
-func (p *MockPTY) Close() error {
+func (p *PTY) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -378,6 +378,6 @@ func (p *MockPTY) Close() error {
 	return nil
 }
 
-func (p *MockPTY) Wait(ctx context.Context) (int, error) {
+func (p *PTY) Wait(_ context.Context) (int, error) {
 	return 0, nil
 }

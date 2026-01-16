@@ -77,7 +77,7 @@ func (s *Server) ListenAndServe(addr string) error {
 }
 
 // handleHealth handles GET /health.
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	s.jsonOK(w, map[string]string{
 		"status":  "ok",
 		"ca_cert": s.proxy.GetCACertPath(),

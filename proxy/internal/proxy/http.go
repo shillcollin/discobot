@@ -55,7 +55,7 @@ func (h *HTTPProxy) setupMITM(certMgr *cert.Manager) {
 	goproxy.GoproxyCa = *ca
 
 	// Create TLS config that uses our CA to sign certificates
-	tlsConfig := func(host string, ctx *goproxy.ProxyCtx) (*tls.Config, error) {
+	tlsConfig := func(host string, _ *goproxy.ProxyCtx) (*tls.Config, error) {
 		// InsecureSkipVerify is required for MITM proxy functionality - the proxy
 		// decrypts traffic from clients and re-encrypts it to upstream servers.
 		// This allows the proxy to inspect and modify HTTP traffic over TLS.
@@ -84,7 +84,7 @@ func (h *HTTPProxy) setupMITM(certMgr *cert.Manager) {
 
 func (h *HTTPProxy) setupHandlers() {
 	// Handle CONNECT requests (HTTPS)
-	h.proxy.OnRequest().HandleConnectFunc(func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
+	h.proxy.OnRequest().HandleConnectFunc(func(host string, _ *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 		if !h.filter.AllowHost(host) {
 			h.logger.LogBlocked(host, "filter")
 			return goproxy.RejectConnect, host

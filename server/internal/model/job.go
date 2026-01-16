@@ -46,7 +46,7 @@ type Job struct {
 func (Job) TableName() string { return "jobs" }
 
 // BeforeCreate generates a UUID if not set.
-func (j *Job) BeforeCreate(tx *gorm.DB) error {
+func (j *Job) BeforeCreate(_ *gorm.DB) error {
 	if j.ID == "" {
 		j.ID = uuid.New().String()
 	}

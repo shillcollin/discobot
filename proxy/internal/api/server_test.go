@@ -13,6 +13,7 @@ import (
 )
 
 func testLogger(t *testing.T) *logger.Logger {
+	t.Helper()
 	log, err := logger.New(config.LoggingConfig{
 		Level:  "error",
 		Format: "text",
@@ -24,6 +25,7 @@ func testLogger(t *testing.T) *logger.Logger {
 }
 
 func createTestProxyServer(t *testing.T) *proxy.Server {
+	t.Helper()
 	cfg := config.Default()
 	cfg.TLS.CertDir = t.TempDir()
 	log := testLogger(t)

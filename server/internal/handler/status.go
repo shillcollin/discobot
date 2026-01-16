@@ -28,7 +28,7 @@ type SystemStatusResponse struct {
 }
 
 // GetSystemStatus checks system requirements and returns status
-func (h *Handler) GetSystemStatus(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetSystemStatus(w http.ResponseWriter, _ *http.Request) {
 	var messages []StatusMessage
 
 	// Check for Git

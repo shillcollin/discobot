@@ -181,7 +181,7 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 	r.Use(chimiddleware.Timeout(60 * time.Second))
 
 	// Health check
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
@@ -517,7 +517,7 @@ func (ts *TestServer) Client() *http.Client {
 	jar, _ := cookiejar.New(nil)
 	return &http.Client{
 		Jar: jar,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse // Don't follow redirects
 		},
 	}

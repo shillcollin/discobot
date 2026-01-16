@@ -23,7 +23,7 @@ type vmState struct {
 	SessionID       string                `json:"session_id"`
 	DiskPath        string                `json:"disk_path"`
 	Secret          string                `json:"secret"`
-	Status          sandbox.SandboxStatus `json:"status"`
+	Status          sandbox.Status `json:"status"`
 	CreatedAt       time.Time             `json:"created_at"`
 	StartedAt       *time.Time            `json:"started_at,omitempty"`
 	StoppedAt       *time.Time            `json:"stopped_at,omitempty"`

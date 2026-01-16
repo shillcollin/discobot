@@ -822,7 +822,7 @@ func (p *Provider) HTTPClient(ctx context.Context, sessionID string) (*http.Clie
 	// Create a custom transport that always dials to the sandbox's mapped port
 	baseURL := fmt.Sprintf("%s:%d", hostIP, httpPort.HostPort)
 	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			// Always connect to the sandbox's mapped port, ignoring the addr from the URL
 			var d net.Dialer
 			return d.DialContext(ctx, "tcp", baseURL)

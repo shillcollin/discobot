@@ -29,7 +29,7 @@ func (c *mockConn) LocalAddr() net.Addr                { return nil }
 func (c *mockConn) RemoteAddr() net.Addr               { return nil }
 func (c *mockConn) SetDeadline(t time.Time) error      { c.deadline = t; return nil }
 func (c *mockConn) SetReadDeadline(t time.Time) error  { c.deadline = t; return nil }
-func (c *mockConn) SetWriteDeadline(t time.Time) error { return nil }
+func (c *mockConn) SetWriteDeadline(_ time.Time) error { return nil }
 
 func TestDetect_HTTP(t *testing.T) {
 	tests := []struct {

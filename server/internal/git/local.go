@@ -565,7 +565,7 @@ func (p *LocalProvider) Log(ctx context.Context, workspaceID string, opts LogOpt
 // GetWorkDir returns the working directory path for a workspace.
 // Note: This only returns workspaces that are in the index. Use EnsureWorkspace
 // to initialize a workspace if it might exist on disk but not in the index.
-func (p *LocalProvider) GetWorkDir(ctx context.Context, workspaceID string) string {
+func (p *LocalProvider) GetWorkDir(_ context.Context, workspaceID string) string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -577,7 +577,7 @@ func (p *LocalProvider) GetWorkDir(ctx context.Context, workspaceID string) stri
 }
 
 // RemoveWorkspace removes the workspace working directory.
-func (p *LocalProvider) RemoveWorkspace(ctx context.Context, workspaceID string) error {
+func (p *LocalProvider) RemoveWorkspace(_ context.Context, workspaceID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 

@@ -65,7 +65,7 @@ type Provider interface {
 type Sandbox struct {
 	ID        string            // Runtime-specific sandbox ID
 	SessionID string            // Octobot session ID (1:1 mapping)
-	Status    SandboxStatus     // created, running, stopped, failed
+	Status    Status            // created, running, stopped, failed
 	Image     string            // Sandbox image used
 	CreatedAt time.Time         // When the sandbox was created
 	StartedAt *time.Time        // When the sandbox was started (nil if never started)
@@ -84,14 +84,14 @@ type AssignedPort struct {
 	Protocol      string // Protocol: "tcp" or "udp"
 }
 
-// SandboxStatus represents the current state of a sandbox.
-type SandboxStatus string
+// Status represents the current state of a sandbox.
+type Status string
 
 const (
-	StatusCreated SandboxStatus = "created" // Sandbox exists but not started
-	StatusRunning SandboxStatus = "running" // Sandbox is running
-	StatusStopped SandboxStatus = "stopped" // Sandbox has stopped
-	StatusFailed  SandboxStatus = "failed"  // Sandbox failed to start or crashed
+	StatusCreated Status = "created" // Sandbox exists but not started
+	StatusRunning Status = "running" // Sandbox is running
+	StatusStopped Status = "stopped" // Sandbox has stopped
+	StatusFailed  Status = "failed"  // Sandbox failed to start or crashed
 )
 
 // CreateOptions configures sandbox creation.

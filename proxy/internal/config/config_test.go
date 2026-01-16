@@ -64,7 +64,7 @@ func TestValidate(t *testing.T) {
 	}{
 		{
 			name:    "valid default config",
-			modify:  func(c *Config) {},
+			modify:  func(_ *Config) {},
 			wantErr: false,
 		},
 		{
