@@ -2,6 +2,28 @@
 
 This document provides essential context for AI coding agents working on this project.
 
+## Documentation
+
+**IMPORTANT**: When making changes to the codebase, update the relevant documentation files:
+
+### Architecture & Design Docs
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) - Overall system architecture (update when changing system-wide patterns)
+- [docs/ui/ARCHITECTURE.md](./docs/ui/ARCHITECTURE.md) - UI architecture (update when changing frontend patterns)
+- [docs/ui/design/](./docs/ui/design/) - UI module design docs (layout, chat, data-layer, components, theming)
+
+### Component READMEs
+- [server/README.md](./server/README.md) - Go backend documentation
+- [agent/README.md](./agent/README.md) - Container agent documentation
+- [proxy/README.md](./proxy/README.md) - MITM proxy documentation
+
+### Server Design Docs
+- [server/docs/ARCHITECTURE.md](./server/docs/ARCHITECTURE.md) - Server architecture
+- [server/docs/design/](./server/docs/design/) - Server module docs (handler, service, store, sandbox, events, jobs)
+
+### Agent Design Docs
+- [agent/docs/ARCHITECTURE.md](./agent/docs/ARCHITECTURE.md) - Agent architecture
+- [agent/docs/design/](./agent/docs/design/) - Agent module docs (server, acp, store)
+
 ## Project Overview
 
 Octobot is an IDE-like chat interface for managing coding sessions with AI agents. It features:

@@ -1,0 +1,15 @@
+proxy:
+  port: 8080
+  api_port: 8081
+
+tls:
+  cert_dir: ./certs
+
+allowlist:
+  enabled: false
+
+headers: {}
+
+logging:
+  level: info
+  format: text

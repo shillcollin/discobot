@@ -33,15 +33,18 @@ This is a monorepo with three main components:
 ├── lib/                    # Shared utilities and hooks
 ├── agent/                  # Container agent service (TypeScript)
 ├── server/                 # Go backend server
+├── proxy/                  # HTTP/SOCKS5 proxy with header injection (Go)
 └── docs/                   # Documentation
 ```
 
 ## Documentation
 
-- [Architecture Overview](./docs/ARCHITECTURE.md) - High-level system architecture
-- [Design Documents](./docs/design/) - Detailed module designs
-- [Agent Documentation](./agent/README.md) - Agent service documentation
-- [Server Documentation](./server/README.md) - Go backend documentation
+- [Architecture Overview](./docs/ARCHITECTURE.md) - Overall system architecture
+- [UI Architecture](./docs/ui/ARCHITECTURE.md) - Frontend architecture
+- [UI Design Documents](./docs/ui/design/) - UI module designs
+- [Server Documentation](./server/README.md) - Go backend
+- [Agent Documentation](./agent/README.md) - Container agent service
+- [Proxy Documentation](./proxy/README.md) - HTTP/SOCKS5 MITM proxy
 
 ## Getting Started
 
@@ -49,7 +52,7 @@ This is a monorepo with three main components:
 
 - Node.js 20+
 - pnpm
-- Go 1.23+
+- Go 1.25+
 - Docker (for container runtime)
 
 ### Development
@@ -102,6 +105,8 @@ pnpm check:fix    # Auto-fix issues
 - **3000**: Next.js frontend
 - **3001**: Go backend server
 - **8080**: Agent container endpoint (internal)
+- **8888**: Proxy server (HTTP/SOCKS5)
+- **8889**: Proxy API server
 
 ## License
 

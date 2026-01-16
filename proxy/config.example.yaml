@@ -1,0 +1,64 @@
+# Octobot Proxy Configuration
+# Copy this file to config.yaml and customize as needed.
+
+# Proxy server settings
+proxy:
+  port: 8080              # Main proxy port (HTTP + SOCKS5)
+  api_port: 8081          # REST API port for configuration
+  read_timeout: 30s       # Connection read timeout
+  write_timeout: 30s      # Connection write timeout
+
+# TLS/Certificate settings
+tls:
+  cert_dir: ./certs       # Directory to store CA certificate
+                          # CA is auto-generated on first run
+
+# Connection allowlist (optional)
+# When enabled, only listed domains/IPs can be accessed through the proxy
+allowlist:
+  enabled: false          # Set to true to enable filtering
+  domains:
+    # Exact domain match
+    - "api.anthropic.com"
+    # Wildcard prefix - matches any subdomain
+    - "*.github.com"
+    - "*.openai.com"
+  ips:
+    # Single IP
+    - "192.168.1.100"
+    # CIDR range
+    - "10.0.0.0/8"
+
+# Header injection rules
+# Map of domain patterns to header rules
+# Each rule has "set" (replace) and/or "append" sections
+# Use the REST API (POST/PATCH /api/config) to set secrets at runtime
+headers:
+  # Example: Set headers (replaces any existing value)
+  "api.anthropic.com":
+    set:
+      "X-Request-Source": "octobot-proxy"
+      # "Authorization": "Bearer sk-ant-xxx"  # Set via API
+
+  # Example: Both set and append
+  "*.github.com":
+    set:
+      "X-Request-Source": "octobot-proxy"
+    append:
+      # Appends to existing header with ", " separator
+      # e.g., "1.2.3.4" becomes "1.2.3.4, proxy.internal"
+      "X-Forwarded-For": "proxy.internal"
+
+  # Example: Append only (useful for Via, X-Forwarded-For)
+  "api.example.com":
+    set:
+      "X-Custom-Header": "custom-value"
+    append:
+      "Via": "1.1 octobot-proxy"
+
+# Logging configuration
+logging:
+  level: info             # debug, info, warn, error
+  format: text            # text (human readable) or json (structured)
+  file: ""                # Log file path, empty for stdout
+  include_body: false     # Include request/response bodies in logs (verbose!)

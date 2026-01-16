@@ -1,0 +1,215 @@
+// Package config provides configuration types, loading, and validation.
+package config
+
+import (
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Config is the root configuration structure.
+type Config struct {
+	Proxy     ProxyConfig     `yaml:"proxy" json:"proxy"`
+	TLS       TLSConfig       `yaml:"tls" json:"tls"`
+	Allowlist AllowlistConfig `yaml:"allowlist" json:"allowlist"`
+	Headers   HeadersConfig   `yaml:"headers" json:"headers"`
+	Logging   LoggingConfig   `yaml:"logging" json:"logging"`
+}
+
+// ProxyConfig contains proxy server settings.
+type ProxyConfig struct {
+	Port         int           `yaml:"port" json:"port"`
+	APIPort      int           `yaml:"api_port" json:"api_port"`
+	ReadTimeout  time.Duration `yaml:"read_timeout" json:"read_timeout"`
+	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
+}
+
+// TLSConfig contains TLS/certificate settings.
+type TLSConfig struct {
+	CertDir string `yaml:"cert_dir" json:"cert_dir"`
+}
+
+// AllowlistConfig contains connection filtering settings.
+type AllowlistConfig struct {
+	Enabled bool     `yaml:"enabled" json:"enabled"`
+	Domains []string `yaml:"domains" json:"domains"`
+	IPs     []string `yaml:"ips" json:"ips"`
+}
+
+// HeadersConfig maps domain patterns to header rules.
+type HeadersConfig map[string]HeaderRule
+
+// HeaderRule defines headers to set or append for a domain.
+type HeaderRule struct {
+	Set    map[string]string `yaml:"set,omitempty" json:"set,omitempty"`
+	Append map[string]string `yaml:"append,omitempty" json:"append,omitempty"`
+}
+
+// LoggingConfig contains logging settings.
+type LoggingConfig struct {
+	Level       string `yaml:"level" json:"level"`
+	Format      string `yaml:"format" json:"format"`
+	File        string `yaml:"file" json:"file"`
+	IncludeBody bool   `yaml:"include_body" json:"include_body"`
+}
+
+// RuntimeConfig is the JSON structure for API updates.
+// It contains only the fields that can be updated at runtime.
+type RuntimeConfig struct {
+	Allowlist *RuntimeAllowlistConfig `json:"allowlist,omitempty"`
+	Headers   HeadersConfig           `json:"headers,omitempty"`
+}
+
+// RuntimeAllowlistConfig is the allowlist portion of RuntimeConfig.
+type RuntimeAllowlistConfig struct {
+	Enabled *bool    `json:"enabled,omitempty"`
+	Domains []string `json:"domains,omitempty"`
+	IPs     []string `json:"ips,omitempty"`
+}
+
+// Default returns a Config with default values.
+func Default() *Config {
+	return &Config{
+		Proxy: ProxyConfig{
+			Port:         8080,
+			APIPort:      8081,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
+		TLS: TLSConfig{
+			CertDir: "./certs",
+		},
+		Allowlist: AllowlistConfig{
+			Enabled: false,
+			Domains: []string{},
+			IPs:     []string{},
+		},
+		Headers: HeadersConfig{},
+		Logging: LoggingConfig{
+			Level:  "info",
+			Format: "text",
+		},
+	}
+}
+
+// Load reads and parses a configuration file.
+func Load(path string) (*Config, error) {
+	path = filepath.Clean(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	cfg := Default()
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// Validate checks the configuration for errors.
+func (c *Config) Validate() error {
+	if c.Proxy.Port < 1 || c.Proxy.Port > 65535 {
+		return errors.New("invalid proxy port")
+	}
+	if c.Proxy.APIPort < 1 || c.Proxy.APIPort > 65535 {
+		return errors.New("invalid API port")
+	}
+	if c.Proxy.Port == c.Proxy.APIPort {
+		return errors.New("proxy and API ports must be different")
+	}
+
+	// Validate domain patterns in headers
+	for pattern := range c.Headers {
+		if !IsValidDomainPattern(pattern) {
+			return fmt.Errorf("invalid header domain pattern: %s", pattern)
+		}
+	}
+
+	// Validate domain patterns in allowlist
+	for _, pattern := range c.Allowlist.Domains {
+		if !IsValidDomainPattern(pattern) {
+			return fmt.Errorf("invalid allowlist domain pattern: %s", pattern)
+		}
+	}
+
+	// Validate IPs/CIDRs in allowlist
+	for _, ip := range c.Allowlist.IPs {
+		if _, _, err := net.ParseCIDR(ip); err != nil {
+			// Try as single IP
+			if net.ParseIP(ip) == nil {
+				return fmt.Errorf("invalid IP/CIDR: %s", ip)
+			}
+		}
+	}
+
+	// Validate logging level
+	switch c.Logging.Level {
+	case "debug", "info", "warn", "error":
+		// Valid
+	default:
+		return fmt.Errorf("invalid log level: %s", c.Logging.Level)
+	}
+
+	// Validate logging format
+	switch c.Logging.Format {
+	case "text", "json":
+		// Valid
+	default:
+		return fmt.Errorf("invalid log format: %s", c.Logging.Format)
+	}
+
+	return nil
+}
+
+// IsValidDomainPattern validates a domain pattern.
+func IsValidDomainPattern(pattern string) bool {
+	if pattern == "" {
+		return false
+	}
+
+	// Wildcard match all
+	if pattern == "*" {
+		return true
+	}
+
+	// Check for valid characters
+	for _, c := range pattern {
+		if !isValidDomainChar(c) && c != '*' {
+			return false
+		}
+	}
+
+	// Wildcard must be at start or end, not middle
+	if strings.Contains(pattern, "*") {
+		if !strings.HasPrefix(pattern, "*.") &&
+			!strings.HasSuffix(pattern, ".*") &&
+			pattern != "*" {
+			return false
+		}
+		// Check for multiple wildcards
+		if strings.Count(pattern, "*") > 1 {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isValidDomainChar(c rune) bool {
+	return (c >= 'a' && c <= 'z') ||
+		(c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') ||
+		c == '-' || c == '.'
+}

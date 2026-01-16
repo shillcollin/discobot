@@ -1,126 +1,357 @@
-# UI Architecture
+# Octobot Architecture
 
-This document describes the architecture of the Octobot frontend, a Next.js 16 application that provides an IDE-like chat interface for AI coding agents.
+This document describes the overall architecture of Octobot, an IDE-like chat interface for managing coding sessions with AI agents.
+
+## Component Documentation
+
+- [UI Architecture](./ui/ARCHITECTURE.md) - Frontend React/Next.js architecture
+- [Server Documentation](../server/README.md) - Go backend server
+- [Agent Documentation](../agent/README.md) - Container agent service
+- [Proxy Documentation](../proxy/README.md) - HTTP/SOCKS5 proxy with header injection
 
 ## Overview
 
-The UI is a single-page application built with React 19 and Next.js App Router. It renders an IDE-style interface with resizable panels for workspace navigation, chat/terminal, and file diffs.
+Octobot is a web-based development environment that lets users interact with AI coding agents (Claude Code, Gemini CLI, etc.) within isolated workspaces. Each workspace can contain multiple chat sessions, and users can configure different AI agents with custom prompts and MCP servers.
+
+## Core Concepts
+
+### Hierarchy
+
+```
+Project
+└── Workspace (local folder or git repo)
+    └── Session (chat thread with an agent)
+        ├── Messages (conversation history)
+        └── Files (diffs/changes made in session)
+```
+
+### Project
+
+A multi-tenant container that owns all resources. In single-user mode, a default `local` project is used automatically.
+
+- Owns: Workspaces, Agents, Credentials
+- Has: Members with roles (owner, admin, member)
+- Supports: Team collaboration via invitations
+
+### Workspace
+
+A working directory linked to either a local folder or a git repository.
+
+| Field | Description |
+|-------|-------------|
+| path | Local path or git URL |
+| sourceType | `local` or `git` |
+| status | `initializing` → `cloning` → `ready` or `error` |
+
+For git workspaces:
+- Repository is cloned to a local cache
+- Tracks current commit SHA
+- Supports branch operations, diffs, commits
+
+### Session
+
+A chat thread within a workspace, bound to a specific AI agent configuration.
+
+| Field | Description |
+|-------|-------------|
+| name | Display name for the session |
+| status | Lifecycle state (see below) |
+| agentId | Which agent configuration to use |
+| workspaceId | Parent workspace |
+
+**Session Lifecycle:**
+```
+initializing → cloning → creating_container → starting_agent → running
+                                                              ↓
+                                                            closed
+                                    (any stage) → error
+```
+
+### Agent
+
+Configuration for an AI coding assistant. References a `SupportedAgentType` (Claude Code, Gemini CLI, etc.) and can customize:
+
+- System prompt
+- MCP servers (stdio or HTTP)
+- Selected mode and model
+
+One agent per project can be marked as `isDefault`.
+
+### Credential
+
+Encrypted storage for AI provider authentication:
+
+- API keys (e.g., `ANTHROPIC_API_KEY`)
+- OAuth tokens (Anthropic Console, GitHub Copilot, OpenAI Codex)
+
+Credentials are encrypted with AES-256-GCM before storage.
+
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Header (logo, controls)                     │
-├─────────────────────────────────────────────────────────────────┤
-│ Left Sidebar  │              Main Content                        │
-│ ┌───────────┐ │  ┌─────────────────────────────────────────┐    │
-│ │ Workspace │ │  │           Diff Panel (tabs)             │    │
-│ │   Tree    │ │  ├─────────────────────────────────────────┤    │
-│ ├───────────┤ │  │        Bottom Panel                     │    │
-│ │  Agents   │ │  │     (Chat or Terminal)                  │    │
-│ │   Panel   │ │  └─────────────────────────────────────────┘    │
-│ └───────────┘ │                                                  │
+│                        Next.js Frontend                          │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐ │
+│  │  Sidebar │  │  Chat    │  │ Terminal │  │ File Diff Viewer │ │
+│  │  Tree    │  │  Panel   │  │  View    │  │ (Tabbed)         │ │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘ │
+│                         ↓ SWR Hooks                              │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │                    API Client Layer                         │ │
+│  └────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
+                              │ HTTP/WebSocket
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                         Go Backend                               │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐ │
+│  │ Handlers │→ │ Services │→ │  Store   │→ │ GORM (DB)        │ │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘ │
+│        ↓                                                         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────────────────┐   │
+│  │   Auth   │  │   Git    │  │      Docker / Container      │   │
+│  │ (OAuth)  │  │ Provider │  │       (Sandbox Runtime)      │   │
+│  └──────────┘  └──────────┘  └──────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+         │                              │
+         │               ┌──────────────┴──────────────┐
+         │               ↓                             ↓
+         │    ┌──────────────────────┐     ┌──────────────────────┐
+         │    │   Agent Container    │     │   MITM Proxy         │
+         │    │   (per session)      │     │   (per container)    │
+         │    │   ┌──────────────┐   │     │   ┌──────────────┐   │
+         │    │   │ Node.js Agent│   │ ──▶ │   │ HTTP/SOCKS5  │   │
+         │    │   │ + AI CLI     │   │     │   │ + TLS MITM   │   │
+         │    │   └──────────────┘   │     │   └──────────────┘   │
+         │    └──────────────────────┘     └──────────────────────┘
+         │                                            │
+         └────────────────┬───────────────────────────┘
+                          ↓
+              ┌───────────┼───────────┐
+              ↓           ↓           ↓
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │ SQLite   │ │ Postgres │ │ AI APIs  │
+        │ (dev)    │ │ (prod)   │ │          │
+        └──────────┘ └──────────┘ └──────────┘
 ```
 
-## Directory Structure
+## Data Model
+
+### Entity Relationships
 
 ```
-app/
-├── layout.tsx           # Root layout with providers
-├── page.tsx            # Main IDE page orchestration
-├── globals.css         # Theme tokens and Tailwind config
-└── api/                # API routes (minimal, proxied to Go server)
-
-components/
-├── ai-elements/        # Vercel AI SDK UI wrappers
-├── ide/               # IDE-specific components
-│   ├── layout/        # Panel layout components
-│   └── *.tsx          # Feature components
-└── ui/                # shadcn/ui base components
-
-lib/
-├── api-client.ts      # REST API client
-├── api-types.ts       # TypeScript interfaces
-├── api-config.ts      # API configuration
-├── hooks/             # Custom React hooks
-└── plugins/           # Auth provider plugins
+User ─────────┬──────────────── UserSession (login sessions)
+              │
+              └─── ProjectMember ─── Project
+                        │               │
+                        │               ├─── Workspace ─── Session ─── Message
+                        │               │                     │
+                        │               ├─── Agent ───────────┘
+                        │               │      │
+                        │               │      └─── AgentMCPServer
+                        │               │
+                        │               ├─── Credential
+                        │               │
+                        │               └─── TerminalHistory
+                        │
+                        └─── ProjectInvitation
 ```
 
-## Module Documentation
+### Key Models
 
-- [Layout Module](./design/layout.md) - Panel system and page composition
-- [Chat Module](./design/chat.md) - AI chat integration with Vercel AI SDK
-- [Data Layer](./design/data-layer.md) - SWR hooks and API client
-- [Components Module](./design/components.md) - UI component organization
-- [Theming Module](./design/theming.md) - Theme system and design tokens
+| Model | Purpose |
+|-------|---------|
+| User | OAuth-authenticated user |
+| UserSession | Login session (token hashed in DB) |
+| Project | Multi-tenant container |
+| ProjectMember | User ↔ Project with role |
+| Workspace | Local folder or git repo |
+| Session | Chat thread in workspace |
+| Agent | AI agent configuration |
+| AgentMCPServer | MCP server config per agent |
+| Message | Chat message in session |
+| Credential | Encrypted AI provider credentials |
 
-## Key Architectural Decisions
+## Frontend Architecture
 
-### 1. No File-based Routing for IDE Panels
+For detailed UI architecture, see [UI Architecture](./ui/ARCHITECTURE.md).
 
-The application uses a single `page.tsx` that manages all IDE state. Panel content is driven by React state (`selectedSession`, `openTabs`, etc.) rather than URL routes. This provides a desktop-like IDE experience.
+### Tech Stack
 
-### 2. SWR for Server State
+- **Framework**: Next.js 16 (App Router)
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS v4 with CSS custom properties
+- **UI Components**: shadcn/ui (Radix primitives)
+- **State Management**: SWR for data fetching
+- **AI SDK**: Vercel AI SDK v5
+- **Terminal**: xterm.js v6
 
-All server data is managed through SWR hooks in `lib/hooks/`. This provides:
+### Layout Structure
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Header (session info, agent selector, theme toggle)         │
+├───────────┬─────────────────────────────────────┬───────────┤
+│           │                                     │           │
+│ Sidebar   │      Main Content Area              │  File     │
+│           │  ┌───────────────────────────────┐  │  Panel    │
+│ Workspaces│  │   Tabbed Diff Viewer          │  │           │
+│   └─Sessions│ │   (file changes per session) │  │  (tree    │
+│           │  └───────────────────────────────┘  │   view)   │
+│           │  ┌───────────────────────────────┐  │           │
+│ Agents    │  │   Chat / Terminal (toggle)    │  │           │
+│           │  └───────────────────────────────┘  │           │
+└───────────┴─────────────────────────────────────┴───────────┘
+```
+
+### Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| `SidebarTree` | Workspace/session navigation |
+| `AgentsPanel` | Agent list and selection |
+| `ChatPanel` | AI conversation interface |
+| `TerminalView` | xterm.js terminal emulator |
+| `TabbedDiffView` | File diff viewer with tabs |
+| `FilePanel` | Session file tree |
+
+### Data Flow
+
+```
+User Action → SWR Hook → API Client → Backend
+                ↓
+            Cache Update → Component Re-render
+```
+
+SWR hooks provide:
 - Automatic caching and revalidation
-- Optimistic updates via mutations
-- Built-in loading and error states
+- Optimistic updates for mutations
+- Loading and error states
 
-### 3. API Proxy to Go Backend
+## Backend Architecture
 
-API calls go to `/api/*` which Next.js rewrites to the Go backend at `localhost:3001`. This allows the frontend to use relative URLs while the backend handles business logic.
+### Tech Stack
 
-### 4. Server-Sent Events for Real-time Updates
+- **Language**: Go
+- **Router**: Chi
+- **ORM**: GORM (PostgreSQL + SQLite)
+- **Auth**: OAuth (GitHub, Google)
 
-The `useProjectEvents` hook subscribes to SSE from the backend. When session/workspace status changes, it triggers SWR mutations to refresh the affected resources.
-
-### 5. Vercel AI SDK for Chat
-
-Chat uses the `useChat` hook from `@ai-sdk/react`. Messages stream via SSE and support custom UI parts for tool invocations and reasoning.
-
-## Data Flow
-
-### User Initiates Chat
+### Layer Structure
 
 ```
-1. User types message in ChatPanel
-2. useChat sends POST /api/chat (proxied to Go server)
-3. Go server creates session, starts container
-4. Go server proxies to container's /chat endpoint
-5. Container streams SSE response
-6. useChat updates messages state
-7. React re-renders with new content
+Handler (HTTP) → Service (Business Logic) → Store (Data Access) → Database
 ```
 
-### Real-time Updates
+| Layer | Responsibility |
+|-------|----------------|
+| Handler | Request parsing, response formatting, auth checks |
+| Service | Business rules, cross-cutting concerns |
+| Store | CRUD operations, query building |
+
+### API Design
+
+All resources are scoped under `/api/projects/{projectId}/`:
 
 ```
-1. Backend emits SSE event (session status changed)
-2. useProjectEvents receives event
-3. Hook calls SWR mutate() for affected resource
-4. SWR refetches from API
-5. React re-renders with fresh data
+/api/projects/{projectId}/workspaces
+/api/projects/{projectId}/workspaces/{id}/sessions
+/api/projects/{projectId}/sessions/{id}
+/api/projects/{projectId}/agents
+/api/projects/{projectId}/credentials
 ```
 
-### Panel State Persistence
+### Authentication
+
+1. OAuth login (GitHub/Google) at `/auth/login/{provider}`
+2. Session token stored in HttpOnly cookie
+3. Token hashed (SHA256) before DB storage
+4. Middleware validates session on protected routes
+
+**Anonymous Mode**: When `AUTH_ENABLED=false`, all requests use a default anonymous user with access to the `local` project.
+
+## Proxy Architecture
+
+The MITM proxy runs alongside each agent container to:
+- Inject authentication headers for AI provider APIs
+- Enforce domain allowlists for network isolation
+- Log all outbound HTTP/HTTPS traffic
+
+### Features
+
+- **Multi-protocol**: HTTP, HTTPS (MITM), and SOCKS5 support
+- **Header injection**: Per-domain rules for setting/removing headers
+- **Domain filtering**: Glob-pattern allowlists (e.g., `*.anthropic.com`)
+- **TLS interception**: Dynamic certificate generation signed by container CA
+- **Runtime configuration**: REST API for updating rules without restart
+
+### Data Flow
 
 ```
-1. User resizes/collapses panels
-2. ResizeHandle callback updates state
-3. usePersistedState syncs to localStorage
-4. On page reload, state restored from localStorage
+Container Process → Proxy (localhost:8888) → TLS MITM → Header Injection → AI API
+                          ↓
+                    Proxy API (:8889)
+                          ↓
+                    Go Backend (config updates)
 ```
 
-## Dependencies
+## Security Model
 
-| Package | Purpose |
-|---------|---------|
-| `next` | App framework with routing and SSR |
-| `react` | UI library |
-| `ai`, `@ai-sdk/react` | Vercel AI SDK for chat |
-| `swr` | Data fetching and caching |
-| `@radix-ui/*` | Accessible UI primitives |
-| `tailwindcss` | Utility-first CSS |
-| `next-themes` | Theme switching |
-| `@xterm/xterm` | Terminal emulator |
-| `lucide-react` | Icons |
+### Credential Encryption
+
+AI provider credentials (API keys, OAuth tokens) are encrypted using AES-256-GCM before storage. The encryption key is configured via `ENCRYPTION_KEY` environment variable.
+
+### Multi-tenancy
+
+- All resources belong to a Project
+- ProjectMember middleware validates membership on all project-scoped routes
+- Roles: owner (full control), admin (manage members), member (use resources)
+
+### Session Security
+
+- Session tokens are random, high-entropy strings
+- Only SHA256 hash stored in database
+- HttpOnly cookies prevent XSS token theft
+- 30-day expiration
+
+## Planned Features
+
+### Docker Terminal (Phase 8)
+
+Each workspace will have an associated Docker container:
+- WebSocket endpoint for PTY attachment
+- Container lifecycle management
+- Terminal history persistence
+
+### AI Chat Streaming (Phase 9)
+
+- Vercel AI SDK compatible streaming endpoint
+- Multi-provider support (Anthropic, OpenAI, Google)
+- Tool use / function calling
+- Message persistence
+
+### Git Integration (Phase 7 - Complete)
+
+- Abstract `git.Provider` interface
+- Local provider with efficient caching
+- Full git operations (clone, fetch, checkout, diff, commit)
+- File read/write at any ref
+
+## Open Questions
+
+1. **Session isolation**: Should each session have its own container, or share a workspace container?
+
+2. **File persistence**: How should file changes be persisted? Per-session branches? Stashed changes?
+
+3. **Real-time collaboration**: Should multiple users be able to view/interact with the same session?
+
+4. **Agent process management**: How to handle long-running agent processes? Separate daemon?
+
+5. **Resource limits**: How to limit container resources (CPU, memory, disk) per workspace/session?
+
+## References
+
+- [UI Architecture](./ui/ARCHITECTURE.md) - Frontend architecture and components
+- [Server README](../server/README.md) - Go backend documentation
+- [Agent README](../agent/README.md) - Container agent documentation
+- [CLAUDE.md](../CLAUDE.md) - AI coding agent guidelines
