@@ -1,5 +1,5 @@
 import type { SessionNotification } from "@agentclientprotocol/sdk";
-import type { DynamicToolUIPart, UIMessage } from "ai";
+import type { DynamicToolUIPart, UIMessage, UIMessageChunk } from "ai";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
@@ -19,6 +19,15 @@ import {
 	getMessages,
 	updateMessage,
 } from "../store/session.js";
+import {
+	type StreamablePart,
+	createBlockIds,
+	createErrorChunk,
+	createFinishChunks,
+	createStartChunk,
+	createStreamState,
+	partToChunks,
+} from "./stream.js";
 
 // Header name for credentials passed from server
 const CREDENTIALS_HEADER = "X-Octobot-Credentials";
@@ -68,6 +77,7 @@ export function createApp(options: AppOptions) {
 		await acpClient.ensureSession();
 
 		const messages = getMessages();
+		console.log(`GET /chat returning ${messages.length} messages`);
 		return c.json({ messages });
 	});
 
@@ -127,11 +137,25 @@ export function createApp(options: AppOptions) {
 		return streamSSE(c, async (stream) => {
 			let textBuffer = "";
 
-			// Helper to log and send SSE
-			const sendSSE = async (data: Record<string, unknown>) => {
-				log({ sse: data });
-				await stream.writeSSE({ data: JSON.stringify(data) });
+			// Track stream state for proper start/delta/end sequences (UIMessage Stream protocol v1)
+			const state = createStreamState();
+			const ids = createBlockIds(assistantMessage.id);
+
+			// Helper to log and send typed SSE events
+			const sendSSE = async (chunk: UIMessageChunk) => {
+				log({ sse: chunk });
+				await stream.writeSSE({ data: JSON.stringify(chunk) });
 			};
+
+			// Helper to send multiple chunks
+			const sendChunks = (chunks: UIMessageChunk[]) => {
+				for (const chunk of chunks) {
+					sendSSE(chunk);
+				}
+			};
+
+			// Send message start event (required by UIMessage Stream protocol v1)
+			await sendSSE(createStartChunk(assistantMessage.id));
 
 			// Set up update callback to stream responses
 			acpClient.setUpdateCallback((params: SessionNotification) => {
@@ -171,6 +195,8 @@ export function createApp(options: AppOptions) {
 							} else {
 								currentMsg.parts.push(toolPart);
 							}
+						} else if (part.type === "reasoning") {
+							currentMsg.parts.push(part);
 						} else {
 							currentMsg.parts.push(part);
 						}
@@ -178,27 +204,8 @@ export function createApp(options: AppOptions) {
 						updateMessage(currentMsg.id, { parts: currentMsg.parts });
 					}
 
-					// Send SSE event in UIMessage Stream format
-					if (part.type === "text") {
-						sendSSE({
-							type: "text-delta",
-							id: currentMsg?.id || "text",
-							delta: part.text,
-						});
-					} else if (part.type === "dynamic-tool") {
-						sendSSE({
-							type: "tool-input-available",
-							toolCallId: part.toolCallId,
-							toolName: part.toolName,
-							input: part.input,
-						});
-					} else if (part.type === "reasoning") {
-						sendSSE({
-							type: "reasoning-delta",
-							id: currentMsg?.id || "reasoning",
-							delta: part.text,
-						});
-					}
+					// Send SSE events using stream module (handles start/delta/end sequences)
+					sendChunks(partToChunks(part as StreamablePart, state, ids));
 				}
 			});
 
@@ -206,11 +213,10 @@ export function createApp(options: AppOptions) {
 				// Send prompt to ACP
 				await acpClient.prompt(contentBlocks);
 
-				// Send completion event
-				await sendSSE({
-					type: "finish",
-					messageId: assistantMessage.id,
-				});
+				// Send finish chunks (text-end, reasoning-end, finish)
+				for (const chunk of createFinishChunks(state, ids)) {
+					await sendSSE(chunk);
+				}
 			} catch (error) {
 				// Extract error message from various error types (including JSON-RPC errors)
 				let errorText = "Unknown error";
@@ -231,7 +237,7 @@ export function createApp(options: AppOptions) {
 				}
 
 				// Send error event
-				await sendSSE({ type: "error", errorText });
+				await sendSSE(createErrorChunk(errorText));
 			} finally {
 				acpClient.setUpdateCallback(null);
 			}
