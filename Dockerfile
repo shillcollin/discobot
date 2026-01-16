@@ -15,8 +15,8 @@ RUN apk add --no-cache \
 
 WORKDIR /build
 
-# Clone agentfs
-RUN git clone https://github.com/tursodatabase/agentfs.git
+# Clone agentfs (using snapshot-feature branch for SIGUSR1 snapshot support)
+RUN git clone --branch snapshot-feature https://github.com/ibuildthecloud/agentfs.git
 
 WORKDIR /build/agentfs/cli
 
@@ -81,24 +81,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user (handle case where UID 1000 already exists)
+# Create octobot user (handle case where UID 1000 already exists)
 RUN useradd -m -s /bin/bash -u 1000 octobot 2>/dev/null \
     || (userdel -r $(getent passwd 1000 | cut -d: -f1) 2>/dev/null; useradd -m -s /bin/bash -u 1000 octobot) \
     || useradd -m -s /bin/bash octobot
 
-WORKDIR /app
+# Create directory structure per filesystem design
+# /.data      - persistent storage (Docker volume or VZ disk)
+# /.workspace - base workspace (read-only)
+# /data       - general data storage (writable, ephemeral)
+# /workspace  - project root (writable)
+RUN mkdir -p /.data /.workspace /data /workspace /opt/octobot/bin \
+    && chown octobot:octobot /.data /data /workspace
 
-# Copy the standalone Bun binary
-COPY --from=bun-builder /app/octobot-agent ./octobot-agent
-RUN chmod +x ./octobot-agent
+# Copy binaries to /opt/octobot/bin
+COPY --from=bun-builder /app/octobot-agent /opt/octobot/bin/octobot-agent
+COPY --from=agentfs-builder /build/agentfs-bin /opt/octobot/bin/agentfs
+COPY --from=proxy-builder /proxy /opt/octobot/bin/proxy
+RUN chmod +x /opt/octobot/bin/*
 
-# Copy agentfs binary
-COPY --from=agentfs-builder /build/agentfs-bin /usr/local/bin/agentfs
-RUN chmod +x /usr/local/bin/agentfs
-
-# Copy proxy binary
-COPY --from=proxy-builder /proxy /usr/local/bin/proxy
-RUN chmod +x /usr/local/bin/proxy
+# Add octobot binaries to PATH
+ENV PATH="/opt/octobot/bin:${PATH}"
 
 # Install claude-code-acp
 # We need Node.js 20+ for this npm package (uses import attributes syntax)
@@ -112,16 +115,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
-# Set ownership
-RUN chown -R octobot:octobot /app
-
-USER octobot
+WORKDIR /workspace
 
 EXPOSE 3002
 
 # Use tini as init to handle signals and reap zombie processes
+# Container starts as root for flexibility in mounting volumes
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["./octobot-agent"]
+CMD ["/opt/octobot/bin/octobot-agent"]
 
 # Stage 5: VZ disk image builder (non-default target)
 # Build with: docker build --target vz-disk-image --output type=local,dest=. .
@@ -155,13 +156,24 @@ mount -t devtmpfs devtmpfs /dev\n\
 mount -t tmpfs tmpfs /tmp\n\
 mount -t tmpfs tmpfs /run\n\
 \n\
+# Mount writable directories as tmpfs (root is read-only)\n\
+mount -t tmpfs tmpfs /data\n\
+mount -t tmpfs tmpfs /workspace\n\
+mount -t tmpfs tmpfs /home/octobot\n\
+\n\
 # Mount VirtioFS metadata (shared from host)\n\
 mkdir -p /run/octobot/metadata\n\
 mount -t virtiofs octobot-meta /run/octobot/metadata 2>/dev/null || true\n\
 \n\
+# Mount persistent data disk at /.data\n\
+mount -t virtiofs octobot-data /.data 2>/dev/null || true\n\
+\n\
+# Mount workspace from host at /.workspace (read-only)\n\
+mount -t virtiofs octobot-workspace /.workspace 2>/dev/null || true\n\
+\n\
 # Start the agent\n\
-cd /app\n\
-exec ./octobot-agent\n\
+cd /workspace\n\
+exec /opt/octobot/bin/octobot-agent\n\
 ' > /rootfs/init \
     && chmod +x /rootfs/init
 
