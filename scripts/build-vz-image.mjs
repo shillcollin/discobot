@@ -47,7 +47,7 @@ try {
 	execSync(
 		`docker build --target vz-disk-image --output type=local,dest="${resourcesDir}" .`,
 		{
-			cwd: join(projectRoot, "agent"),
+			cwd: projectRoot,
 			stdio: "inherit",
 		},
 	);

@@ -46,7 +46,7 @@ try {
 	execSync(
 		`docker build --target vz-kernel --output type=local,dest="${resourcesDir}" .`,
 		{
-			cwd: join(projectRoot, "agent"),
+			cwd: projectRoot,
 			stdio: "inherit",
 		},
 	);

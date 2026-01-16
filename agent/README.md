@@ -75,8 +75,11 @@ npm start
 ### Docker
 
 ```bash
-# Build image
+# Build image (from project root)
 docker build -t octobot-agent .
+
+# Or from agent directory
+docker build -t octobot-agent -f ../Dockerfile ..
 
 # Run container
 docker run -p 8080:3002 \
@@ -134,7 +137,7 @@ agent/
 ├── test/
 │   ├── e2e.test.ts       # Integration tests
 │   └── translate.test.ts # Unit tests
-├── Dockerfile            # Multi-stage build
+├── ../Dockerfile         # Multi-stage build (in project root)
 ├── package.json
 └── tsconfig.json
 ```

@@ -145,12 +145,15 @@ describe("AgentWatcher", () => {
 		agentDir = join(tempDir, "agent");
 		envPath = join(tempDir, ".env");
 		await mkdir(agentDir, { recursive: true });
+		// Create Dockerfile at project root (tempDir)
+		await writeFile(join(tempDir, "Dockerfile"), "FROM busybox:1.36");
 	});
 
 	describe("checkAgentDirExists", () => {
 		it("returns true if agent directory exists", async () => {
 			const watcher = new AgentWatcher({
 				agentDir,
+				projectRoot: tempDir,
 				envFilePath: envPath,
 				imageName: "test",
 				imageTag: "latest",
@@ -165,6 +168,7 @@ describe("AgentWatcher", () => {
 		it("returns false if agent directory does not exist", async () => {
 			const watcher = new AgentWatcher({
 				agentDir: join(tempDir, "nonexistent"),
+				projectRoot: tempDir,
 				envFilePath: envPath,
 				imageName: "test",
 				imageTag: "latest",
@@ -195,6 +199,7 @@ describe("AgentWatcher", () => {
 
 			const watcher = new AgentWatcher({
 				agentDir,
+				projectRoot: tempDir,
 				envFilePath: envPath,
 				imageName: "my-image",
 				imageTag: "dev",
@@ -208,7 +213,7 @@ describe("AgentWatcher", () => {
 			assert.equal(calls.length, 2);
 			assert.equal(calls[0].command, "docker");
 			assert.deepEqual(calls[0].args, ["build", "-t", "my-image:dev", "."]);
-			assert.equal(calls[0].cwd, agentDir);
+			assert.equal(calls[0].cwd, tempDir);
 			assert.equal(calls[1].command, "docker");
 			assert.deepEqual(calls[1].args, [
 				"inspect",
@@ -226,6 +231,7 @@ describe("AgentWatcher", () => {
 
 			const watcher = new AgentWatcher({
 				agentDir,
+				projectRoot: tempDir,
 				envFilePath: envPath,
 				imageName: "my-image",
 				imageTag: "dev",
@@ -255,6 +261,7 @@ describe("AgentWatcher", () => {
 
 			const watcher = new AgentWatcher({
 				agentDir,
+				projectRoot: tempDir,
 				envFilePath: envPath,
 				imageName: "test-image",
 				imageTag: "v1",
@@ -306,6 +313,7 @@ describe("AgentWatcher", () => {
 
 			const watcher = new AgentWatcher({
 				agentDir,
+				projectRoot: tempDir,
 				envFilePath: envPath,
 				imageName: "test",
 				imageTag: "latest",
@@ -365,6 +373,7 @@ describe("AgentWatcher", () => {
 
 			const watcher = new AgentWatcher({
 				agentDir,
+				projectRoot: tempDir,
 				envFilePath: envPath,
 				imageName: "test",
 				imageTag: "latest",
@@ -413,6 +422,7 @@ describe("AgentWatcher", () => {
 
 			const watcher = new AgentWatcher({
 				agentDir,
+				projectRoot: tempDir,
 				envFilePath: envPath,
 				imageName: "test",
 				imageTag: "latest",
@@ -426,7 +436,7 @@ describe("AgentWatcher", () => {
 			};
 
 			// Create initial file so directory is valid
-			await writeFile(join(agentDir, "Dockerfile"), "FROM node:20");
+			await writeFile(join(agentDir, "package.json"), "{}");
 
 			// Start watcher (skip initial build by mocking)
 			await watcher.doBuild(); // Initial build
@@ -483,9 +493,9 @@ describe("AgentWatcher E2E with Docker", { skip: !isDockerAvailable() }, () => {
 		envPath = join(tempDir, ".env");
 		await mkdir(agentDir, { recursive: true });
 
-		// Create a minimal Dockerfile
+		// Create a minimal Dockerfile at project root (tempDir)
 		await writeFile(
-			join(agentDir, "Dockerfile"),
+			join(tempDir, "Dockerfile"),
 			`FROM busybox:1.36
 CMD ["echo", "hello"]
 `,
@@ -513,6 +523,7 @@ CMD ["echo", "hello"]
 	it("builds real Docker image and updates env file with digest", async () => {
 		const watcher = new AgentWatcher({
 			agentDir,
+			projectRoot: tempDir,
 			envFilePath: envPath,
 			imageName: "agent-watcher-test",
 			imageTag: "e2e",

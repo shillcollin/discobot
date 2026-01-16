@@ -2,8 +2,8 @@
 /**
  * Agent Image Watcher - Entry point
  *
- * Watches the ./agent directory for changes and automatically rebuilds
- * the Docker image, then updates server/.env with the new image digest.
+ * Watches the ./agent directory and ./Dockerfile for changes and automatically
+ * rebuilds the Docker image, then updates server/.env with the new image digest.
  *
  * Usage: npx tsx scripts/agent-watcher/index.ts
  */
@@ -19,6 +19,7 @@ const SERVER_ENV_PATH = join(ROOT_DIR, "server", ".env");
 
 const watcher = new AgentWatcher({
 	agentDir: AGENT_DIR,
+	projectRoot: ROOT_DIR,
 	envFilePath: SERVER_ENV_PATH,
 	imageName: "octobot-agent",
 	imageTag: "dev",

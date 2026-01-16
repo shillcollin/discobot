@@ -1,7 +1,8 @@
 /**
  * Agent Watcher Module
  *
- * Core logic for watching the agent directory and triggering Docker builds.
+ * Core logic for watching the agent directory and root Dockerfile,
+ * triggering Docker builds when changes are detected.
  */
 
 import { spawn } from "node:child_process";
@@ -10,6 +11,8 @@ import { access, constants, readFile, writeFile } from "node:fs/promises";
 
 export interface WatcherConfig {
 	agentDir: string;
+	/** Project root directory (where Dockerfile lives) */
+	projectRoot: string;
 	envFilePath: string;
 	imageName: string;
 	imageTag: string;
@@ -155,6 +158,7 @@ export class AgentWatcher {
 	private runCommand: CommandRunner;
 	private logger: Logger;
 	private watcher: FSWatcher | null = null;
+	private dockerfileWatcher: FSWatcher | null = null;
 	private buildInProgress = false;
 	private pendingBuild = false;
 	private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -190,7 +194,7 @@ export class AgentWatcher {
 		const result = await this.runCommand(
 			"docker",
 			["build", "-t", this.imageRef, "."],
-			this.config.agentDir,
+			this.config.projectRoot,
 		);
 
 		if (result.exitCode !== 0) {
@@ -205,7 +209,7 @@ export class AgentWatcher {
 		const digestResult = await this.runCommand(
 			"docker",
 			["inspect", this.imageRef, "--format", "{{.Id}}"],
-			this.config.agentDir,
+			this.config.projectRoot,
 		);
 
 		if (digestResult.exitCode !== 0 || !digestResult.stdout.trim()) {
@@ -299,7 +303,7 @@ export class AgentWatcher {
 		this.logger.log("Performing initial build...");
 		await this.doBuild();
 
-		// Watch for changes
+		// Watch for changes in agent directory
 		this.watcher = watch(
 			this.config.agentDir,
 			{ recursive: true },
@@ -320,6 +324,24 @@ export class AgentWatcher {
 
 		this.watcher.on("close", () => {
 			this.logger.error("Watcher closed unexpectedly!");
+		});
+
+		// Watch for changes to Dockerfile at project root
+		const dockerfilePath = `${this.config.projectRoot}/Dockerfile`;
+		this.logger.log(`Watching ${dockerfilePath} for changes`);
+
+		this.dockerfileWatcher = watch(dockerfilePath, (eventType, filename) => {
+			this.logger.log(`Dockerfile changed (${eventType})`);
+			this.onFileChange?.(filename ?? "Dockerfile", eventType);
+			this.scheduleBuild();
+		});
+
+		this.dockerfileWatcher.on("error", (err) => {
+			this.logger.error(`Dockerfile watcher error: ${err}`);
+		});
+
+		this.dockerfileWatcher.on("close", () => {
+			this.logger.error("Dockerfile watcher closed unexpectedly!");
 		});
 
 		// Handle graceful shutdown
@@ -343,6 +365,10 @@ export class AgentWatcher {
 		if (this.watcher) {
 			this.watcher.close();
 			this.watcher = null;
+		}
+		if (this.dockerfileWatcher) {
+			this.dockerfileWatcher.close();
+			this.dockerfileWatcher = null;
 		}
 	}
 }
