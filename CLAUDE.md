@@ -168,6 +168,16 @@ The backend currently uses mock data from `lib/mock-db.tsx`. To implement real p
 
 ## Best Practices
 
+### React/Next.js Performance
+
+When working on React or Next.js code (components, hooks, data fetching, etc.), load the Vercel React best practices skill:
+
+```
+/vercel-react-best-practices
+```
+
+This skill provides 45 optimization rules across categories like eliminating waterfalls, bundle size, server-side performance, SWR patterns, and re-render optimization.
+
 ### When Adding New Features
 
 1. **Define types first** in `lib/api-types.ts`

@@ -1,6 +1,6 @@
 "use client";
 
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { api } from "../api-client";
 import type { UpdateSessionRequest } from "../api-types";
 import { useWorkspaces } from "./use-workspaces";
@@ -45,9 +45,25 @@ export function useSession(sessionId: string | null) {
 
 export function useDeleteSession() {
 	const { mutate: mutateWorkspaces } = useWorkspaces();
+	const { mutate: globalMutate } = useSWRConfig();
 
-	const deleteSession = async (sessionId: string) => {
+	/**
+	 * Delete a session and invalidate all related caches.
+	 * @param sessionId - The session ID to delete
+	 * @param workspaceId - Optional workspace ID to invalidate the sessions-{workspaceId} cache
+	 */
+	const deleteSession = async (sessionId: string, workspaceId?: string) => {
 		await api.deleteSession(sessionId);
+
+		// Invalidate the specific session cache
+		globalMutate(`session-${sessionId}`);
+
+		// Invalidate the workspace's sessions list if workspaceId provided
+		if (workspaceId) {
+			globalMutate(`sessions-${workspaceId}`);
+		}
+
+		// Invalidate workspaces (which contain nested sessions)
 		mutateWorkspaces();
 	};
 

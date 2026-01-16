@@ -10,10 +10,8 @@ import { SystemRequirementsDialog } from "@/components/ide/system-requirements-d
 import { WelcomeModal } from "@/components/ide/welcome-modal";
 import { api } from "@/lib/api-client";
 import type {
-	Agent,
 	CreateAgentRequest,
 	CreateWorkspaceRequest,
-	Session,
 	StatusMessage,
 	SupportedAgentType,
 	Workspace,
@@ -35,10 +33,13 @@ export default function IDEChatPage() {
 		STORAGE_KEYS.LEFT_SIDEBAR_OPEN,
 		true,
 	);
-	const [selectedSession, setSelectedSession] = React.useState<Session | null>(
+	// Store only IDs - derive full objects from SWR data to stay in sync
+	const [selectedSessionId, setSelectedSessionId] = React.useState<
+		string | null
+	>(null);
+	const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(
 		null,
 	);
-	const [selectedAgent, setSelectedAgent] = React.useState<Agent | null>(null);
 	const [preselectedWorkspaceId, setPreselectedWorkspaceId] = React.useState<
 		string | null
 	>(null);
@@ -128,7 +129,20 @@ export default function IDEChatPage() {
 		[],
 	);
 
-	// Computed values
+	// Derive full objects from SWR data - automatically updates when data changes
+	// This ensures UI always reflects current state (no stale references after deletions)
+	const selectedSession = React.useMemo(() => {
+		if (!selectedSessionId) return null;
+		for (const workspace of workspaces) {
+			const session = workspace.sessions.find(
+				(s) => s.id === selectedSessionId,
+			);
+			if (session) return session;
+		}
+		return null;
+	}, [selectedSessionId, workspaces]);
+
+	// Computed values derived from selected session
 	const sessionAgent = React.useMemo(() => {
 		if (!selectedSession?.agentId) return null;
 		return agents.find((a) => a.id === selectedSession.agentId) || null;
@@ -142,19 +156,19 @@ export default function IDEChatPage() {
 	}, [selectedSession, workspaces]);
 
 	// Handlers
-	const handleSessionSelect = React.useCallback((session: Session) => {
-		setSelectedSession(session);
+	const handleSessionSelect = React.useCallback((session: { id: string }) => {
+		setSelectedSessionId(session.id);
 		setPreselectedWorkspaceId(null);
 	}, []);
 
 	const handleNewSession = React.useCallback(() => {
-		setSelectedSession(null);
+		setSelectedSessionId(null);
 		setPreselectedWorkspaceId(null);
 		setChatResetTrigger((prev) => prev + 1);
 	}, []);
 
 	const handleAddSession = React.useCallback((workspaceId: string) => {
-		setSelectedSession(null);
+		setSelectedSessionId(null);
 		setPreselectedWorkspaceId(workspaceId);
 		setWorkspaceSelectTrigger((prev) => prev + 1);
 	}, []);
@@ -165,10 +179,10 @@ export default function IDEChatPage() {
 		// Find first non-closed session in this workspace
 		const firstSession = workspace.sessions.find((s) => s.status !== "closed");
 		if (firstSession) {
-			setSelectedSession(firstSession);
+			setSelectedSessionId(firstSession.id);
 		} else {
 			// No open sessions - clear selection and preselect this workspace for new session
-			setSelectedSession(null);
+			setSelectedSessionId(null);
 			setPreselectedWorkspaceId(workspace.id);
 		}
 	}, []);
@@ -200,8 +214,10 @@ export default function IDEChatPage() {
 			setPreselectedWorkspaceId(null);
 		}
 		// Clear session if it belonged to the deleted workspace
+		// Note: With derived state, selectedSession will auto-clear when workspace is removed
+		// from SWR data, but we clear the ID explicitly for immediate feedback
 		if (selectedSession?.workspaceId === workspaceId) {
-			setSelectedSession(null);
+			setSelectedSessionId(null);
 		}
 
 		setDeleteWorkspaceDialogOpen(false);
@@ -215,7 +231,7 @@ export default function IDEChatPage() {
 		} else {
 			const agent = await createAgent(agentData);
 			if (agent) {
-				setSelectedAgent(agent);
+				setSelectedAgentId(agent.id);
 			}
 		}
 		dialogs.closeAgentDialog();
@@ -224,21 +240,18 @@ export default function IDEChatPage() {
 	// Called when chat endpoint creates a new session
 	const handleSessionCreated = async (sessionId: string) => {
 		try {
-			// Fetch the newly created session
-			const session = await api.getSession(sessionId);
-			setSelectedSession(session);
+			// Refresh the workspaces list first (sessions are nested within workspaces)
+			await mutateWorkspaces();
+
+			// Set the session ID - the full session object will be derived from workspaces
+			setSelectedSessionId(sessionId);
 			setPreselectedWorkspaceId(null);
 
-			// Select the agent if available
+			// Fetch the session to get agentId for agent selection
+			const session = await api.getSession(sessionId);
 			if (session.agentId) {
-				const agent = agents.find((a) => a.id === session.agentId);
-				if (agent) {
-					setSelectedAgent(agent);
-				}
+				setSelectedAgentId(session.agentId);
 			}
-
-			// Refresh the workspaces list (sessions are nested within workspaces)
-			mutateWorkspaces();
 		} catch (error) {
 			console.error("Failed to fetch created session:", error);
 		}
@@ -267,10 +280,10 @@ export default function IDEChatPage() {
 					workspaces={workspaces}
 					agents={agents}
 					agentTypes={agentTypes}
-					selectedSessionId={selectedSession?.id || null}
-					selectedAgentId={selectedAgent?.id || null}
+					selectedSessionId={selectedSessionId}
+					selectedAgentId={selectedAgentId}
 					onSessionSelect={handleSessionSelect}
-					onAgentSelect={setSelectedAgent}
+					onAgentSelect={(agent) => setSelectedAgentId(agent?.id ?? null)}
 					onAddWorkspace={dialogs.openWorkspaceDialog}
 					onAddSession={handleAddSession}
 					onDeleteWorkspace={handleDeleteWorkspace}
@@ -286,7 +299,7 @@ export default function IDEChatPage() {
 					preselectedWorkspaceId={preselectedWorkspaceId}
 					workspaceSelectTrigger={workspaceSelectTrigger}
 					chatResetTrigger={chatResetTrigger}
-					selectedAgentId={selectedAgent?.id || null}
+					selectedAgentId={selectedAgentId}
 					onAddWorkspace={dialogs.openWorkspaceDialog}
 					onAddAgent={() => dialogs.openAgentDialog()}
 					onSessionCreated={handleSessionCreated}

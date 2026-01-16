@@ -151,9 +151,9 @@ function getStatusDisplay(status: SessionStatus): {
 				icon: <Loader2 className="h-4 w-4 animate-spin" />,
 				isLoading: true,
 			};
-		case "creating_container":
+		case "creating_sandbox":
 			return {
-				text: "Creating container...",
+				text: "Creating sandbox...",
 				icon: <Loader2 className="h-4 w-4 animate-spin" />,
 				isLoading: true,
 			};

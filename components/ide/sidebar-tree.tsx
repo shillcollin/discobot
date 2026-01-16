@@ -333,7 +333,7 @@ function SessionNode({
 	};
 
 	const handleDelete = async () => {
-		await deleteSession(session.id);
+		await deleteSession(session.id, session.workspaceId);
 	};
 
 	return (
