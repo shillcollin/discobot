@@ -238,11 +238,16 @@ func TestDeleteSession(t *testing.T) {
 
 	AssertStatus(t, resp, http.StatusOK)
 
-	// Verify session is deleted
+	// Verify session status is "removing" (async deletion)
 	resp = client.Get("/api/projects/" + project.ID + "/sessions/" + session.ID)
 	defer resp.Body.Close()
 
-	AssertStatus(t, resp, http.StatusNotFound)
+	AssertStatus(t, resp, http.StatusOK)
+	var result map[string]interface{}
+	ParseJSON(t, resp, &result)
+	if result["status"] != "removing" {
+		t.Errorf("Expected status 'removing', got '%v'", result["status"])
+	}
 }
 
 func TestListSessionsByWorkspace_WithData(t *testing.T) {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -43,13 +44,18 @@ func (h *Handler) UpdateSession(w http.ResponseWriter, r *http.Request) {
 	h.JSON(w, http.StatusOK, session)
 }
 
-// DeleteSession deletes a session
+// DeleteSession initiates async deletion of a session
 func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 	ctx := r.Context()
+	projectID := middleware.GetProjectID(ctx)
 
-	if err := h.sessionService.DeleteSession(ctx, sessionID); err != nil {
-		h.Error(w, http.StatusInternalServerError, "Failed to delete session")
+	if err := h.sessionService.DeleteSession(ctx, projectID, sessionID, h.jobQueue); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			h.Error(w, http.StatusNotFound, "Session not found")
+			return
+		}
+		h.Error(w, http.StatusInternalServerError, "Failed to initiate session deletion")
 		return
 	}
 

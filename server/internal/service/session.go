@@ -174,9 +174,68 @@ func (s *SessionService) UpdateSession(ctx context.Context, sessionID, name, sta
 	return s.mapSession(sess), nil
 }
 
-// DeleteSession deletes a session
-func (s *SessionService) DeleteSession(ctx context.Context, sessionID string) error {
-	return s.store.DeleteSession(ctx, sessionID)
+// JobEnqueuer is an interface for enqueueing session delete jobs.
+type JobEnqueuer interface {
+	EnqueueSessionDelete(ctx context.Context, projectID, sessionID string) error
+}
+
+// DeleteSession initiates async deletion of a session.
+// It sets the session status to "removing", emits an SSE event, and enqueues a deletion job.
+func (s *SessionService) DeleteSession(ctx context.Context, projectID, sessionID string, jobQueue JobEnqueuer) error {
+	// Get session to verify it exists
+	sess, err := s.store.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+
+	// Don't allow deletion of sessions already being removed
+	if sess.Status == model.SessionStatusRemoving {
+		return nil // Already being deleted
+	}
+
+	// Update status to "removing"
+	sess.Status = model.SessionStatusRemoving
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("failed to update session status: %w", err)
+	}
+
+	// Emit SSE event
+	if s.eventBroker != nil {
+		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusRemoving); err != nil {
+			log.Printf("Failed to publish session removing event: %v", err)
+		}
+	}
+
+	// Enqueue deletion job
+	if err := jobQueue.EnqueueSessionDelete(ctx, projectID, sessionID); err != nil {
+		// If job enqueueing fails, log but don't fail - the session is marked as removing
+		// and can be cleaned up later by reconciliation
+		log.Printf("Failed to enqueue session delete job for %s: %v", sessionID, err)
+	}
+
+	return nil
+}
+
+// PerformDeletion performs the actual session deletion work.
+// This is called by the SessionDeleteExecutor job handler.
+func (s *SessionService) PerformDeletion(ctx context.Context, sessionID string) error {
+	// Step 1: Destroy sandbox (idempotent - handles not found)
+	if s.sandboxProvider != nil {
+		if err := s.sandboxProvider.Remove(ctx, sessionID); err != nil {
+			if !errors.Is(err, sandbox.ErrNotFound) {
+				return fmt.Errorf("failed to remove sandbox: %w", err)
+			}
+			// Sandbox not found is fine - continue with deletion
+		}
+	}
+
+	// Step 2: Delete from database (messages, terminal history, session)
+	if err := s.store.DeleteSession(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to delete session from database: %w", err)
+	}
+
+	log.Printf("Session %s deleted successfully", sessionID)
+	return nil
 }
 
 // mapSession maps a model Session to a service Session

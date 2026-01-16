@@ -210,6 +210,7 @@ const (
 	SessionStatusStopped         = "stopped"          // Sandbox is stopped, will restart on demand
 	SessionStatusError           = "error"            // Something failed during setup
 	SessionStatusClosed          = "closed"           // Session has been archived
+	SessionStatusRemoving        = "removing"         // Session is being deleted
 )
 
 // Session represents a chat thread within a workspace.

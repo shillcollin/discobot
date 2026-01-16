@@ -149,10 +149,11 @@ func main() {
 		workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
 		disp.RegisterExecutor(jobs.NewWorkspaceInitExecutor(workspaceSvc))
 
-		// Register session init executor if sandbox provider is available
+		// Register session init and delete executors if sandbox provider is available
 		if sandboxProvider != nil {
 			sessionSvc := service.NewSessionService(s, gitProvider, sandboxProvider, eventBroker)
 			disp.RegisterExecutor(jobs.NewSessionInitExecutor(sessionSvc))
+			disp.RegisterExecutor(jobs.NewSessionDeleteExecutor(sessionSvc))
 		}
 
 		disp.Start(context.Background())

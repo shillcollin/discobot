@@ -419,8 +419,17 @@ func (p *Provider) Get(ctx context.Context, sessionID string) (*sandbox.Sandbox,
 		s.Status = sandbox.StatusFailed
 		s.Error = info.State.Error
 	case info.State.ExitCode != 0:
-		s.Status = sandbox.StatusFailed
-		s.Error = fmt.Sprintf("exited with code %d", info.State.ExitCode)
+		// Exit codes 137 (SIGKILL, 128+9) and 143 (SIGTERM, 128+15) are expected
+		// from docker stop and should be treated as stopped, not failed
+		if info.State.ExitCode == 137 || info.State.ExitCode == 143 {
+			s.Status = sandbox.StatusStopped
+			if stopped, err := time.Parse(time.RFC3339Nano, info.State.FinishedAt); err == nil {
+				s.StoppedAt = &stopped
+			}
+		} else {
+			s.Status = sandbox.StatusFailed
+			s.Error = fmt.Sprintf("exited with code %d", info.State.ExitCode)
+		}
 	default:
 		if info.State.FinishedAt != "" && info.State.FinishedAt != "0001-01-01T00:00:00Z" {
 			s.Status = sandbox.StatusStopped
@@ -671,8 +680,17 @@ func (p *Provider) List(ctx context.Context) ([]*sandbox.Sandbox, error) {
 			sb.Status = sandbox.StatusFailed
 			sb.Error = info.State.Error
 		case info.State.ExitCode != 0:
-			sb.Status = sandbox.StatusFailed
-			sb.Error = fmt.Sprintf("exited with code %d", info.State.ExitCode)
+			// Exit codes 137 (SIGKILL, 128+9) and 143 (SIGTERM, 128+15) are expected
+			// from docker stop and should be treated as stopped, not failed
+			if info.State.ExitCode == 137 || info.State.ExitCode == 143 {
+				sb.Status = sandbox.StatusStopped
+				if stopped, err := time.Parse(time.RFC3339Nano, info.State.FinishedAt); err == nil {
+					sb.StoppedAt = &stopped
+				}
+			} else {
+				sb.Status = sandbox.StatusFailed
+				sb.Error = fmt.Sprintf("exited with code %d", info.State.ExitCode)
+			}
 		default:
 			if info.State.FinishedAt != "" && info.State.FinishedAt != "0001-01-01T00:00:00Z" {
 				sb.Status = sandbox.StatusStopped

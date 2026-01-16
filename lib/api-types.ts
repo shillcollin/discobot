@@ -21,7 +21,8 @@ export type SessionStatus =
 	| "running" // Session is ready for use
 	| "stopped" // Sandbox is stopped, will restart on demand
 	| "error" // Something failed during setup
-	| "closed"; // Session has been archived
+	| "closed" // Session has been archived
+	| "removing"; // Session is being deleted
 
 export interface Session {
 	id: string;
