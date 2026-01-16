@@ -10,6 +10,14 @@ import {
 	sessionUpdateToUIPart,
 	uiMessageToContentBlocks,
 } from "../acp/translate.js";
+import type {
+	ChatRequest,
+	ClearSessionResponse,
+	ErrorResponse,
+	GetMessagesResponse,
+	HealthResponse,
+	RootResponse,
+} from "../api/types.js";
 import { authMiddleware } from "../auth/middleware.js";
 import { checkCredentialsChanged } from "../credentials/credentials.js";
 import {
@@ -20,13 +28,13 @@ import {
 	updateMessage,
 } from "../store/session.js";
 import {
-	type StreamablePart,
 	createBlockIds,
 	createErrorChunk,
 	createFinishChunks,
 	createStartChunk,
 	createStreamState,
 	partToChunks,
+	type StreamablePart,
 } from "./stream.js";
 
 // Header name for credentials passed from server
@@ -61,11 +69,14 @@ export function createApp(options: AppOptions) {
 	}
 
 	app.get("/", (c) => {
-		return c.json({ status: "ok", service: "agent" });
+		return c.json<RootResponse>({ status: "ok", service: "agent" });
 	});
 
 	app.get("/health", (c) => {
-		return c.json({ healthy: true, connected: acpClient.isConnected });
+		return c.json<HealthResponse>({
+			healthy: true,
+			connected: acpClient.isConnected,
+		});
 	});
 
 	// GET /chat - Return all messages
@@ -78,7 +89,7 @@ export function createApp(options: AppOptions) {
 
 		const messages = getMessages();
 		console.log(`GET /chat returning ${messages.length} messages`);
-		return c.json({ messages });
+		return c.json<GetMessagesResponse>({ messages });
 	});
 
 	// POST /chat - Send messages and stream response
@@ -87,11 +98,11 @@ export function createApp(options: AppOptions) {
 		const log = (data: Record<string, unknown>) =>
 			console.log(JSON.stringify({ reqId, ...data }));
 
-		const body = await c.req.json<{ messages: UIMessage[] }>();
+		const body = await c.req.json<ChatRequest>();
 		const { messages: inputMessages } = body;
 
 		if (!inputMessages || !Array.isArray(inputMessages)) {
-			return c.json({ error: "messages array required" }, 400);
+			return c.json<ErrorResponse>({ error: "messages array required" }, 400);
 		}
 
 		// Get the last user message to send
@@ -99,7 +110,7 @@ export function createApp(options: AppOptions) {
 			.filter((m) => m.role === "user")
 			.pop();
 		if (!lastUserMessage) {
-			return c.json({ error: "No user message found" }, 400);
+			return c.json<ErrorResponse>({ error: "No user message found" }, 400);
 		}
 
 		// Check for credential changes from header
@@ -247,7 +258,7 @@ export function createApp(options: AppOptions) {
 	// DELETE /chat - Clear session and messages
 	app.delete("/chat", async (c) => {
 		await clearSession();
-		return c.json({ success: true });
+		return c.json<ClearSessionResponse>({ success: true });
 	});
 
 	return { app, acpClient };

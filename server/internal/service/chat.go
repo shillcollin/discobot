@@ -11,6 +11,7 @@ import (
 	"github.com/anthropics/octobot/server/internal/events"
 	"github.com/anthropics/octobot/server/internal/model"
 	"github.com/anthropics/octobot/server/internal/sandbox"
+	"github.com/anthropics/octobot/server/internal/sandbox/sandboxapi"
 	"github.com/anthropics/octobot/server/internal/store"
 )
 
@@ -234,7 +235,7 @@ func (c *ChatService) getCredentialOpts(ctx context.Context, projectID string) *
 
 // GetMessages returns all messages for a session by querying the sandbox.
 // Returns empty slice if sandbox is not available or not running.
-func (c *ChatService) GetMessages(ctx context.Context, projectID, sessionID string) ([]UIMessage, error) {
+func (c *ChatService) GetMessages(ctx context.Context, projectID, sessionID string) ([]sandboxapi.UIMessage, error) {
 	// Validate session belongs to project
 	_, err := c.GetSession(ctx, projectID, sessionID)
 	if err != nil {
@@ -243,14 +244,14 @@ func (c *ChatService) GetMessages(ctx context.Context, projectID, sessionID stri
 
 	if c.sandboxClient == nil {
 		// Sandbox provider not available, return empty messages
-		return []UIMessage{}, nil
+		return []sandboxapi.UIMessage{}, nil
 	}
 
 	opts := c.getCredentialOpts(ctx, projectID)
 	messages, err := c.sandboxClient.GetMessages(ctx, sessionID, opts)
 	if err != nil {
 		// Sandbox not running or not accessible, return empty messages
-		return []UIMessage{}, nil
+		return []sandboxapi.UIMessage{}, nil
 	}
 
 	return messages, nil

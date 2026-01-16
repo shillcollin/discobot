@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthropics/octobot/server/internal/sandbox"
+	"github.com/anthropics/octobot/server/internal/sandbox/sandboxapi"
 )
 
 // Retry configuration for sandbox requests.
@@ -102,12 +103,6 @@ func retryWithBackoff[T any](ctx context.Context, fn func() (T, int, error)) (T,
 	return zero, fmt.Errorf("max retry attempts exceeded")
 }
 
-// SandboxChatRequest is the request sent to the sandbox's chat endpoint.
-// Messages is passed through as raw JSON without parsing.
-type SandboxChatRequest struct {
-	Messages json.RawMessage `json:"messages"`
-}
-
 // SSELine represents a raw SSE data line from the sandbox.
 // The content is passed through without parsing - the sandbox
 // is expected to send data in AI SDK UIMessage Stream format.
@@ -116,14 +111,6 @@ type SSELine struct {
 	Data string
 	// Done indicates this is the [DONE] signal
 	Done bool
-}
-
-// UIMessage represents a message in UIMessage format from the sandbox.
-type UIMessage struct {
-	ID        string          `json:"id"`
-	Role      string          `json:"role"`
-	Parts     json.RawMessage `json:"parts"`
-	CreatedAt string          `json:"createdAt,omitempty"`
 }
 
 // getSandboxURL returns the base URL for the sandbox's HTTP endpoint.
@@ -189,7 +176,7 @@ func (c *SandboxChatClient) applyRequestAuth(ctx context.Context, req *http.Requ
 // Retries with exponential backoff on connection errors and 5xx responses.
 func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, messages json.RawMessage, opts *RequestOptions) (<-chan SSELine, error) {
 	// Build the request body once - pass messages through as-is
-	reqBody := SandboxChatRequest{Messages: messages}
+	reqBody := sandboxapi.ChatRequest{Messages: messages}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -283,7 +270,7 @@ func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, 
 // GetMessages retrieves message history from the sandbox.
 // The sandbox is expected to respond with an array of UIMessages.
 // Retries with exponential backoff on connection errors and 5xx responses.
-func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string, opts *RequestOptions) ([]UIMessage, error) {
+func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string, opts *RequestOptions) ([]sandboxapi.UIMessage, error) {
 	// Use retry logic to handle container startup delays
 	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
 		baseURL, err := c.getSandboxURL(ctx, sessionID)
@@ -321,10 +308,10 @@ func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string, o
 		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var messages []UIMessage
-	if err := json.NewDecoder(resp.Body).Decode(&messages); err != nil {
+	var response sandboxapi.GetMessagesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return messages, nil
+	return response.Messages, nil
 }
