@@ -108,7 +108,7 @@ func (s *CodexCallbackServer) Stop() {
 	if s.server != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		s.server.Shutdown(ctx)
+		_ = s.server.Shutdown(ctx)
 	}
 
 	s.running = false
@@ -213,7 +213,7 @@ func (s *CodexCallbackServer) handleCallback(w http.ResponseWriter, r *http.Requ
 func (s *CodexCallbackServer) renderSuccess(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `<!DOCTYPE html>
+	_, _ = fmt.Fprint(w, `<!DOCTYPE html>
 <html>
 <head>
     <title>Authorization Successful</title>
@@ -237,7 +237,7 @@ func (s *CodexCallbackServer) renderSuccess(w http.ResponseWriter) {
 func (s *CodexCallbackServer) renderError(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `<!DOCTYPE html>
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
 <head>
     <title>Authorization Failed</title>
@@ -262,7 +262,7 @@ func (s *CodexCallbackServer) renderError(w http.ResponseWriter, message string)
 func (s *CodexCallbackServer) renderCodeForCopy(w http.ResponseWriter, code string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `<!DOCTYPE html>
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
 <head>
     <title>Authorization Code</title>

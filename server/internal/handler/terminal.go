@@ -87,7 +87,7 @@ func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("failed to upgrade websocket: %v", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Attach to sandbox PTY
 	pty, err := h.sandboxService.Attach(ctx, sessionID, rows, cols)
@@ -96,7 +96,7 @@ func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 		sendError(conn, "failed to attach to terminal")
 		return
 	}
-	defer pty.Close()
+	defer func() { _ = pty.Close() }()
 
 	// Create a context for cancellation
 	ctx, cancel := context.WithCancel(ctx)
@@ -257,7 +257,7 @@ func sendError(conn *websocket.Conn, message string) {
 		Type: "error",
 		Data: json.RawMessage(`"` + message + `"`),
 	}
-	conn.WriteJSON(msg)
+	_ = conn.WriteJSON(msg)
 }
 
 // escapeForJSON escapes binary data for JSON string

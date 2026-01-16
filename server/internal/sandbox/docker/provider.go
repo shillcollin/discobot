@@ -73,7 +73,7 @@ func NewProvider(cfg *config.Config) (*Provider, error) {
 	defer cancel()
 
 	if _, err := cli.Ping(ctx); err != nil {
-		cli.Close()
+		_ = cli.Close()
 		return nil, fmt.Errorf("failed to connect to docker daemon: %w", err)
 	}
 
@@ -304,7 +304,7 @@ func (p *Provider) ensureImage(ctx context.Context, image string) error {
 	if err != nil {
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Drain the reader to complete the pull (progress is discarded)
 	_, err = io.Copy(io.Discard, reader)
@@ -536,8 +536,8 @@ func (p *Provider) Exec(ctx context.Context, sessionID string, cmd []string, opt
 	// Handle stdin if provided
 	if opts.Stdin != nil {
 		go func() {
-			io.Copy(resp.Conn, opts.Stdin)
-			resp.CloseWrite()
+			_, _ = io.Copy(resp.Conn, opts.Stdin)
+			_ = resp.CloseWrite()
 		}()
 	}
 
@@ -603,7 +603,7 @@ func (p *Provider) Attach(ctx context.Context, sessionID string, opts sandbox.At
 
 	// Resize PTY if dimensions provided
 	if opts.Rows > 0 && opts.Cols > 0 {
-		p.client.ContainerExecResize(ctx, execCreate.ID, containerTypes.ResizeOptions{
+		_ = p.client.ContainerExecResize(ctx, execCreate.ID, containerTypes.ResizeOptions{
 			Height: uint(opts.Rows),
 			Width:  uint(opts.Cols),
 		})

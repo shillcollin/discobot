@@ -266,7 +266,7 @@ func (s *AuthService) getGitHubUser(ctx context.Context, token *oauth2.Token) (*
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user info: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -312,7 +312,7 @@ func (s *AuthService) getGitHubEmail(_ context.Context, client *http.Client) (st
 	if err != nil {
 		return "", fmt.Errorf("failed to get emails: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var emails []struct {
 		Email    string `json:"email"`
@@ -347,7 +347,7 @@ func (s *AuthService) getGoogleUser(ctx context.Context, token *oauth2.Token) (*
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user info: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

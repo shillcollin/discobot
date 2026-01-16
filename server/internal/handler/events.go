@@ -47,7 +47,7 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 	defer h.eventBroker.Unsubscribe(sub)
 
 	// Send initial connection event
-	fmt.Fprintf(w, "event: connected\ndata: {\"projectId\":%q}\n\n", projectID)
+	_, _ = fmt.Fprintf(w, "event: connected\ndata: {\"projectId\":%q}\n\n", projectID)
 	flusher.Flush()
 
 	// Track sent event IDs to avoid duplicates between history and live events
@@ -58,7 +58,7 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 		// Get events after a specific event ID
 		events, err := h.eventBroker.GetEventsAfterID(r.Context(), projectID, afterID)
 		if err != nil {
-			fmt.Fprintf(w, "event: error\ndata: {\"error\":\"failed to get historical events\"}\n\n")
+			_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":\"failed to get historical events\"}\n\n")
 			flusher.Flush()
 		} else {
 			for _, event := range events {
@@ -66,7 +66,7 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
-				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
+				_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
 				sentEventIDs[event.ID] = true
 			}
 			flusher.Flush()
@@ -80,7 +80,7 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 			if _, err := fmt.Sscanf(sinceStr, "%d", &unixSec); err == nil {
 				since = time.Unix(unixSec, 0)
 			} else {
-				fmt.Fprintf(w, "event: error\ndata: {\"error\":\"invalid since parameter, use RFC3339 format\"}\n\n")
+				_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":\"invalid since parameter, use RFC3339 format\"}\n\n")
 				flusher.Flush()
 			}
 		}
@@ -88,7 +88,7 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 		if !since.IsZero() {
 			events, err := h.eventBroker.GetEventsSince(r.Context(), projectID, since)
 			if err != nil {
-				fmt.Fprintf(w, "event: error\ndata: {\"error\":\"failed to get historical events\"}\n\n")
+				_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":\"failed to get historical events\"}\n\n")
 				flusher.Flush()
 			} else {
 				for _, event := range events {
@@ -96,7 +96,7 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 					if err != nil {
 						continue
 					}
-					fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
+					_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
 					sentEventIDs[event.ID] = true
 				}
 				flusher.Flush()
@@ -129,7 +129,7 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Write SSE format: event: <type>\ndata: <json>\n\n
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
 			flusher.Flush()
 		}
 	}

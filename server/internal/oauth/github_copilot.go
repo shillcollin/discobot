@@ -84,7 +84,7 @@ func (p *GitHubCopilotProvider) RequestDeviceCode(ctx context.Context) (*DeviceC
 	if err != nil {
 		return nil, fmt.Errorf("device code request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -122,7 +122,7 @@ func (p *GitHubCopilotProvider) PollForToken(ctx context.Context, deviceCode str
 	if err != nil {
 		return nil, fmt.Errorf("token poll request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

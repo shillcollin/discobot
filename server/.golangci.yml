@@ -12,7 +12,6 @@ linters:
   settings:
     gosec:
       excludes:
-        - G104
         - G101
     misspell:
       locale: US
@@ -51,25 +50,6 @@ linters:
       - path: _test\.go
         text: dot-imports
       - linters:
-          - errcheck
-        text: Error return value of .*(Close|Shutdown).*is not checked
-      - linters:
-          - errcheck
-        path: internal/handler/
-        text: Error return value of .*(Write|Fprint|Fprintf|Encode).*is not checked
-      - linters:
-          - errcheck
-        path: cmd/server/
-        text: Error return value of .*Write.*is not checked
-      - linters:
-          - errcheck
-        path: internal/sandbox/
-        text: Error return value of .*(Copy|Resize).*is not checked
-      - linters:
-          - staticcheck
-        path: internal/sandbox/
-        text: SA1019.*deprecated
-      - linters:
           - gosec
         path: internal/git/
         text: G301|G306
@@ -81,13 +61,11 @@ linters:
           - gosec
         path: internal/sandbox/
         text: G115
-      - linters:
-          - prealloc
-        path: internal/
     paths:
       - third_party$
       - builtin$
       - examples$
+      - workspaces/
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
@@ -105,3 +83,4 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+      - workspaces/

@@ -165,7 +165,7 @@ func NewTestServer(t *testing.T) *TestServer {
 		disp.Stop()
 		eventPoller.Stop()
 		server.Close()
-		db.Close()
+		_ = db.Close()
 	})
 
 	return ts
@@ -183,7 +183,7 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
 	// Auth routes (no auth required)
@@ -383,7 +383,7 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 		disp.Stop()
 		eventPoller.Stop()
 		server.Close()
-		db.Close()
+		_ = db.Close()
 	})
 
 	return ts
@@ -595,7 +595,7 @@ func (tc *TestClient) do(method, path string, body interface{}) *http.Response {
 // ParseJSON parses the response body as JSON
 func ParseJSON(t *testing.T, resp *http.Response, v interface{}) {
 	t.Helper()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -612,7 +612,7 @@ func AssertStatus(t *testing.T, resp *http.Response, expected int) {
 	t.Helper()
 	if resp.StatusCode != expected {
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		t.Errorf("Expected status %d, got %d\nBody: %s", expected, resp.StatusCode, string(body))
 	}
 }

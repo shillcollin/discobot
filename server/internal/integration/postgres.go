@@ -104,7 +104,7 @@ func waitForPostgres(timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", "localhost:"+postgresPort, time.Second)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 
 			// Port is open, but PostgreSQL might not be ready yet
 			// Try to connect with psql
@@ -118,7 +118,7 @@ func waitForPostgres(timeout time.Duration) error {
 				// Verify we can actually connect from outside the container
 				verifyConn, verifyErr := net.DialTimeout("tcp", "localhost:"+postgresPort, time.Second)
 				if verifyErr == nil {
-					verifyConn.Close()
+					_ = verifyConn.Close()
 					return nil
 				}
 			}

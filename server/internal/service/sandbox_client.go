@@ -144,7 +144,7 @@ func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, 
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -154,7 +154,7 @@ func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, 
 	// Start goroutine to read SSE lines and pass through
 	go func() {
 		defer close(lineCh)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
@@ -212,7 +212,7 @@ func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string, o
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
