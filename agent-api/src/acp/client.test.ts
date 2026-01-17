@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { describe, it, mock } from "node:test";
+import { describe, it } from "node:test";
 
 describe("ACPClient", () => {
 	describe("process exit handling", () => {
@@ -13,13 +13,7 @@ describe("ACPClient", () => {
 			};
 			mockProcess.stdin = { write: () => true };
 			mockProcess.stdout = new EventEmitter();
-			mockProcess.kill = mock.fn();
-
-			// Mock the spawn function (kept for potential future use)
-			const _originalSpawn = await import("node:child_process").then(
-				(m) => m.spawn,
-			);
-			const _spawnMock = mock.fn(() => mockProcess);
+			mockProcess.kill = () => {};
 
 			// Dynamically import and patch the module
 			// Since we can't easily mock ES modules, we'll test the behavior directly

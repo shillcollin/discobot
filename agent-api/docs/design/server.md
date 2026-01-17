@@ -30,6 +30,7 @@ This module implements the HTTP API using Hono web framework.
 │  │  - ACPClient (acp/client.ts)                         │  │
 │  │  - SessionStore (store/session.ts)                   │  │
 │  │  - translate functions (acp/translate.ts)            │  │
+│  │  - stream functions (server/stream.ts)               │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -202,9 +203,11 @@ async function handleChat(c: Context) {
 
   // 8. Handle ACP updates
   acpClient.setUpdateCallback((update) => {
-    const part = sessionUpdateToUIPart(update)
+    // Convert directly to stream chunks
+    const chunks = sessionUpdateToChunks(update, state, ids)
     // Accumulate parts in assistant message
     // Write SSE events
+    for (const chunk of chunks) sendSSE(chunk)
   })
 
   // 9. Send prompt

@@ -6,8 +6,8 @@ This module implements the Agent Client Protocol (ACP) client for communicating 
 
 | File | Description |
 |------|-------------|
-| `src/acp/client.ts` | ACP client wrapper |
-| `src/acp/translate.ts` | Type conversion functions |
+| `src/acp/client.ts` | ACP client wrapper with session replay |
+| `src/acp/translate.ts` | UIMessage ↔ ContentBlock conversion |
 
 ## Architecture
 
@@ -29,14 +29,12 @@ This module implements the Agent Client Protocol (ACP) client for communicating 
 │  │  - Handles permission requests                           │  │
 │  │  - Routes updates to callbacks                           │  │
 │  └──────────────────────────────────────────────────────────┘  │
-│                           │                                      │
-│                           ▼                                      │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │                 Translation Layer                         │  │
-│  │  - UIMessage ↔ ContentBlock conversion                   │  │
-│  │  - SessionUpdate → UIPart conversion                     │  │
-│  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
+
+Translation happens in two places:
+- translate.ts: UIMessage → ContentBlock (for sending prompts to ACP)
+- stream.ts: SessionUpdate → UIMessageChunk (for streaming responses)
+- client.ts: SessionUpdate → UIPart (for session replay only)
 ```
 
 ## ACPClient Class
@@ -198,36 +196,37 @@ function uiMessageToContentBlocks(message: UIMessage): ContentBlock[] {
 }
 ```
 
-### sessionUpdateToUIPart()
+### sessionUpdateToPart() (in client.ts)
 
-Converts ACP update to AI SDK part:
+Local helper in client.ts for session replay. Converts ACP update to AI SDK part:
 
 ```typescript
-function sessionUpdateToUIPart(update: SessionUpdate): UIPart | null {
-  switch (update.type) {
+function sessionUpdateToPart(update: SessionUpdate): UIMessagePart | null {
+  switch (update.sessionUpdate) {
+    case 'user_message_chunk':
     case 'agent_message_chunk':
-      return {
-        type: 'text',
-        text: update.content
+      if (update.content.type === 'text') {
+        return { type: 'text', text: update.content.text }
       }
+      break
 
     case 'agent_thought_chunk':
-      return {
-        type: 'reasoning',
-        text: update.content
+      if (update.content.type === 'text') {
+        return { type: 'reasoning', text: update.content.text }
       }
+      break
 
     case 'tool_call':
-      return toolCallToUIPart(update)
-
     case 'tool_call_update':
-      return toolCallUpdateToUIPart(update)
-
-    default:
-      return null
+      // Returns DynamicToolUIPart with appropriate state
+      break
   }
+  return null
 }
 ```
+
+**Note:** For real-time streaming, use `sessionUpdateToChunks()` from `stream.ts` instead,
+which produces UIMessageChunk events with proper start/delta/end sequencing.
 
 ### Tool Status Mapping
 
@@ -305,6 +304,132 @@ this.acp.onPermissionRequest((request) => {
   return { approved: true }
 })
 ```
+
+## Agent-Specific Extensions
+
+The ACP specification includes an `_meta` field for agent-specific extensions. This section documents
+how different agent implementations use this field.
+
+### Claude Code Extensions
+
+Claude Code (via `claude-code-acp`) uses `_meta.claudeCode` to provide additional metadata not covered
+by the standard ACP specification. The translation layer extracts these fields with fallbacks:
+
+```
+Priority: Standard ACP field → _meta.claudeCode field → Default value
+```
+
+#### _meta.claudeCode Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `toolName` | `string` | The actual Claude Code tool name (e.g., "Bash", "Read", "Edit", "Write"). Different from `title` which is the display name. |
+| `toolResponse` | `object` | Structured tool output for terminal commands |
+| `toolResponse.stdout` | `string` | Standard output from the command |
+| `toolResponse.stderr` | `string` | Standard error from the command |
+| `toolResponse.interrupted` | `boolean` | Whether the command was interrupted |
+| `toolResponse.isImage` | `boolean` | Whether the output is an image |
+| `options` | `object` | Session options forwarded to Claude Code (only on `newSession`) |
+
+#### Field Extraction Priority
+
+When translating ACP events to UIMessageChunk:
+
+**Tool Name:**
+```typescript
+// Priority: _meta.claudeCode.toolName → title → "unknown"
+toolName = _meta?.claudeCode?.toolName || title || "unknown"
+```
+
+**Tool Output:**
+```typescript
+// Priority: rawOutput → _meta.claudeCode.toolResponse → content array
+output = rawOutput ?? _meta?.claudeCode?.toolResponse ?? extractFromContent(content)
+```
+
+**Display Title:**
+```typescript
+// Use ACP title field directly (e.g., "`ls -la /tmp`")
+title = update.title
+```
+
+#### Example: Tool Call with Claude Code Extensions
+
+ACP ToolCall from Claude Code:
+```json
+{
+  "sessionUpdate": "tool_call",
+  "toolCallId": "toolu_123",
+  "title": "`ls -la /tmp`",
+  "kind": "execute",
+  "status": "pending",
+  "rawInput": { "command": "ls -la /tmp" },
+  "_meta": {
+    "claudeCode": {
+      "toolName": "Bash"
+    }
+  }
+}
+```
+
+Translated UIMessageChunk:
+```json
+{
+  "type": "tool-input-start",
+  "toolCallId": "toolu_123",
+  "toolName": "Bash",
+  "title": "`ls -la /tmp`",
+  "providerMetadata": {
+    "claudeCode": { "toolName": "Bash" }
+  },
+  "dynamic": true
+}
+```
+
+#### Example: Tool Output with Claude Code Extensions
+
+ACP ToolCallUpdate from Claude Code:
+```json
+{
+  "sessionUpdate": "tool_call_update",
+  "toolCallId": "toolu_123",
+  "status": "completed",
+  "_meta": {
+    "claudeCode": {
+      "toolName": "Bash",
+      "toolResponse": {
+        "stdout": "file1.txt\nfile2.txt",
+        "stderr": "",
+        "interrupted": false
+      }
+    }
+  }
+}
+```
+
+Translated UIMessageChunk:
+```json
+{
+  "type": "tool-output-available",
+  "toolCallId": "toolu_123",
+  "output": {
+    "stdout": "file1.txt\nfile2.txt",
+    "stderr": "",
+    "interrupted": false
+  },
+  "dynamic": true
+}
+```
+
+### Adding Support for New Agents
+
+When adding support for a new ACP agent implementation:
+
+1. **Check for _meta extensions**: Review the agent's source code for `_meta` usage
+2. **Add extraction helpers**: Create functions in `stream.ts` to extract agent-specific fields
+3. **Maintain fallback order**: Always check standard ACP fields first, then agent extensions
+4. **Document the extension**: Add a section here describing the agent's `_meta` structure
+5. **Pass through providerMetadata**: Include relevant metadata in `providerMetadata` for UI access
 
 ## Testing
 

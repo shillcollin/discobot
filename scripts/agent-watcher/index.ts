@@ -1,8 +1,8 @@
 #!/usr/bin/env npx tsx
 /**
- * Agent Image Watcher - Entry point
+ * Agent API Image Watcher - Entry point
  *
- * Watches the ./agent directory and ./Dockerfile for changes and automatically
+ * Watches the ./agent-api directory and ./Dockerfile for changes and automatically
  * rebuilds the Docker image, then updates server/.env with the new image digest.
  *
  * Usage: npx tsx scripts/agent-watcher/index.ts
@@ -14,14 +14,14 @@ import { AgentWatcher } from "./watcher.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = join(__dirname, "../..");
-const AGENT_DIR = join(ROOT_DIR, "agent");
+const AGENT_DIR = join(ROOT_DIR, "agent-api");
 const SERVER_ENV_PATH = join(ROOT_DIR, "server", ".env");
 
 const watcher = new AgentWatcher({
 	agentDir: AGENT_DIR,
 	projectRoot: ROOT_DIR,
 	envFilePath: SERVER_ENV_PATH,
-	imageName: "octobot-agent",
+	imageName: "obot-agent-api",
 	imageTag: "dev",
 	debounceMs: 500,
 });

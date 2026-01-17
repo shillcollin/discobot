@@ -337,7 +337,7 @@ Chat Message → POST sandbox:3002/chat
 
 ```go
 type SandboxOptions struct {
-    Image       string            // e.g., "octobot-agent:latest"
+    Image       string            // e.g., "obot-agent-api:latest"
     Binds       []string          // Volume mounts
     Env         []string          // Environment variables
     NetworkMode string            // Docker network

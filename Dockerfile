@@ -48,26 +48,49 @@ COPY proxy/ ./proxy/
 # Build the proxy binary
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /proxy ./proxy/cmd/proxy
 
-# Stage 3: Build the Bun standalone binary
+# Stage 3: Build the Bun standalone binary (glibc)
 FROM oven/bun:1 AS bun-builder
 
 WORKDIR /app
 
-# Copy package files from agent directory
-COPY agent/package.json agent/bun.lock* ./
+# Copy package files from agent-api directory
+COPY agent-api/package.json agent-api/bun.lock* ./
 
 # Install dependencies with Bun
 RUN bun install
 
-# Copy source files from agent directory
-COPY agent/tsconfig.json ./
-COPY agent/src ./src
+# Copy source files from agent-api directory
+COPY agent-api/tsconfig.json ./
+COPY agent-api/src ./src
 
 # Build standalone binary for native architecture (buildx handles multi-arch)
+# This binary links against glibc and works on Debian/Ubuntu-based systems
 RUN bun build ./src/index.ts \
     --compile \
     --minify \
-    --outfile=octobot-agent
+    --outfile=obot-agent-api
+
+# Stage 3b: Build the Bun standalone binary (musl)
+FROM oven/bun:1-alpine AS bun-builder-musl
+
+WORKDIR /app
+
+# Copy package files from agent-api directory
+COPY agent-api/package.json agent-api/bun.lock* ./
+
+# Install dependencies with Bun
+RUN bun install
+
+# Copy source files from agent-api directory
+COPY agent-api/tsconfig.json ./
+COPY agent-api/src ./src
+
+# Build standalone binary for musl-based systems (Alpine Linux)
+# This binary links against musl libc and works on Alpine-based systems
+RUN bun build ./src/index.ts \
+    --compile \
+    --minify \
+    --outfile=obot-agent-api.musl
 
 # Stage 4: Minimal Ubuntu runtime
 FROM ubuntu:24.04 AS runtime
@@ -95,7 +118,8 @@ RUN mkdir -p /.data /.workspace /data /workspace /opt/octobot/bin \
     && chown octobot:octobot /.data /data /workspace
 
 # Copy binaries to /opt/octobot/bin
-COPY --from=bun-builder /app/octobot-agent /opt/octobot/bin/octobot-agent
+COPY --from=bun-builder /app/obot-agent-api /opt/octobot/bin/obot-agent-api
+COPY --from=bun-builder-musl /app/obot-agent-api.musl /opt/octobot/bin/obot-agent-api.musl
 COPY --from=agentfs-builder /build/agentfs-bin /opt/octobot/bin/agentfs
 COPY --from=proxy-builder /proxy /opt/octobot/bin/proxy
 RUN chmod +x /opt/octobot/bin/*
@@ -122,7 +146,7 @@ EXPOSE 3002
 # Use tini as init to handle signals and reap zombie processes
 # Container starts as root for flexibility in mounting volumes
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/opt/octobot/bin/octobot-agent"]
+CMD ["/opt/octobot/bin/obot-agent-api"]
 
 # Stage 5: VZ disk image builder (non-default target)
 # Build with: docker build --target vz-disk-image --output type=local,dest=. .
@@ -173,7 +197,7 @@ mount -t virtiofs octobot-workspace /.workspace 2>/dev/null || true\n\
 \n\
 # Start the agent\n\
 cd /workspace\n\
-exec /opt/octobot/bin/octobot-agent\n\
+exec /opt/octobot/bin/obot-agent-api\n\
 ' > /rootfs/init \
     && chmod +x /rootfs/init
 

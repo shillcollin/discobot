@@ -1,6 +1,6 @@
-# Octobot Agent
+# Octobot Agent API
 
-The Octobot Agent is a Node.js container service that bridges the IDE chat interface with AI coding agents via the Agent Client Protocol (ACP).
+The Octobot Agent API is a Bun-based container service that bridges the IDE chat interface with AI coding agents via the Agent Client Protocol (ACP).
 
 ## Overview
 
@@ -76,16 +76,16 @@ npm start
 
 ```bash
 # Build image (from project root)
-docker build -t octobot-agent .
+docker build -t obot-agent-api .
 
-# Or from agent directory
-docker build -t octobot-agent -f ../Dockerfile ..
+# Or from agent-api directory
+docker build -t obot-agent-api -f ../Dockerfile ..
 
 # Run container
 docker run -p 8080:3002 \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   -v /path/to/workspace:/workspace \
-  octobot-agent
+  obot-agent-api
 ```
 
 ## API Endpoints
@@ -124,7 +124,7 @@ data: {"type": "finish", "messageId": "msg-2"}
 ## Project Structure
 
 ```
-agent/
+agent-api/
 ├── src/
 │   ├── index.ts           # Entry point
 │   ├── server/

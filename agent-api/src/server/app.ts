@@ -1,5 +1,5 @@
 import type { SessionNotification } from "@agentclientprotocol/sdk";
-import type { DynamicToolUIPart, UIMessage, UIMessageChunk } from "ai";
+import type { UIMessage, UIMessageChunk } from "ai";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
@@ -7,7 +7,6 @@ import { ACPClient } from "../acp/client.js";
 import {
 	createUIMessage,
 	generateMessageId,
-	sessionUpdateToUIPart,
 	uiMessageToContentBlocks,
 } from "../acp/translate.js";
 import type {
@@ -33,8 +32,7 @@ import {
 	createFinishChunks,
 	createStartChunk,
 	createStreamState,
-	partToChunks,
-	type StreamablePart,
+	sessionUpdateToChunks,
 } from "./stream.js";
 
 // Header name for credentials passed from server
@@ -171,53 +169,81 @@ export function createApp(options: AppOptions) {
 			// Set up update callback to stream responses
 			acpClient.setUpdateCallback((params: SessionNotification) => {
 				const update = params.update;
-				const part = sessionUpdateToUIPart(update);
 
 				// Log session update from ACP
 				log({ sessionUpdate: update });
 
-				if (part) {
-					// Update the assistant message in store
-					const currentMsg = getLastAssistantMessage();
-					if (currentMsg) {
-						// For text parts, we accumulate the text
-						if (part.type === "text") {
-							textBuffer += part.text;
+				// Generate stream chunks from the ACP update
+				const chunks = sessionUpdateToChunks(update, state, ids);
 
-							// Find existing text part or add new one
-							const existingTextPart = currentMsg.parts.find(
-								(p) => p.type === "text",
-							);
-							if (existingTextPart && existingTextPart.type === "text") {
-								existingTextPart.text = textBuffer;
-							} else {
-								currentMsg.parts.push({ type: "text", text: textBuffer });
-							}
-						} else if (part.type === "dynamic-tool") {
-							// Update or add tool invocation
-							const toolPart = part as DynamicToolUIPart;
-							const existingToolPart = currentMsg.parts.find(
-								(p): p is DynamicToolUIPart =>
-									p.type === "dynamic-tool" &&
-									p.toolCallId === toolPart.toolCallId,
-							);
-							if (existingToolPart) {
-								Object.assign(existingToolPart, toolPart);
-							} else {
-								currentMsg.parts.push(toolPart);
-							}
-						} else if (part.type === "reasoning") {
-							currentMsg.parts.push(part);
+				// Update the assistant message in store based on update type
+				const currentMsg = getLastAssistantMessage();
+				if (currentMsg) {
+					if (
+						update.sessionUpdate === "agent_message_chunk" &&
+						update.content.type === "text"
+					) {
+						// Accumulate text
+						textBuffer += update.content.text;
+						const existingTextPart = currentMsg.parts.find(
+							(p) => p.type === "text",
+						);
+						if (existingTextPart && existingTextPart.type === "text") {
+							existingTextPart.text = textBuffer;
 						} else {
-							currentMsg.parts.push(part);
+							currentMsg.parts.push({ type: "text", text: textBuffer });
 						}
-
+						updateMessage(currentMsg.id, { parts: currentMsg.parts });
+					} else if (
+						update.sessionUpdate === "tool_call" ||
+						update.sessionUpdate === "tool_call_update"
+					) {
+						// Update or add tool invocation
+						const toolCallId = update.toolCallId;
+						const existingToolPart = currentMsg.parts.find(
+							(p) => p.type === "dynamic-tool" && p.toolCallId === toolCallId,
+						);
+						if (existingToolPart && existingToolPart.type === "dynamic-tool") {
+							existingToolPart.toolName =
+								update.title || existingToolPart.toolName;
+							if (update.rawInput !== undefined) {
+								existingToolPart.input = update.rawInput;
+							}
+							if (update.status === "completed") {
+								existingToolPart.state = "output-available";
+								existingToolPart.output = update.rawOutput;
+							} else if (update.status === "failed") {
+								existingToolPart.state = "output-error";
+								existingToolPart.errorText = String(
+									update.rawOutput || "Tool call failed",
+								);
+							} else if (update.status === "in_progress") {
+								existingToolPart.state = "input-available";
+							}
+						} else {
+							currentMsg.parts.push({
+								type: "dynamic-tool",
+								toolCallId,
+								toolName: update.title || "unknown",
+								state: "input-streaming",
+								input: update.rawInput,
+							});
+						}
+						updateMessage(currentMsg.id, { parts: currentMsg.parts });
+					} else if (
+						update.sessionUpdate === "agent_thought_chunk" &&
+						update.content.type === "text"
+					) {
+						currentMsg.parts.push({
+							type: "reasoning",
+							text: update.content.text,
+						});
 						updateMessage(currentMsg.id, { parts: currentMsg.parts });
 					}
-
-					// Send SSE events using stream module (handles start/delta/end sequences)
-					sendChunks(partToChunks(part as StreamablePart, state, ids));
 				}
+
+				// Send SSE events (handles start/delta/end sequences)
+				sendChunks(chunks);
 			});
 
 			try {

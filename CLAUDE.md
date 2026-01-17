@@ -13,16 +13,16 @@ This document provides essential context for AI coding agents working on this pr
 
 ### Component READMEs
 - [server/README.md](./server/README.md) - Go backend documentation
-- [agent/README.md](./agent/README.md) - Container agent documentation
+- [agent-api/README.md](./agent-api/README.md) - Container agent API documentation
 - [proxy/README.md](./proxy/README.md) - MITM proxy documentation
 
 ### Server Design Docs
 - [server/docs/ARCHITECTURE.md](./server/docs/ARCHITECTURE.md) - Server architecture
 - [server/docs/design/](./server/docs/design/) - Server module docs (handler, service, store, sandbox, events, jobs)
 
-### Agent Design Docs
-- [agent/docs/ARCHITECTURE.md](./agent/docs/ARCHITECTURE.md) - Agent architecture
-- [agent/docs/design/](./agent/docs/design/) - Agent module docs (server, acp, store)
+### Agent API Design Docs
+- [agent-api/docs/ARCHITECTURE.md](./agent-api/docs/ARCHITECTURE.md) - Agent API architecture
+- [agent-api/docs/design/](./agent-api/docs/design/) - Agent API module docs (server, acp, store)
 
 ## Project Overview
 
@@ -35,6 +35,7 @@ Octobot is an IDE-like chat interface for managing coding sessions with AI agent
 
 ## Tech Stack
 
+- **Package Manager**: pnpm (always use `pnpm` instead of `npm` or `yarn`)
 - **Framework**: Next.js 16 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS v4 with CSS custom properties for theming

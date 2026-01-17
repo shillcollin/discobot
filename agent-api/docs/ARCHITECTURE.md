@@ -1,6 +1,6 @@
-# Agent Architecture
+# Agent API Architecture
 
-This document describes the architecture of the Octobot Agent service, a Node.js application that bridges the IDE with AI coding agents via the Agent Client Protocol (ACP).
+This document describes the architecture of the Octobot Agent API service, a Bun application that bridges the IDE with AI coding agents via the Agent Client Protocol (ACP).
 
 ## Overview
 
@@ -46,6 +46,7 @@ The agent service runs inside a Docker container and provides:
 - [Server Module](./design/server.md) - HTTP API implementation
 - [ACP Module](./design/acp.md) - Agent Client Protocol client
 - [Store Module](./design/store.md) - Session and message storage
+- [File System Layout](./design/filesystem.md) - Container paths and mount points
 
 ## Data Flow
 
@@ -145,19 +146,32 @@ The agent service runs inside a Docker container and provides:
 
 ## Docker Build
 
-Multi-stage build:
+Multi-stage build producing multiple binaries:
+
+| Binary | Description | Linking |
+|--------|-------------|---------|
+| `obot-agent-api` | Agent API server (glibc) | Dynamic (glibc) |
+| `obot-agent-api.musl` | Agent API server (musl) | Dynamic (musl) |
+| `agentfs` | Filesystem tool | Static (musl) |
+| `proxy` | HTTP/SOCKS5 proxy | Static (CGO_ENABLED=0) |
+
+**Note**: All binaries except `obot-agent-api` are fully statically linked. The agent API binary is built with Bun's `--compile` flag, which produces a self-contained executable that still requires libc (either glibc or musl depending on the build environment).
 
 ```dockerfile
-# Stage 1: Build agentfs (Rust)
-FROM rust:1.83-slim AS agentfs-builder
-# Compiles agentfs file system tool
+# Stage 1: Build agentfs (Rust/musl - static)
+FROM rust:alpine AS agentfs-builder
 
-# Stage 2: Node.js Runtime
-FROM node:25-slim
-# - Installs claude-code-acp
-# - Copies agentfs binary
-# - Builds TypeScript
-# - Runs as non-root user
+# Stage 2: Build proxy (Go - static)
+FROM golang:1.25 AS proxy-builder
+
+# Stage 3: Build obot-agent-api (Bun/glibc - dynamic)
+FROM oven/bun:1 AS bun-builder
+
+# Stage 3b: Build obot-agent-api.musl (Bun/musl - dynamic)
+FROM oven/bun:1-alpine AS bun-builder-musl
+
+# Stage 4: Ubuntu runtime
+FROM ubuntu:24.04 AS runtime
 ```
 
 ## Environment Configuration

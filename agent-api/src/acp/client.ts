@@ -9,8 +9,9 @@ import {
 	type RequestPermissionRequest,
 	type RequestPermissionResponse,
 	type SessionNotification,
+	type SessionUpdate,
 } from "@agentclientprotocol/sdk";
-import type { UIMessage } from "ai";
+import type { DynamicToolUIPart, UIMessage } from "ai";
 import {
 	addMessage,
 	clearMessages,
@@ -18,7 +19,78 @@ import {
 	type SessionData,
 	saveSession,
 } from "../store/session.js";
-import { createUIMessage, sessionUpdateToUIPart } from "./translate.js";
+import { createUIMessage } from "./translate.js";
+
+/** Type alias for UIMessage parts (extracted from UIMessage to avoid generic params) */
+type MessagePart = UIMessage["parts"][number];
+
+/**
+ * Convert ACP SessionUpdate to UIMessagePart for session replay.
+ * Used when reconstructing UIMessages from stored session history.
+ */
+function sessionUpdateToPart(update: SessionUpdate): MessagePart | null {
+	switch (update.sessionUpdate) {
+		case "user_message_chunk":
+		case "agent_message_chunk":
+			if (update.content.type === "text") {
+				return { type: "text", text: update.content.text };
+			}
+			break;
+
+		case "agent_thought_chunk":
+			if (update.content.type === "text") {
+				return { type: "reasoning", text: update.content.text };
+			}
+			break;
+
+		case "tool_call":
+		case "tool_call_update": {
+			const status = update.status;
+			let state: DynamicToolUIPart["state"] = "input-streaming";
+			if (status === "completed") state = "output-available";
+			else if (status === "failed") state = "output-error";
+			else if (status === "in_progress") state = "input-available";
+
+			if (state === "output-error") {
+				return {
+					type: "dynamic-tool",
+					toolCallId: update.toolCallId,
+					toolName: update.title || "unknown",
+					state: "output-error",
+					input: update.rawInput || {},
+					errorText: String(update.rawOutput || "Tool call failed"),
+				};
+			}
+			if (state === "output-available") {
+				return {
+					type: "dynamic-tool",
+					toolCallId: update.toolCallId,
+					toolName: update.title || "unknown",
+					state: "output-available",
+					input: update.rawInput || {},
+					output: update.rawOutput,
+				};
+			}
+			if (state === "input-available") {
+				return {
+					type: "dynamic-tool",
+					toolCallId: update.toolCallId,
+					toolName: update.title || "unknown",
+					state: "input-available",
+					input: update.rawInput || {},
+				};
+			}
+			return {
+				type: "dynamic-tool",
+				toolCallId: update.toolCallId,
+				toolName: update.title || "unknown",
+				state: "input-streaming",
+				input: update.rawInput,
+			};
+		}
+	}
+	return null;
+}
 
 export interface ACPClientOptions {
 	command: string;
@@ -170,7 +242,7 @@ export class ACPClient {
 								}
 								currentMessage = createUIMessage("user");
 							}
-							const part = sessionUpdateToUIPart(update);
+							const part = sessionUpdateToPart(update);
 							if (part) {
 								currentMessage.parts.push(part);
 							}
@@ -188,7 +260,7 @@ export class ACPClient {
 								}
 								currentMessage = createUIMessage("assistant");
 							}
-							const part = sessionUpdateToUIPart(update);
+							const part = sessionUpdateToPart(update);
 							if (part) {
 								currentMessage.parts.push(part);
 							}
@@ -294,7 +366,9 @@ export class ACPClient {
 			await this.connect();
 			console.log("Agent command restarted with updated environment");
 		} else {
-			console.log("Environment updated, will apply on next connect (agent not connected)");
+			console.log(
+				"Environment updated, will apply on next connect (agent not connected)",
+			);
 		}
 	}
 

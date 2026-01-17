@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { SessionUpdate } from "@agentclientprotocol/sdk";
-import type { DynamicToolUIPart, UIMessage, UIMessageChunk } from "ai";
+import type {
+	SessionUpdate,
+	ToolCall,
+	ToolCallUpdate,
+} from "@agentclientprotocol/sdk";
+import type { UIMessage, UIMessageChunk } from "ai";
 import { readUIMessageStream } from "ai";
-import { sessionUpdateToUIPart } from "../acp/translate.js";
 import {
 	createBlockIds,
 	createErrorChunk,
@@ -12,9 +15,9 @@ import {
 	createStartChunk,
 	createStreamState,
 	createTextChunks,
-	createToolChunks,
-	partToChunks,
-	type StreamablePart,
+	createToolCallChunks,
+	createToolCallUpdateChunks,
+	sessionUpdateToChunks,
 } from "./stream.js";
 
 /**
@@ -61,10 +64,7 @@ function processSessionUpdates(
 
 	// Process each session update
 	for (const update of sessionUpdates) {
-		const part = sessionUpdateToUIPart(update);
-		if (part) {
-			chunks.push(...partToChunks(part as StreamablePart, state, ids));
-		}
+		chunks.push(...sessionUpdateToChunks(update, state, ids));
 	}
 
 	// Finish chunks
@@ -177,14 +177,13 @@ describe("stream.ts", () => {
 			assert.equal(state.currentTextBlockId, "text-msg-1-1");
 
 			// Tool interrupts (closes text block)
-			const toolPart: DynamicToolUIPart = {
-				type: "dynamic-tool",
+			const toolCall: ToolCall = {
 				toolCallId: "tc-1",
-				toolName: "test",
-				state: "input-available",
-				input: {},
+				title: "test",
+				status: "in_progress",
+				rawInput: {},
 			};
-			createToolChunks(toolPart, state);
+			createToolCallChunks(toolCall, state);
 			assert.equal(state.currentTextBlockId, null); // Text block closed
 
 			// Second text block - should get NEW unique ID
@@ -217,15 +216,14 @@ describe("stream.ts", () => {
 
 				// Simulate tool closing the text block (except on last iteration)
 				if (i < 2) {
-					const toolPart: DynamicToolUIPart = {
-						type: "dynamic-tool",
+					const toolCall: ToolCall = {
 						toolCallId: `tc-${i}`,
-						toolName: "test",
-						state: "output-available",
-						input: {},
-						output: "done",
+						title: "test",
+						status: "completed",
+						rawInput: {},
+						rawOutput: "done",
 					};
-					createToolChunks(toolPart, state);
+					createToolCallChunks(toolCall, state);
 				}
 			}
 
@@ -327,7 +325,7 @@ describe("stream.ts", () => {
 		});
 	});
 
-	describe("createToolChunks", () => {
+	describe("createToolCallChunks", () => {
 		it("closes open text block before tool and emits tool-input-start", () => {
 			const state = createStreamState();
 			const ids = createBlockIds("msg-1");
@@ -335,15 +333,13 @@ describe("stream.ts", () => {
 			// Start text
 			createTextChunks("Let me check", state, ids);
 
-			const toolPart: DynamicToolUIPart = {
-				type: "dynamic-tool",
+			const toolCall: ToolCall = {
 				toolCallId: "tc-1",
-				toolName: "read_file",
-				state: "input-streaming",
-				input: undefined,
+				title: "read_file",
+				status: "pending",
 			};
 
-			const chunks = createToolChunks(toolPart, state);
+			const chunks = createToolCallChunks(toolCall, state);
 
 			// Should close text, then emit tool-input-start
 			assert.equal(chunks.length, 2);
@@ -352,6 +348,8 @@ describe("stream.ts", () => {
 				type: "tool-input-start",
 				toolCallId: "tc-1",
 				toolName: "read_file",
+				title: "read_file",
+				providerMetadata: undefined,
 				dynamic: true,
 			});
 			assert.equal(state.currentTextBlockId, null);
@@ -359,81 +357,78 @@ describe("stream.ts", () => {
 
 		it("emits tool-input-start on first encounter (no prior blocks)", () => {
 			const state = createStreamState();
-			const toolPart: DynamicToolUIPart = {
-				type: "dynamic-tool",
+			const toolCall: ToolCall = {
 				toolCallId: "tc-1",
-				toolName: "read_file",
-				state: "input-streaming",
-				input: undefined,
+				title: "read_file",
+				status: "pending",
 			};
 
-			const chunks = createToolChunks(toolPart, state);
+			const chunks = createToolCallChunks(toolCall, state);
 
 			assert.equal(chunks.length, 1);
 			assert.deepEqual(chunks[0], {
 				type: "tool-input-start",
 				toolCallId: "tc-1",
 				toolName: "read_file",
+				title: "read_file",
+				providerMetadata: undefined,
 				dynamic: true,
 			});
 		});
 
-		it("emits tool-input-available on state transition", () => {
+		it("emits tool-input-available on in_progress status", () => {
 			const state = createStreamState();
 
-			// First: input-streaming
-			const toolPart1: DynamicToolUIPart = {
-				type: "dynamic-tool",
+			// First: pending (input-streaming)
+			const toolCall1: ToolCall = {
 				toolCallId: "tc-1",
-				toolName: "read_file",
-				state: "input-streaming",
-				input: undefined,
+				title: "read_file",
+				status: "pending",
 			};
-			createToolChunks(toolPart1, state);
+			createToolCallChunks(toolCall1, state);
 
-			// Second: input-available
-			const toolPart2: DynamicToolUIPart = {
-				type: "dynamic-tool",
+			// Second: in_progress (input-available)
+			const toolCall2: ToolCall = {
 				toolCallId: "tc-1",
-				toolName: "read_file",
-				state: "input-available",
-				input: { path: "/test.txt" },
+				title: "read_file",
+				status: "in_progress",
+				rawInput: { path: "/test.txt" },
 			};
-			const chunks = createToolChunks(toolPart2, state);
+			const chunks = createToolCallChunks(toolCall2, state);
 
 			assert.equal(chunks.length, 1);
 			assert.deepEqual(chunks[0], {
 				type: "tool-input-available",
 				toolCallId: "tc-1",
 				toolName: "read_file",
+				title: "read_file",
 				input: { path: "/test.txt" },
+				providerMetadata: undefined,
 				dynamic: true,
 			});
 		});
 
-		it("emits tool-output-available on completion", () => {
+		it("emits tool-output-available on completed status", () => {
 			const state = createStreamState();
 
-			// Setup: input-available
-			const toolPart1: DynamicToolUIPart = {
-				type: "dynamic-tool",
+			// Setup: in_progress
+			const toolCall1: ToolCall = {
 				toolCallId: "tc-1",
-				toolName: "read_file",
-				state: "input-available",
-				input: { path: "/test.txt" },
+				title: "read_file",
+				status: "in_progress",
+				rawInput: { path: "/test.txt" },
 			};
-			createToolChunks(toolPart1, state);
+			createToolCallChunks(toolCall1, state);
 
-			// Complete: output-available
-			const toolPart2: DynamicToolUIPart = {
-				type: "dynamic-tool",
+			// Complete: completed
+			const toolCall2: ToolCall = {
 				toolCallId: "tc-1",
-				toolName: "read_file",
-				state: "output-available",
-				input: { path: "/test.txt" },
-				output: "file contents",
+				title: "read_file",
+				status: "completed",
+				rawInput: { path: "/test.txt" },
+				rawOutput: "file contents",
 			};
-			const chunks = createToolChunks(toolPart2, state);
+			const chunks = createToolCallChunks(toolCall2, state);
 
 			assert.equal(chunks.length, 1);
 			assert.deepEqual(chunks[0], {
@@ -444,29 +439,27 @@ describe("stream.ts", () => {
 			});
 		});
 
-		it("emits tool-output-error on failure", () => {
+		it("emits tool-output-error on failed status", () => {
 			const state = createStreamState();
 
-			// Setup: input-available
-			const toolPart1: DynamicToolUIPart = {
-				type: "dynamic-tool",
+			// Setup: in_progress
+			const toolCall1: ToolCall = {
 				toolCallId: "tc-1",
-				toolName: "read_file",
-				state: "input-available",
-				input: { path: "/test.txt" },
+				title: "read_file",
+				status: "in_progress",
+				rawInput: { path: "/test.txt" },
 			};
-			createToolChunks(toolPart1, state);
+			createToolCallChunks(toolCall1, state);
 
-			// Fail: output-error
-			const toolPart2: DynamicToolUIPart = {
-				type: "dynamic-tool",
+			// Fail: failed
+			const toolCall2: ToolCall = {
 				toolCallId: "tc-1",
-				toolName: "read_file",
-				state: "output-error",
-				input: { path: "/test.txt" },
-				errorText: "File not found",
+				title: "read_file",
+				status: "failed",
+				rawInput: { path: "/test.txt" },
+				rawOutput: "File not found",
 			};
-			const chunks = createToolChunks(toolPart2, state);
+			const chunks = createToolCallChunks(toolCall2, state);
 
 			assert.equal(chunks.length, 1);
 			assert.deepEqual(chunks[0], {
@@ -480,21 +473,252 @@ describe("stream.ts", () => {
 		it("does not emit duplicate events for same state", () => {
 			const state = createStreamState();
 
-			const toolPart: DynamicToolUIPart = {
-				type: "dynamic-tool",
+			const toolCall: ToolCall = {
 				toolCallId: "tc-1",
-				toolName: "read_file",
-				state: "input-available",
-				input: { path: "/test.txt" },
+				title: "read_file",
+				status: "in_progress",
+				rawInput: { path: "/test.txt" },
 			};
 
 			// First call: should emit start + input-available
-			const chunks1 = createToolChunks(toolPart, state);
+			const chunks1 = createToolCallChunks(toolCall, state);
 			assert.equal(chunks1.length, 2);
 
 			// Second call with same state: should emit nothing
-			const chunks2 = createToolChunks(toolPart, state);
+			const chunks2 = createToolCallChunks(toolCall, state);
 			assert.equal(chunks2.length, 0);
+		});
+	});
+
+	describe("createToolCallUpdateChunks", () => {
+		it("emits tool-input-start on first encounter", () => {
+			const state = createStreamState();
+			const update: ToolCallUpdate = {
+				toolCallId: "tc-1",
+				title: "read_file",
+				status: "pending",
+			};
+
+			const chunks = createToolCallUpdateChunks(update, state);
+
+			assert.equal(chunks.length, 1);
+			assert.deepEqual(chunks[0], {
+				type: "tool-input-start",
+				toolCallId: "tc-1",
+				toolName: "read_file",
+				title: "read_file",
+				providerMetadata: undefined,
+				dynamic: true,
+			});
+		});
+
+		it("uses 'unknown' for missing title", () => {
+			const state = createStreamState();
+			const update: ToolCallUpdate = {
+				toolCallId: "tc-1",
+				status: "pending",
+			};
+
+			const chunks = createToolCallUpdateChunks(update, state);
+
+			assert.equal(chunks.length, 1);
+			const startChunk = chunks[0];
+			assert.equal(startChunk.type, "tool-input-start");
+			if (startChunk.type === "tool-input-start") {
+				assert.equal(startChunk.toolName, "unknown");
+			}
+		});
+
+		it("emits tool-output-available on completed status", () => {
+			const state = createStreamState();
+
+			// Setup: in_progress
+			const update1: ToolCallUpdate = {
+				toolCallId: "tc-1",
+				title: "read_file",
+				status: "in_progress",
+				rawInput: { path: "/test.txt" },
+			};
+			createToolCallUpdateChunks(update1, state);
+
+			// Complete
+			const update2: ToolCallUpdate = {
+				toolCallId: "tc-1",
+				title: "read_file",
+				status: "completed",
+				rawInput: { path: "/test.txt" },
+				rawOutput: "file contents",
+			};
+			const chunks = createToolCallUpdateChunks(update2, state);
+
+			assert.equal(chunks.length, 1);
+			assert.deepEqual(chunks[0], {
+				type: "tool-output-available",
+				toolCallId: "tc-1",
+				output: "file contents",
+				dynamic: true,
+			});
+		});
+
+		it("emits tool-output-error on failed status", () => {
+			const state = createStreamState();
+
+			// Setup: in_progress
+			const update1: ToolCallUpdate = {
+				toolCallId: "tc-1",
+				title: "read_file",
+				status: "in_progress",
+				rawInput: { path: "/test.txt" },
+			};
+			createToolCallUpdateChunks(update1, state);
+
+			// Fail
+			const update2: ToolCallUpdate = {
+				toolCallId: "tc-1",
+				title: "read_file",
+				status: "failed",
+				rawInput: { path: "/test.txt" },
+				rawOutput: "File not found",
+			};
+			const chunks = createToolCallUpdateChunks(update2, state);
+
+			assert.equal(chunks.length, 1);
+			assert.deepEqual(chunks[0], {
+				type: "tool-output-error",
+				toolCallId: "tc-1",
+				errorText: "File not found",
+				dynamic: true,
+			});
+		});
+	});
+
+	describe("Claude Code _meta extraction", () => {
+		it("extracts toolName from _meta.claudeCode.toolName", () => {
+			const state = createStreamState();
+			const toolCall: ToolCall = {
+				toolCallId: "tc-1",
+				title: "`ls -la /tmp`", // Display title
+				status: "pending",
+				_meta: {
+					claudeCode: {
+						toolName: "Bash", // Actual tool name
+					},
+				},
+			};
+
+			const chunks = createToolCallChunks(toolCall, state);
+
+			assert.equal(chunks.length, 1);
+			const chunk = chunks[0];
+			assert.equal(chunk.type, "tool-input-start");
+			if (chunk.type === "tool-input-start") {
+				assert.equal(chunk.toolName, "Bash"); // Should use _meta.claudeCode.toolName
+				assert.equal(chunk.title, "`ls -la /tmp`"); // Should preserve display title
+				// NOTE: providerMetadata is not currently supported by AI SDK's Zod schema
+			}
+		});
+
+		it("extracts output from _meta.claudeCode.toolResponse", () => {
+			const state = createStreamState();
+
+			// First: setup tool in progress
+			const toolCall1: ToolCall = {
+				toolCallId: "tc-1",
+				title: "Terminal",
+				status: "in_progress",
+				rawInput: { command: "ls" },
+				_meta: { claudeCode: { toolName: "Bash" } },
+			};
+			createToolCallChunks(toolCall1, state);
+
+			// Complete with toolResponse in _meta
+			const toolCall2: ToolCall = {
+				toolCallId: "tc-1",
+				title: "Terminal",
+				status: "completed",
+				rawInput: { command: "ls" },
+				// rawOutput is NOT set - output should come from _meta
+				_meta: {
+					claudeCode: {
+						toolName: "Bash",
+						toolResponse: {
+							stdout: "file1.txt\nfile2.txt",
+							stderr: "",
+							interrupted: false,
+						},
+					},
+				},
+			};
+			const chunks = createToolCallChunks(toolCall2, state);
+
+			assert.equal(chunks.length, 1);
+			const chunk = chunks[0];
+			assert.equal(chunk.type, "tool-output-available");
+			if (chunk.type === "tool-output-available") {
+				assert.deepEqual(chunk.output, {
+					stdout: "file1.txt\nfile2.txt",
+					stderr: "",
+					interrupted: false,
+				});
+			}
+		});
+
+		it("prefers rawOutput over _meta.claudeCode.toolResponse", () => {
+			const state = createStreamState();
+
+			// Setup tool
+			const toolCall1: ToolCall = {
+				toolCallId: "tc-1",
+				title: "Read",
+				status: "in_progress",
+				rawInput: { path: "/test.txt" },
+			};
+			createToolCallChunks(toolCall1, state);
+
+			// Complete with both rawOutput and _meta.toolResponse
+			const toolCall2: ToolCall = {
+				toolCallId: "tc-1",
+				title: "Read",
+				status: "completed",
+				rawInput: { path: "/test.txt" },
+				rawOutput: "standard output", // Should take precedence
+				_meta: {
+					claudeCode: {
+						toolName: "Read",
+						toolResponse: {
+							stdout: "should not use this",
+							stderr: "",
+						},
+					},
+				},
+			};
+			const chunks = createToolCallChunks(toolCall2, state);
+
+			assert.equal(chunks.length, 1);
+			const chunk = chunks[0];
+			assert.equal(chunk.type, "tool-output-available");
+			if (chunk.type === "tool-output-available") {
+				assert.equal(chunk.output, "standard output");
+			}
+		});
+
+		it("falls back to title when _meta.claudeCode.toolName not present", () => {
+			const state = createStreamState();
+			const toolCall: ToolCall = {
+				toolCallId: "tc-1",
+				title: "read_file",
+				status: "pending",
+				// No _meta
+			};
+
+			const chunks = createToolCallChunks(toolCall, state);
+
+			assert.equal(chunks.length, 1);
+			const chunk = chunks[0];
+			assert.equal(chunk.type, "tool-input-start");
+			if (chunk.type === "tool-input-start") {
+				assert.equal(chunk.toolName, "read_file"); // Falls back to title
+			}
 		});
 	});
 
@@ -549,6 +773,143 @@ describe("stream.ts", () => {
 				type: "error",
 				errorText: "Something went wrong",
 			});
+		});
+	});
+
+	describe("sessionUpdateToChunks", () => {
+		it("handles agent_message_chunk with text", () => {
+			const state = createStreamState();
+			const ids = createBlockIds("msg-1");
+			const update: SessionUpdate = {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "Hello" },
+			};
+
+			const chunks = sessionUpdateToChunks(update, state, ids);
+
+			assert.equal(chunks.length, 2);
+			assert.deepEqual(chunks[0], { type: "text-start", id: "text-msg-1-1" });
+			assert.deepEqual(chunks[1], {
+				type: "text-delta",
+				id: "text-msg-1-1",
+				delta: "Hello",
+			});
+		});
+
+		it("handles agent_thought_chunk with text", () => {
+			const state = createStreamState();
+			const ids = createBlockIds("msg-1");
+			const update: SessionUpdate = {
+				sessionUpdate: "agent_thought_chunk",
+				content: { type: "text", text: "Thinking..." },
+			};
+
+			const chunks = sessionUpdateToChunks(update, state, ids);
+
+			assert.equal(chunks.length, 2);
+			assert.deepEqual(chunks[0], {
+				type: "reasoning-start",
+				id: "reasoning-msg-1-1",
+			});
+			assert.deepEqual(chunks[1], {
+				type: "reasoning-delta",
+				id: "reasoning-msg-1-1",
+				delta: "Thinking...",
+			});
+		});
+
+		it("handles tool_call", () => {
+			const state = createStreamState();
+			const ids = createBlockIds("msg-1");
+			const update: SessionUpdate = {
+				sessionUpdate: "tool_call",
+				toolCallId: "tc-1",
+				title: "Read",
+				status: "in_progress",
+				rawInput: { path: "/test.txt" },
+			};
+
+			const chunks = sessionUpdateToChunks(update, state, ids);
+
+			assert.equal(chunks.length, 2);
+			assert.deepEqual(chunks[0], {
+				type: "tool-input-start",
+				toolCallId: "tc-1",
+				toolName: "Read",
+				title: "Read",
+				providerMetadata: undefined,
+				dynamic: true,
+			});
+			assert.deepEqual(chunks[1], {
+				type: "tool-input-available",
+				toolCallId: "tc-1",
+				toolName: "Read",
+				title: "Read",
+				input: { path: "/test.txt" },
+				providerMetadata: undefined,
+				dynamic: true,
+			});
+		});
+
+		it("handles tool_call_update", () => {
+			const state = createStreamState();
+			const ids = createBlockIds("msg-1");
+
+			// First: tool_call
+			const toolCall: SessionUpdate = {
+				sessionUpdate: "tool_call",
+				toolCallId: "tc-1",
+				title: "Read",
+				status: "in_progress",
+				rawInput: { path: "/test.txt" },
+			};
+			sessionUpdateToChunks(toolCall, state, ids);
+
+			// Then: tool_call_update
+			const update: SessionUpdate = {
+				sessionUpdate: "tool_call_update",
+				toolCallId: "tc-1",
+				title: "Read",
+				status: "completed",
+				rawInput: { path: "/test.txt" },
+				rawOutput: "file contents",
+			};
+
+			const chunks = sessionUpdateToChunks(update, state, ids);
+
+			assert.equal(chunks.length, 1);
+			assert.deepEqual(chunks[0], {
+				type: "tool-output-available",
+				toolCallId: "tc-1",
+				output: "file contents",
+				dynamic: true,
+			});
+		});
+
+		it("returns empty array for non-text content", () => {
+			const state = createStreamState();
+			const ids = createBlockIds("msg-1");
+			const update: SessionUpdate = {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "image", data: "base64data", mimeType: "image/png" },
+			};
+
+			const chunks = sessionUpdateToChunks(update, state, ids);
+
+			assert.equal(chunks.length, 0);
+		});
+
+		it("returns empty array for unhandled update types", () => {
+			const state = createStreamState();
+			const ids = createBlockIds("msg-1");
+			const update: SessionUpdate = {
+				sessionUpdate: "plan",
+				entries: [],
+			};
+
+			const chunks = sessionUpdateToChunks(update, state, ids);
+
+			assert.equal(chunks.length, 0);
 		});
 	});
 });
@@ -654,13 +1015,17 @@ describe("stream fixtures", () => {
 					type: "tool-input-start",
 					toolCallId: "tc-read",
 					toolName: "Read",
+					title: "Read",
+					providerMetadata: undefined,
 					dynamic: true,
 				},
 				{
 					type: "tool-input-available",
 					toolCallId: "tc-read",
 					toolName: "Read",
+					title: "Read",
 					input: { path: "/file.txt" },
+					providerMetadata: undefined,
 					dynamic: true,
 				},
 				{
@@ -706,13 +1071,17 @@ describe("stream fixtures", () => {
 					type: "tool-input-start",
 					toolCallId: "tc-fail",
 					toolName: "Write",
+					title: "Write",
+					providerMetadata: undefined,
 					dynamic: true,
 				},
 				{
 					type: "tool-input-available",
 					toolCallId: "tc-fail",
 					toolName: "Write",
+					title: "Write",
 					input: { path: "/readonly.txt" },
+					providerMetadata: undefined,
 					dynamic: true,
 				},
 				{
@@ -845,6 +1214,7 @@ describe("AI SDK integration", () => {
 				type: "tool-input-start",
 				toolCallId: "tc-1",
 				toolName: "read_file",
+				providerMetadata: undefined,
 				dynamic: true,
 			},
 			{
@@ -852,6 +1222,7 @@ describe("AI SDK integration", () => {
 				toolCallId: "tc-1",
 				toolName: "read_file",
 				input: { path: "/test.txt" },
+				providerMetadata: undefined,
 				dynamic: true,
 			},
 			{
@@ -906,6 +1277,7 @@ describe("AI SDK integration", () => {
 				type: "tool-input-start",
 				toolCallId: "tc-1",
 				toolName: "read",
+				providerMetadata: undefined,
 				dynamic: true,
 			},
 			{

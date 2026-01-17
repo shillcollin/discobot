@@ -129,22 +129,22 @@ describe("Agent Service E2E Tests", () => {
 
 				// Read the SSE stream
 				const text = await res.text();
-				const events = parseSSE(text);
+				const chunks = parseSSEChunks(text);
 
-				// Should have text-delta events and a done event
-				const textDeltas = events.filter((e) => e.event === "text-delta");
-				const doneEvents = events.filter((e) => e.event === "done");
+				// Should have text-delta events and a finish event
+				const textDeltas = chunks.filter((c) => c.type === "text-delta");
+				const finishEvents = chunks.filter((c) => c.type === "finish");
 
 				assert.ok(textDeltas.length > 0, "Should have text-delta events");
 				assert.equal(
-					doneEvents.length,
+					finishEvents.length,
 					1,
-					"Should have exactly one done event",
+					"Should have exactly one finish event",
 				);
 
 				// Verify we got some text content
 				const fullText = textDeltas
-					.map((e) => (JSON.parse(e.data) as { text: string }).text)
+					.map((c) => (c as unknown as { delta: string }).delta)
 					.join("");
 				assert.ok(fullText.length > 0, "Should have received text content");
 			},
@@ -206,25 +206,28 @@ describe("Agent Service E2E Tests", () => {
 	});
 });
 
-// Helper to parse SSE text into events
-function parseSSE(text: string): Array<{ event: string; data: string }> {
-	const events: Array<{ event: string; data: string }> = [];
+// Helper to parse SSE text into UIMessageChunks
+function parseSSEChunks(
+	text: string,
+): Array<{ type: string; [key: string]: unknown }> {
+	const chunks: Array<{ type: string; [key: string]: unknown }> = [];
 	const lines = text.split("\n");
 
-	let currentEvent = "";
-	let currentData = "";
-
 	for (const line of lines) {
-		if (line.startsWith("event:")) {
-			currentEvent = line.slice(6).trim();
-		} else if (line.startsWith("data:")) {
-			currentData = line.slice(5).trim();
-		} else if (line === "" && currentEvent) {
-			events.push({ event: currentEvent, data: currentData });
-			currentEvent = "";
-			currentData = "";
+		if (line.startsWith("data:")) {
+			const data = line.slice(5).trim();
+			if (data) {
+				try {
+					const parsed = JSON.parse(data);
+					if (parsed && typeof parsed.type === "string") {
+						chunks.push(parsed);
+					}
+				} catch {
+					// Skip non-JSON data lines
+				}
+			}
 		}
 	}
 
-	return events;
+	return chunks;
 }

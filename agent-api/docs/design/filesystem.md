@@ -1,0 +1,331 @@
+# File System Layout
+
+This document describes the file system layout inside the agent container, including paths, mount points, and directory purposes.
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `Dockerfile` | Multi-stage build defining the container layout |
+| `src/store/session.ts` | Session persistence (uses `/data` paths) |
+
+## Container Layout
+
+```
+/
+├── .data/                        # Persistent storage (survives container restarts)
+│   └── ...                       # Long-term persistent data
+│
+├── .workspace/                   # Base workspace directory (READ-ONLY)
+│   └── ...                       # Original project files
+│
+├── data/                         # General data storage (WRITABLE)
+│   ├── agent-session.json        # Session metadata (SESSION_FILE)
+│   ├── agent-messages.json       # Message history (MESSAGES_FILE)
+│   └── ...                       # Application data, caches
+│
+├── workspace/                    # Project root (WRITABLE)
+│   └── ...                       # Working copy of project files
+│
+├── home/octobot/                 # User home directory (WRITABLE)
+│   └── ...                       # User config, caches, etc.
+│
+├── tmp/                          # Temporary storage (WRITABLE)
+│   └── ...                       # Ephemeral files
+│
+├── opt/octobot/bin/
+│   ├── obot-agent-api            # Agent API server binary (Bun standalone, glibc)
+│   ├── obot-agent-api.musl       # Agent API server binary (Bun standalone, musl)
+│   ├── agentfs                   # AgentFS file system tool (Rust, static)
+│   └── proxy                     # MITM proxy (Go, static)
+│
+└── run/octobot/                  # Runtime directory (VZ only)
+    └── metadata/                 # VirtioFS mount for VM metadata
+```
+
+## Directory Purposes
+
+### `/.data` - Persistent Storage
+
+The only directory that persists across container restarts and recreation. Used for long-term data that must survive container recreation.
+
+- **Docker:** Mounted as a Docker volume
+- **VZ VM:** Mounted as a separate disk image
+
+Permissions: **Writable**
+
+### `/.workspace` - Base Workspace (Read-Only)
+
+The base workspace directory containing the original project files. This is mounted read-only to preserve the original state.
+
+- Contains the pristine copy of the project
+- Used as source for `/workspace`
+- Agent cannot modify files here
+
+Permissions: **Read-only**
+
+### `/workspace` - Project Root (Writable)
+
+The working directory where Claude Code operates. This is where the agent reads and writes project files.
+
+- Root of the active project
+- All file modifications happen here
+- Working directory for Claude Code subprocess
+
+Permissions: **Writable**
+
+### `/home/octobot` - User Home (Writable)
+
+Home directory for the non-root `octobot` user (UID 1000).
+
+Used by:
+- Claude Code ACP for user-level configuration
+- npm/node for package caching
+- Shell initialization files
+- Tool configuration (`.config/`, `.local/`)
+
+Permissions: **Writable**
+
+### `/data` - General Data Storage (Writable)
+
+Writable storage for application data. Does not persist across container recreation.
+
+| File | Env Variable | Default | Purpose |
+|------|--------------|---------|---------|
+| `agent-session.json` | `SESSION_FILE` | `/data/agent-session.json` | Session ID and metadata |
+| `agent-messages.json` | `MESSAGES_FILE` | `/data/agent-messages.json` | Message history |
+
+Session file format:
+```json
+{
+  "sessionId": "session-abc123",
+  "cwd": "/workspace",
+  "createdAt": "2024-01-15T10:30:00Z"
+}
+```
+
+Also used for:
+- Application caches
+- Downloaded dependencies
+- Generated artifacts
+
+Permissions: **Writable**
+
+### `/tmp` - Temporary Storage (Writable)
+
+Standard temporary directory for ephemeral files. Cleared on container restart.
+
+Used by:
+- Temporary build artifacts
+- Process communication files
+- Short-lived caches
+
+Permissions: **Writable**
+
+### `/opt/octobot/bin` - Octobot Binaries
+
+All Octobot executables are installed here. Added to `$PATH` at runtime.
+
+| Binary | Source | Purpose | Linking |
+|--------|--------|---------|---------|
+| `obot-agent-api` | Bun standalone | Agent HTTP server (glibc) | Dynamic (glibc) |
+| `obot-agent-api.musl` | Bun standalone | Agent HTTP server (musl) | Dynamic (musl) |
+| `agentfs` | Rust (tursodatabase/agentfs) | File system operations with sandboxing | Static |
+| `proxy` | Go (proxy module) | MITM proxy for network interception | Static |
+
+**Note:** All binaries except `obot-agent-api*` are fully statically linked. The agent API binaries are built with Bun's `--compile` flag, which produces self-contained executables that still require libc (either glibc or musl depending on build variant). Use the `.musl` variant for Alpine-based systems.
+
+Permissions: **Read-only** at runtime
+
+### `/run/octobot/metadata` - VM Metadata (VZ only)
+
+VirtioFS mount point for macOS Virtualization.framework VMs.
+
+Used to pass runtime configuration from the host to the VM without network.
+
+## Runtime Permissions Summary
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Runtime Permissions                           │
+├──────────────────────┬──────────────────────────────────────────┤
+│  WRITABLE            │  READ-ONLY                               │
+├──────────────────────┼──────────────────────────────────────────┤
+│  /workspace          │  /.workspace                             │
+│  /home/octobot       │  /opt/octobot/bin                        │
+│  /tmp                │  /usr, /bin, /lib, etc.                  │
+│  /data               │                                          │
+│  /.data              │                                          │
+└──────────────────────┴──────────────────────────────────────────┘
+```
+
+## Environment Variations
+
+### Docker Container (Default)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Docker Container                                                │
+│                                                                  │
+│  obot-agent-api      ─────────────  Main process                │
+│                                                                  │
+│  /.data              ─────────────  Docker volume (persistent)  │
+│  /.workspace         ─────────────  Read-only bind mount        │
+│  /data               ─────────────  Writable (ephemeral)        │
+│  /workspace          ─────────────  Writable project root       │
+│  /home/octobot       ─────────────  Writable user home          │
+│  /tmp                ─────────────  Writable tmpfs              │
+│                                                                  │
+│  Network: Bridge or host mode                                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### VZ Virtual Machine (macOS)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  VZ Virtual Machine                                              │
+│                                                                  │
+│  /                   ─────────────  ext4 root disk (READ-ONLY)  │
+│                                                                  │
+│  /.data              ─────────────  Mounted disk (persistent)   │
+│  /.workspace         ─────────────  VirtioFS (read-only)        │
+│  /data               ─────────────  Writable (ephemeral)        │
+│  /workspace          ─────────────  Writable project root       │
+│  /home/octobot       ─────────────  Writable (tmpfs or overlay) │
+│  /tmp                ─────────────  Writable tmpfs              │
+│  /run/octobot/meta   ─────────────  VirtioFS for metadata       │
+│                                                                  │
+│  Network: Virtio-net                                             │
+│  Console: Virtio-console                                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Note:** In VZ VMs, the root filesystem is read-only. Writable directories (`/data`, `/workspace`, `/home/octobot`, `/tmp`) use tmpfs or overlay mounts.
+
+## User and Permissions
+
+### Container User
+
+| Property | Value |
+|----------|-------|
+| Username | `octobot` |
+| UID | `1000` |
+| GID | `1000` |
+| Home | `/home/octobot` |
+| Shell | `/bin/bash` |
+
+### File Ownership
+
+| Path | Owner | Mode |
+|------|-------|------|
+| `/opt/octobot/bin/*` | `root:root` | `755` |
+| `/home/octobot` | `octobot:octobot` | `755` |
+| `/workspace` | `octobot:octobot` | varies |
+| `/data` | `octobot:octobot` | `755` |
+| `/.data` | `octobot:octobot` | `755` |
+
+### Process Execution
+
+The container runs as non-root (`USER octobot`):
+
+```dockerfile
+USER octobot
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/opt/octobot/bin/obot-agent-api"]
+```
+
+The `tini` init process handles:
+- Signal forwarding to child processes
+- Zombie process reaping
+- Clean shutdown
+
+## Runtime Paths
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SESSION_FILE` | `/data/agent-session.json` | Session persistence |
+| `MESSAGES_FILE` | `/data/agent-messages.json` | Message persistence |
+| `AGENT_CWD` | `/workspace` | Working directory for Claude Code |
+
+### Network Ports
+
+| Port | Protocol | Service |
+|------|----------|---------|
+| `3002` | HTTP | Agent API (Hono server) |
+
+### Process Spawning
+
+Claude Code is spawned with working directory set to `/workspace`:
+
+```typescript
+const child = spawn(agentCommand, agentArgs, {
+  cwd: '/workspace',
+  env: { ...process.env },
+  stdio: ['pipe', 'pipe', 'pipe']
+})
+```
+
+## Storage Lifecycle
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Storage Persistence                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  /.data              ───── PERSISTS ─────▶  Across restarts     │
+│  (session data)            (only persistent storage)             │
+│                                                                  │
+│  /.workspace         ───── READ-ONLY ────▶  Original project    │
+│  (base workspace)          (preserved)                           │
+│                                                                  │
+│  /workspace          ───── WRITABLE ─────▶  Lost on restart     │
+│  (project root)            (unless synced)                       │
+│                                                                  │
+│  /data               ───── WRITABLE ─────▶  Lost on restart     │
+│  (general data)            (ephemeral)                           │
+│                                                                  │
+│  /home/octobot       ───── WRITABLE ─────▶  Lost on restart     │
+│  (user home)               (ephemeral)                           │
+│                                                                  │
+│  /tmp                ───── WRITABLE ─────▶  Lost on restart     │
+│  (temporary)               (ephemeral)                           │
+│                                                                  │
+│  /opt/octobot/bin    ───── READ-ONLY ────▶  Image layers        │
+│  (application)             (rebuilt)                             │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Future Considerations
+
+### Workspace Synchronization
+
+The `/workspace` directory is writable but ephemeral. Strategies for preserving changes:
+- Sync modified files back to host via `/.workspace` overlay
+- Git-based change tracking with automatic commits
+- File system snapshots before container shutdown
+
+### AgentFS Integration
+
+The `agentfs` binary is available for enhanced file operations:
+- Sandboxed file access with permission controls
+- Audit logging of file operations
+- Rate limiting for file system calls
+
+### Multi-Session Support
+
+Current layout assumes single session per container. Future enhancements:
+```
+/.data/
+├── sessions/
+│   ├── {session-id-1}/
+│   │   ├── session.json
+│   │   └── messages.json
+│   └── {session-id-2}/
+│       ├── session.json
+│       └── messages.json
+└── config.json
+```
