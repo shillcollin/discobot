@@ -138,6 +138,18 @@ RUN useradd -m -s /bin/bash -u 1000 octobot 2>/dev/null \
     || (userdel -r $(getent passwd 1000 | cut -d: -f1) 2>/dev/null; useradd -m -s /bin/bash -u 1000 octobot) \
     || useradd -m -s /bin/bash octobot
 
+# Configure npm global directory in /home/octobot/.npm-global
+# This allows npm install -g to work without root for the octobot user
+# Environment is set system-wide via /etc/profile.d so both root and octobot can use it
+RUN mkdir -p /home/octobot/.npm-global/bin \
+    && chown -R octobot:octobot /home/octobot/.npm-global \
+    && printf '%s\n' \
+        '# npm global packages directory' \
+        'export NPM_CONFIG_PREFIX="/home/octobot/.npm-global"' \
+        'export PATH="/home/octobot/.npm-global/bin:$PATH"' \
+        > /etc/profile.d/npm-global.sh \
+    && chmod 644 /etc/profile.d/npm-global.sh
+
 # Create directory structure per filesystem design
 # /.data      - persistent storage (Docker volume or VZ disk)
 # /.workspace - base workspace (read-only)
@@ -155,8 +167,10 @@ COPY --from=proxy-builder /proxy /opt/octobot/bin/proxy
 COPY --from=agent-builder /obot-agent /opt/octobot/bin/obot-agent
 RUN chmod +x /opt/octobot/bin/*
 
-# Add octobot binaries to PATH
-ENV PATH="/opt/octobot/bin:${PATH}"
+# Add octobot binaries and npm global bin to PATH
+# Also set NPM_CONFIG_PREFIX for non-login shell contexts
+ENV NPM_CONFIG_PREFIX="/home/octobot/.npm-global"
+ENV PATH="/home/octobot/.npm-global/bin:/opt/octobot/bin:${PATH}"
 
 WORKDIR /workspace
 
