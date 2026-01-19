@@ -139,15 +139,18 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 					// Remove from workspaces cache (sessions are nested in workspaces)
 					mutate(
 						"workspaces",
-						(current: Workspace[] | undefined) => {
-							if (!current) return current;
-							return current.map((workspace) => ({
-								...workspace,
-								sessions: workspace.sessions.filter(
-									(session: Session) =>
-										session.id !== sessionData.sessionId,
-								),
-							}));
+						(current: { workspaces: Workspace[] } | undefined) => {
+							if (!current?.workspaces) return current;
+							return {
+								...current,
+								workspaces: current.workspaces.map((workspace) => ({
+									...workspace,
+									sessions: workspace.sessions.filter(
+										(session: Session) =>
+											session.id !== sessionData.sessionId,
+									),
+								})),
+							};
 						},
 						{ revalidate: false },
 					);
