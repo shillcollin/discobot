@@ -184,7 +184,7 @@ func main() {
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
-	r.Use(chimiddleware.Timeout(60 * time.Second))
+	// Note: No global timeout - SSE endpoints need long-lived connections
 
 	// CORS configuration
 	r.Use(cors.Handler(cors.Options{

@@ -181,7 +181,7 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
-	r.Use(chimiddleware.Timeout(60 * time.Second))
+	// Note: No global timeout - SSE endpoints need long-lived connections
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
