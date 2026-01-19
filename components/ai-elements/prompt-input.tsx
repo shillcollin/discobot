@@ -71,6 +71,8 @@ export function Input({
 		e.preventDefault();
 		if ((input.trim() || files) && status === "ready") {
 			onSubmit?.({ text: input, files: files ?? undefined }, e);
+			// Clear input and files after submission
+			setInput("");
 			setFiles(null);
 		}
 	};

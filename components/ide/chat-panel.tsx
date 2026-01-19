@@ -3,6 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { SiGithub } from "@icons-pack/react-simple-icons";
 import { DefaultChatTransport, generateId, type UIMessage } from "ai";
+import { AnimatePresence, motion } from "framer-motion";
 import {
 	AlertCircle,
 	Bot,
@@ -236,9 +237,6 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	);
 	const [isShimmering, setIsShimmering] = React.useState(false);
 
-	// Manage input state locally
-	const [input, setInput] = React.useState("");
-
 	// Fetch existing messages when a session is selected
 	// Use selectedSessionId directly (not derived selectedSession) to avoid stale cache issues
 	const { messages: existingMessages, error: messagesError } =
@@ -438,8 +436,8 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		e: React.FormEvent,
 	) => {
 		e.preventDefault();
-		const messageText = message.text || input;
-		if (!messageText.trim() || isLoading) return;
+		const messageText = message.text;
+		if (!messageText?.trim() || isLoading) return;
 
 		// Validate selections for new sessions
 		if (
@@ -452,9 +450,6 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		// Track if this is a new session so we can notify parent after success
 		const isNewSession = !selectedSessionId && pendingSessionId;
 
-		// Clear input and send message
-		setInput("");
-
 		try {
 			await sendMessage({ text: messageText });
 
@@ -465,8 +460,6 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			}
 		} catch (err) {
 			console.error("Failed to send message:", err);
-			// Restore input on error
-			setInput(messageText);
 		}
 	};
 
@@ -593,23 +586,26 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				className,
 			)}
 		>
-			{/* Welcome header - fades out when in conversation mode */}
-			<div
-				className={cn(
-					"flex flex-col items-center transition-all duration-300 ease-in-out overflow-hidden",
-					mode === "welcome"
-						? "opacity-100 max-h-[200px] py-6"
-						: "opacity-0 max-h-0 py-0",
+			{/* Welcome header - animated in/out based on mode */}
+			<AnimatePresence>
+				{mode === "welcome" && (
+					<motion.div
+						initial={{ opacity: 0, height: 0 }}
+						animate={{ opacity: 1, height: "auto" }}
+						exit={{ opacity: 0, height: 0 }}
+						transition={{ duration: 0.3, ease: "easeInOut" }}
+						className="flex flex-col items-center py-6 overflow-hidden"
+					>
+						<div className="text-center space-y-2">
+							<MessageSquare className="h-12 w-12 mx-auto text-muted-foreground/50" />
+							<h2 className="text-xl font-semibold">Start a new session</h2>
+							<p className="text-muted-foreground text-sm">
+								Describe what you want to work on and I'll help you get started.
+							</p>
+						</div>
+					</motion.div>
 				)}
-			>
-				<div className="text-center space-y-2">
-					<MessageSquare className="h-12 w-12 mx-auto text-muted-foreground/50" />
-					<h2 className="text-xl font-semibold">Start a new session</h2>
-					<p className="text-muted-foreground text-sm">
-						Describe what you want to work on and I'll help you get started.
-					</p>
-				</div>
-			</div>
+			</AnimatePresence>
 
 			{/* Session status indicator - shows during initialization */}
 			{selectedSession &&
@@ -654,143 +650,146 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				</div>
 			)}
 
-			{/* Agent/Workspace selectors - fade out in conversation mode */}
-			<div
-				className={cn(
-					"flex flex-col items-center gap-3 transition-all duration-300 ease-in-out overflow-hidden",
-					mode === "welcome"
-						? "opacity-100 max-h-[120px] py-4"
-						: "opacity-0 max-h-0 py-0",
-				)}
-			>
-				<div className="flex items-center gap-2">
-					<span className="text-sm text-muted-foreground w-20 text-right">
-						Agent:
-					</span>
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button
-								variant="outline"
-								size="sm"
-								className="gap-2 min-w-[200px] justify-between bg-transparent"
-							>
-								{selectedAgent ? (
-									<>
-										<div className="flex items-center gap-2 truncate">
-											{getAgentIcons(selectedAgent) ? (
+			{/* Agent/Workspace selectors - animated in/out based on mode */}
+			<AnimatePresence>
+				{mode === "welcome" && (
+					<motion.div
+						initial={{ opacity: 0, height: 0 }}
+						animate={{ opacity: 1, height: "auto" }}
+						exit={{ opacity: 0, height: 0 }}
+						transition={{ duration: 0.3, ease: "easeInOut" }}
+						className="flex flex-col items-center gap-3 py-4 overflow-hidden"
+					>
+						<div className="flex items-center gap-2">
+							<span className="text-sm text-muted-foreground w-20 text-right">
+								Agent:
+							</span>
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant="outline"
+										size="sm"
+										className="gap-2 min-w-[200px] justify-between bg-transparent"
+									>
+										{selectedAgent ? (
+											<>
+												<div className="flex items-center gap-2 truncate">
+													{getAgentIcons(selectedAgent) ? (
+														<IconRenderer
+															icons={getAgentIcons(selectedAgent)}
+															size={16}
+															className="shrink-0"
+														/>
+													) : (
+														<Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+													)}
+													<span className="truncate">{selectedAgent.name}</span>
+												</div>
+												<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+											</>
+										) : (
+											<>
+												<span className="text-muted-foreground">Select agent</span>
+												<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+											</>
+										)}
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="center" className="w-[250px]">
+									{agents.map((agent) => (
+										<DropdownMenuItem
+											key={agent.id}
+											onClick={() => setLocalSelectedAgentId(agent.id)}
+											className="gap-2"
+										>
+											{getAgentIcons(agent) ? (
 												<IconRenderer
-													icons={getAgentIcons(selectedAgent)}
+													icons={getAgentIcons(agent)}
 													size={16}
 													className="shrink-0"
 												/>
 											) : (
 												<Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
 											)}
-											<span className="truncate">{selectedAgent.name}</span>
-										</div>
-										<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
-									</>
-								) : (
-									<>
-										<span className="text-muted-foreground">Select agent</span>
-										<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
-									</>
-								)}
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="center" className="w-[250px]">
-							{agents.map((agent) => (
-								<DropdownMenuItem
-									key={agent.id}
-									onClick={() => setLocalSelectedAgentId(agent.id)}
-									className="gap-2"
-								>
-									{getAgentIcons(agent) ? (
-										<IconRenderer
-											icons={getAgentIcons(agent)}
-											size={16}
-											className="shrink-0"
-										/>
-									) : (
-										<Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-									)}
-									<span className="truncate flex-1">{agent.name}</span>
-								</DropdownMenuItem>
-							))}
-							{agents.length > 0 && <DropdownMenuSeparator />}
-							<DropdownMenuItem
-								onClick={() => dialogs.openAgentDialog()}
-								className="gap-2"
-							>
-								<Plus className="h-4 w-4" />
-								<span>Add Agent</span>
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-				</div>
+											<span className="truncate flex-1">{agent.name}</span>
+										</DropdownMenuItem>
+									))}
+									{agents.length > 0 && <DropdownMenuSeparator />}
+									<DropdownMenuItem
+										onClick={() => dialogs.openAgentDialog()}
+										className="gap-2"
+									>
+										<Plus className="h-4 w-4" />
+										<span>Add Agent</span>
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						</div>
 
-				<div className="flex items-center gap-2">
-					<span className="text-sm text-muted-foreground w-20 text-right">
-						Workspace:
-					</span>
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button
-								variant="outline"
-								size="sm"
-								className={cn(
-									"gap-2 min-w-[200px] justify-between bg-transparent transition-all",
-									isShimmering && "animate-pulse ring-2 ring-primary/50",
-								)}
-							>
-								{selectedWorkspace ? (
-									<>
-										<div className="flex items-center gap-2 truncate">
-											<WorkspaceIcon
-												path={selectedWorkspace.path}
-												className="h-4 w-4 shrink-0"
-											/>
+						<div className="flex items-center gap-2">
+							<span className="text-sm text-muted-foreground w-20 text-right">
+								Workspace:
+							</span>
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant="outline"
+										size="sm"
+										className={cn(
+											"gap-2 min-w-[200px] justify-between bg-transparent transition-all",
+											isShimmering && "animate-pulse ring-2 ring-primary/50",
+										)}
+									>
+										{selectedWorkspace ? (
+											<>
+												<div className="flex items-center gap-2 truncate">
+													<WorkspaceIcon
+														path={selectedWorkspace.path}
+														className="h-4 w-4 shrink-0"
+													/>
+													<span className="truncate">
+														{getWorkspaceDisplayName(selectedWorkspace.path)}
+													</span>
+												</div>
+												<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+											</>
+										) : (
+											<>
+												<span className="text-muted-foreground">
+													Select workspace
+												</span>
+												<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+											</>
+										)}
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="center" className="w-[250px]">
+									{workspaces.map((ws) => (
+										<DropdownMenuItem
+											key={ws.id}
+											onClick={() => setLocalSelectedWorkspaceId(ws.id)}
+											className="gap-2"
+										>
+											<WorkspaceIcon path={ws.path} className="h-4 w-4 shrink-0" />
 											<span className="truncate">
-												{getWorkspaceDisplayName(selectedWorkspace.path)}
+												{getWorkspaceDisplayName(ws.path)}
 											</span>
-										</div>
-										<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
-									</>
-								) : (
-									<>
-										<span className="text-muted-foreground">
-											Select workspace
-										</span>
-										<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
-									</>
-								)}
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="center" className="w-[250px]">
-							{workspaces.map((ws) => (
-								<DropdownMenuItem
-									key={ws.id}
-									onClick={() => setLocalSelectedWorkspaceId(ws.id)}
-									className="gap-2"
-								>
-									<WorkspaceIcon path={ws.path} className="h-4 w-4 shrink-0" />
-									<span className="truncate">
-										{getWorkspaceDisplayName(ws.path)}
-									</span>
-								</DropdownMenuItem>
-							))}
-							{workspaces.length > 0 && <DropdownMenuSeparator />}
-							<DropdownMenuItem
-								onClick={dialogs.openWorkspaceDialog}
-								className="gap-2"
-							>
-								<Plus className="h-4 w-4" />
-								<span>Add Workspace</span>
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-				</div>
-			</div>
+										</DropdownMenuItem>
+									))}
+									{workspaces.length > 0 && <DropdownMenuSeparator />}
+									<DropdownMenuItem
+										onClick={dialogs.openWorkspaceDialog}
+										className="gap-2"
+									>
+										<Plus className="h-4 w-4" />
+										<span>Add Workspace</span>
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						</div>
+					</motion.div>
+				)}
+			</AnimatePresence>
 
 			{/* Conversation area - expands in conversation mode */}
 			<Conversation
@@ -875,8 +874,6 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			>
 				<Input
 					onSubmit={handleSubmit}
-					value={input}
-					onChange={setInput}
 					status={status}
 					className="max-w-full"
 				>
