@@ -42,3 +42,6 @@ next-env.d.ts
 /src-tauri/resources/*.zst
 /src-tauri/resources/kernel-version
 proxy/octobot-proxy
+
+# Agent filesystem cache
+.agentfs/
