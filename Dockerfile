@@ -15,8 +15,8 @@ RUN apk add --no-cache \
 
 WORKDIR /build
 
-# Clone agentfs (using snapshot-feature branch for SIGUSR1 snapshot support)
-RUN git clone --branch snapshot-feature https://github.com/ibuildthecloud/agentfs.git
+# Clone agentfs from upstream tursodatabase
+RUN git clone https://github.com/tursodatabase/agentfs.git
 
 WORKDIR /build/agentfs/cli
 
@@ -116,10 +116,12 @@ FROM ubuntu:24.04 AS runtime
 # (apt-get changes infrequently; binary copies change with each code change)
 # git is needed for workspace cloning
 # socat is needed for vsock forwarding in VZ VMs
+# fuse3 is needed for agentfs FUSE filesystem
 # nodejs is needed for claude-code-acp
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    fuse3 \
     git \
     socat \
     && curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \
@@ -127,7 +129,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && npm install -g @zed-industries/claude-code-acp \
     && apt-get purge -y curl \
     && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
+    && rm -rf /var/lib/apt/lists/* /root/.npm \
+    # Enable user_allow_other in fuse.conf (required for --allow-root mount option)
+    && echo 'user_allow_other' >> /etc/fuse.conf
 
 # Create octobot user (handle case where UID 1000 already exists)
 RUN useradd -m -s /bin/bash -u 1000 octobot 2>/dev/null \

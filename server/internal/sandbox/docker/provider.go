@@ -166,6 +166,9 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 	// Build environment variables
 	var env []string
 
+	// Add session ID (required by obot-agent for AgentFS database naming)
+	env = append(env, fmt.Sprintf("SESSION_ID=%s", sessionID))
+
 	// Add hashed secret as OCTOBOT_SECRET env var
 	if opts.SharedSecret != "" {
 		hashedSecret := hashSecret(opts.SharedSecret)
@@ -207,6 +210,18 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 				Type:   mount.TypeVolume,
 				Source: dataVolName,
 				Target: dataVolumePath,
+			},
+		},
+		// CAP_SYS_ADMIN is required for FUSE mounts (agentfs)
+		CapAdd: []string{"SYS_ADMIN"},
+		// /dev/fuse device is required for FUSE filesystems
+		Resources: containerTypes.Resources{
+			Devices: []containerTypes.DeviceMapping{
+				{
+					PathOnHost:        "/dev/fuse",
+					PathInContainer:   "/dev/fuse",
+					CgroupPermissions: "rwm",
+				},
 			},
 		},
 	}

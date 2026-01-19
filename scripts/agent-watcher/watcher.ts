@@ -10,7 +10,10 @@ import { type FSWatcher, watch } from "node:fs";
 import { access, constants, readFile, writeFile } from "node:fs/promises";
 
 export interface WatcherConfig {
+	/** Primary agent directory (agent-api) */
 	agentDir: string;
+	/** Additional directories to watch (e.g., agent init process) */
+	additionalDirs?: string[];
 	/** Project root directory (where Dockerfile lives) */
 	projectRoot: string;
 	envFilePath: string;
@@ -157,7 +160,7 @@ export class AgentWatcher {
 	private config: WatcherConfig;
 	private runCommand: CommandRunner;
 	private logger: Logger;
-	private watcher: FSWatcher | null = null;
+	private watchers: FSWatcher[] = [];
 	private dockerfileWatcher: FSWatcher | null = null;
 	private buildInProgress = false;
 	private pendingBuild = false;
@@ -297,17 +300,23 @@ export class AgentWatcher {
 			throw new Error(`Agent directory not found: ${this.config.agentDir}`);
 		}
 
-		this.logger.log(`Watching ${this.config.agentDir} for changes`);
+		// Collect all directories to watch
+		const dirsToWatch = [this.config.agentDir];
+		if (this.config.additionalDirs) {
+			dirsToWatch.push(...this.config.additionalDirs);
+		}
+
+		for (const dir of dirsToWatch) {
+			this.logger.log(`Watching ${dir} for changes`);
+		}
 
 		// Do an initial build
 		this.logger.log("Performing initial build...");
 		await this.doBuild();
 
-		// Watch for changes in agent directory
-		this.watcher = watch(
-			this.config.agentDir,
-			{ recursive: true },
-			(eventType, filename) => {
+		// Watch for changes in all directories
+		for (const dir of dirsToWatch) {
+			const watcher = watch(dir, { recursive: true }, (eventType, filename) => {
 				if (shouldIgnorePath(filename)) {
 					return;
 				}
@@ -315,16 +324,18 @@ export class AgentWatcher {
 				this.logger.log(`Change detected: ${filename} (${eventType})`);
 				this.onFileChange?.(filename ?? "", eventType);
 				this.scheduleBuild();
-			},
-		);
+			});
 
-		this.watcher.on("error", (err) => {
-			this.logger.error(`Watcher error: ${err}`);
-		});
+			watcher.on("error", (err) => {
+				this.logger.error(`Watcher error for ${dir}: ${err}`);
+			});
 
-		this.watcher.on("close", () => {
-			this.logger.error("Watcher closed unexpectedly!");
-		});
+			watcher.on("close", () => {
+				this.logger.error(`Watcher for ${dir} closed unexpectedly!`);
+			});
+
+			this.watchers.push(watcher);
+		}
 
 		// Watch for changes to Dockerfile at project root
 		// Note: We watch the directory instead of the file directly because
@@ -372,10 +383,10 @@ export class AgentWatcher {
 			clearTimeout(this.debounceTimer);
 			this.debounceTimer = null;
 		}
-		if (this.watcher) {
-			this.watcher.close();
-			this.watcher = null;
+		for (const watcher of this.watchers) {
+			watcher.close();
 		}
+		this.watchers = [];
 		if (this.dockerfileWatcher) {
 			this.dockerfileWatcher.close();
 			this.dockerfileWatcher = null;
