@@ -66,6 +66,36 @@ defineGlobal(
 	},
 );
 
+// Mock EventSource for SSE
+defineGlobal(
+	"EventSource",
+	class EventSource {
+		static CONNECTING = 0;
+		static OPEN = 1;
+		static CLOSED = 2;
+
+		readyState = 0;
+		onopen = null;
+		onmessage = null;
+		onerror = null;
+
+		constructor(url) {
+			this.url = url;
+			// Simulate connection opening
+			setTimeout(() => {
+				this.readyState = 1;
+				if (this.onopen) this.onopen({ type: 'open' });
+			}, 0);
+		}
+
+		addEventListener() {}
+		removeEventListener() {}
+		close() {
+			this.readyState = 2;
+		}
+	},
+);
+
 // Mock matchMedia
 defineGlobal("matchMedia", (query) => ({
 	matches: false,

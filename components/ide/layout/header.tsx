@@ -1,12 +1,9 @@
 "use client";
 
-import { SiGithub } from "@icons-pack/react-simple-icons";
 import {
 	Bot,
 	Check,
 	ChevronDown,
-	GitBranch,
-	HardDrive,
 	Key,
 	MessageSquare,
 	PanelLeft,
@@ -17,6 +14,10 @@ import * as React from "react";
 import { CredentialsDialog } from "@/components/ide/credentials-dialog";
 import { IconRenderer } from "@/components/ide/icon-renderer";
 import { OctobotLogo } from "@/components/ide/octobot-logo";
+import {
+	getWorkspaceDisplayPath,
+	WorkspaceIcon,
+} from "@/components/ide/workspace-path";
 import { ThemeToggle } from "@/components/ide/theme-toggle";
 import { isTauriEnv, WindowControls } from "@/components/ide/window-controls";
 import { Button } from "@/components/ui/button";
@@ -29,50 +30,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Agent, Workspace } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
-import { cn } from "@/lib/utils";
-
-function getWorkspaceType(path: string): "github" | "git" | "local" {
-	if (path.includes("github.com") || path.startsWith("git@github.com")) {
-		return "github";
-	}
-	if (
-		path.startsWith("git@") ||
-		path.startsWith("git://") ||
-		(path.startsWith("https://") && path.includes(".git"))
-	) {
-		return "git";
-	}
-	return "local";
-}
-
-function getWorkspaceDisplayName(path: string): string {
-	const type = getWorkspaceType(path);
-	if (type === "github") {
-		const match = path.match(/github\.com[:/](.+?)(\.git)?$/);
-		if (match) return match[1].replace(/\.git$/, "");
-		return path;
-	}
-	if (type === "git") {
-		return path
-			.replace(/^(git@|git:\/\/|https?:\/\/)/, "")
-			.replace(/\.git$/, "");
-	}
-	return path;
-}
-
-function WorkspaceIcon({
-	path,
-	className,
-}: {
-	path: string;
-	className?: string;
-}) {
-	const type = getWorkspaceType(path);
-	if (type === "github") return <SiGithub className={className} />;
-	if (type === "git")
-		return <GitBranch className={cn("text-orange-500", className)} />;
-	return <HardDrive className={cn("text-blue-500", className)} />;
-}
 
 interface HeaderProps {
 	leftSidebarOpen: boolean;
@@ -185,8 +142,14 @@ export function Header({
 											path={sessionWorkspace.path}
 											className="h-4 w-4 shrink-0"
 										/>
-										<span className="truncate max-w-[150px]">
-											{getWorkspaceDisplayName(sessionWorkspace.path)}
+										<span
+											className="truncate max-w-[150px]"
+											title={sessionWorkspace.path}
+										>
+											{getWorkspaceDisplayPath(
+												sessionWorkspace.path,
+												sessionWorkspace.sourceType,
+											)}
 										</span>
 										<ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
 									</button>
@@ -207,8 +170,8 @@ export function Header({
 													path={ws.path}
 													className="h-4 w-4 shrink-0"
 												/>
-												<span className="truncate flex-1">
-													{getWorkspaceDisplayName(ws.path)}
+												<span className="truncate flex-1" title={ws.path}>
+													{getWorkspaceDisplayPath(ws.path, ws.sourceType)}
 												</span>
 												<span className="text-xs text-muted-foreground">
 													{nonClosedSessions.length}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { SiGithub } from "@icons-pack/react-simple-icons";
 import { DefaultChatTransport, generateId, type UIMessage } from "ai";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -10,8 +9,6 @@ import {
 	CheckCircle,
 	ChevronDown,
 	Copy,
-	GitBranch,
-	HardDrive,
 	Loader2,
 	MessageSquare,
 	Play,
@@ -34,6 +31,7 @@ import {
 	MessageResponse,
 	MessageRoleProvider,
 } from "@/components/ai-elements/message";
+import { ToolCall, type ToolCallPart } from "@/components/ai-elements/tool-call";
 import {
 	Input,
 	PromptInputAttachment,
@@ -44,6 +42,10 @@ import {
 	PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import { IconRenderer } from "@/components/ide/icon-renderer";
+import {
+	getWorkspaceDisplayPath,
+	WorkspaceIcon,
+} from "@/components/ide/workspace-path";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -59,49 +61,6 @@ import { useSessionContext } from "@/lib/contexts/session-context";
 import { useMessages } from "@/lib/hooks/use-messages";
 import { useSession } from "@/lib/hooks/use-sessions";
 import { cn } from "@/lib/utils";
-
-function getWorkspaceType(path: string): "github" | "git" | "local" {
-	if (path.includes("github.com") || path.startsWith("git@github.com")) {
-		return "github";
-	}
-	if (
-		path.startsWith("git@") ||
-		path.startsWith("git://") ||
-		(path.startsWith("https://") && path.includes(".git"))
-	) {
-		return "git";
-	}
-	return "local";
-}
-
-function getWorkspaceDisplayName(path: string): string {
-	const type = getWorkspaceType(path);
-	if (type === "github") {
-		const match = path.match(/github\.com[:/](.+?)(\.git)?$/);
-		if (match) return match[1].replace(/\.git$/, "");
-		return path;
-	}
-	if (type === "git") {
-		return path
-			.replace(/^(git@|git:\/\/|https?:\/\/)/, "")
-			.replace(/\.git$/, "");
-	}
-	return path;
-}
-
-function WorkspaceIcon({
-	path,
-	className,
-}: {
-	path: string;
-	className?: string;
-}) {
-	const type = getWorkspaceType(path);
-	if (type === "github") return <SiGithub className={className} />;
-	if (type === "git")
-		return <GitBranch className={cn("text-orange-500", className)} />;
-	return <HardDrive className={cn("text-blue-500", className)} />;
-}
 
 type ChatMode = "welcome" | "conversation";
 
@@ -405,13 +364,18 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		}
 	}, [agents, localSelectedAgentId]);
 
+	// When workspaceSelectTrigger fires, update local workspace selection and show shimmer
 	React.useEffect(() => {
 		if (workspaceSelectTrigger && workspaceSelectTrigger > 0) {
+			// Update local workspace to the preselected one
+			if (preselectedWorkspaceId) {
+				setLocalSelectedWorkspaceId(preselectedWorkspaceId);
+			}
 			setIsShimmering(true);
 			const timeout = setTimeout(() => setIsShimmering(false), 600);
 			return () => clearTimeout(timeout);
 		}
-	}, [workspaceSelectTrigger]);
+	}, [workspaceSelectTrigger, preselectedWorkspaceId]);
 
 	const selectedWorkspace = workspaces.find(
 		(ws) => ws.id === localSelectedWorkspaceId,
@@ -811,13 +775,19 @@ export function ChatPanel({ className }: ChatPanelProps) {
 									>
 										{selectedWorkspace ? (
 											<>
-												<div className="flex items-center gap-2 truncate">
+												<div
+													className="flex items-center gap-2 truncate"
+													title={selectedWorkspace.path}
+												>
 													<WorkspaceIcon
 														path={selectedWorkspace.path}
 														className="h-4 w-4 shrink-0"
 													/>
 													<span className="truncate">
-														{getWorkspaceDisplayName(selectedWorkspace.path)}
+														{getWorkspaceDisplayPath(
+															selectedWorkspace.path,
+															selectedWorkspace.sourceType,
+														)}
 													</span>
 												</div>
 												<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
@@ -838,13 +808,14 @@ export function ChatPanel({ className }: ChatPanelProps) {
 											key={ws.id}
 											onClick={() => setLocalSelectedWorkspaceId(ws.id)}
 											className="gap-2"
+											title={ws.path}
 										>
 											<WorkspaceIcon
 												path={ws.path}
 												className="h-4 w-4 shrink-0"
 											/>
 											<span className="truncate">
-												{getWorkspaceDisplayName(ws.path)}
+												{getWorkspaceDisplayPath(ws.path, ws.sourceType)}
 											</span>
 										</DropdownMenuItem>
 									))}
@@ -906,7 +877,25 @@ export function ChatPanel({ className }: ChatPanelProps) {
 																		? "You"
 																		: "Assistant"}
 																</div>
-																<MessageResponse>{textContent}</MessageResponse>
+																{/* Render message parts in order */}
+																{message.parts.map((part, partIdx) => {
+																	if (part.type === "text") {
+																		return (
+																			<MessageResponse key={`text-${partIdx}`}>
+																				{part.text}
+																			</MessageResponse>
+																		);
+																	}
+																	if (part.type === "dynamic-tool") {
+																		return (
+																			<ToolCall
+																				key={part.toolCallId}
+																				part={part as ToolCallPart}
+																			/>
+																		);
+																	}
+																	return null;
+																})}
 																{message.role === "assistant" &&
 																	messageIdx === group.messages.length - 1 && (
 																		<MessageActions>

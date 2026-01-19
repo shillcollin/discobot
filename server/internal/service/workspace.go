@@ -4,12 +4,29 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/obot-platform/octobot/server/internal/events"
 	"github.com/obot-platform/octobot/server/internal/git"
 	"github.com/obot-platform/octobot/server/internal/model"
 	"github.com/obot-platform/octobot/server/internal/store"
 )
+
+// expandPath expands ~ to the user's home directory and cleans the path.
+// For paths starting with ~, it replaces ~ with $HOME.
+// All paths are cleaned using filepath.Clean to remove redundant elements.
+func expandPath(path string) (string, error) {
+	if strings.HasPrefix(path, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to get home directory: %w", err)
+		}
+		path = filepath.Join(home, path[1:])
+	}
+	return filepath.Clean(path), nil
+}
 
 // Workspace represents a workspace with its sessions (for API responses)
 type Workspace struct {
@@ -65,6 +82,15 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 
 // CreateWorkspace creates a new workspace with initializing status
 func (s *WorkspaceService) CreateWorkspace(ctx context.Context, projectID, path, sourceType string) (*Workspace, error) {
+	// Expand ~ to home directory for local paths
+	if sourceType == "local" {
+		expandedPath, err := expandPath(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to expand path: %w", err)
+		}
+		path = expandedPath
+	}
+
 	ws := &model.Workspace{
 		ProjectID:  projectID,
 		Path:       path,
@@ -83,6 +109,15 @@ func (s *WorkspaceService) UpdateWorkspace(ctx context.Context, workspaceID, pat
 	ws, err := s.store.GetWorkspaceByID(ctx, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace: %w", err)
+	}
+
+	// Expand ~ to home directory for local paths
+	if ws.SourceType == "local" {
+		expandedPath, err := expandPath(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to expand path: %w", err)
+		}
+		path = expandedPath
 	}
 
 	ws.Path = path

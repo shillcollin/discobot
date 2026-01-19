@@ -2,6 +2,7 @@
 
 import { AlertTriangle } from "lucide-react";
 import * as React from "react";
+import { getWorkspaceShortName } from "@/components/ide/workspace-path";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -13,30 +14,6 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import type { Workspace } from "@/lib/api-types";
-
-/** Derives a display name from a workspace path */
-function getWorkspaceDisplayName(path: string, sourceType: "local" | "git") {
-	if (sourceType === "local") {
-		// For local paths, use the last segment
-		const segments = path.split("/").filter(Boolean);
-		return segments[segments.length - 1] || path;
-	}
-
-	// For git URLs, extract repo name
-	const githubMatch = path.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/);
-	if (githubMatch) {
-		return githubMatch[1];
-	}
-
-	// Strip protocol and .git suffix for other git URLs
-	return (
-		path
-			.replace(/^(https?:\/\/|git@|ssh:\/\/)/, "")
-			.replace(/\.git$/, "")
-			.split("/")
-			.pop() || path
-	);
-}
 
 interface DeleteWorkspaceDialogProps {
 	open: boolean;
@@ -73,7 +50,7 @@ export function DeleteWorkspaceDialog({
 
 	if (!workspace) return null;
 
-	const displayName = getWorkspaceDisplayName(
+	const displayName = getWorkspaceShortName(
 		workspace.path,
 		workspace.sourceType,
 	);

@@ -213,6 +213,74 @@ func TestListWorkspaces_WithData(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspace_TildeExpansion(t *testing.T) {
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	client := ts.AuthenticatedClient(user)
+
+	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]string{
+		"path":       "~/code/myproject",
+		"sourceType": "local",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var workspace map[string]interface{}
+	ParseJSON(t, resp, &workspace)
+
+	path := workspace["path"].(string)
+	// Path should not contain ~
+	if path == "~/code/myproject" || path[0] == '~' {
+		t.Errorf("Expected tilde to be expanded, got '%v'", path)
+	}
+	// Path should contain /code/myproject
+	if !filepath.IsAbs(path) {
+		t.Errorf("Expected absolute path, got '%v'", path)
+	}
+	// Path should end with /code/myproject
+	homeDir, _ := os.UserHomeDir()
+	expected := filepath.Join(homeDir, "code/myproject")
+	if path != expected {
+		t.Errorf("Expected path '%s', got '%s'", expected, path)
+	}
+}
+
+func TestUpdateWorkspace_TildeExpansion(t *testing.T) {
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	workspace := ts.CreateTestWorkspace(project, "/home/user/code")
+	client := ts.AuthenticatedClient(user)
+
+	resp := client.Put("/api/projects/"+project.ID+"/workspaces/"+workspace.ID, map[string]string{
+		"path": "~/projects/newpath",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusOK)
+
+	var result map[string]interface{}
+	ParseJSON(t, resp, &result)
+
+	path := result["path"].(string)
+	// Path should not contain ~
+	if path == "~/projects/newpath" || path[0] == '~' {
+		t.Errorf("Expected tilde to be expanded, got '%v'", path)
+	}
+	// Path should be absolute
+	if !filepath.IsAbs(path) {
+		t.Errorf("Expected absolute path, got '%v'", path)
+	}
+	// Path should end with /projects/newpath
+	homeDir, _ := os.UserHomeDir()
+	expected := filepath.Join(homeDir, "projects/newpath")
+	if path != expected {
+		t.Errorf("Expected path '%s', got '%s'", expected, path)
+	}
+}
+
 func TestWorkspaceInitialization_Local(t *testing.T) {
 	ts := NewTestServer(t)
 	user := ts.CreateTestUser("test@example.com")

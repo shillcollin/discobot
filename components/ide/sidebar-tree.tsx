@@ -1,6 +1,5 @@
 "use client";
 
-import { SiGithub } from "@icons-pack/react-simple-icons";
 import {
 	Archive,
 	ChevronDown,
@@ -9,8 +8,6 @@ import {
 	CircleHelp,
 	Eye,
 	EyeOff,
-	GitBranch,
-	HardDrive,
 	Loader2,
 	MoreHorizontal,
 	Pause,
@@ -28,29 +25,10 @@ import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
 import { cn } from "@/lib/utils";
-
-function parseWorkspacePath(path: string, sourceType: "local" | "git") {
-	if (sourceType === "local") {
-		return { displayPath: path, isGitHub: false };
-	}
-
-	const githubHttpMatch = path.match(/github\.com\/([^/]+\/[^/]+)/);
-	const githubSshMatch = path.match(
-		/git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/,
-	);
-
-	if (githubHttpMatch) {
-		return { displayPath: githubHttpMatch[1], isGitHub: true };
-	}
-	if (githubSshMatch) {
-		return { displayPath: githubSshMatch[1], isGitHub: true };
-	}
-
-	const stripped = path
-		.replace(/^(https?:\/\/|git@|ssh:\/\/)/, "")
-		.replace(/\.git$/, "");
-	return { displayPath: stripped, isGitHub: false };
-}
+import {
+	parseWorkspacePath,
+	WorkspaceIcon,
+} from "@/components/ide/workspace-path";
 
 interface SidebarTreeProps {
 	className?: string;
@@ -183,10 +161,8 @@ function WorkspaceNode({
 }) {
 	const isExpanded = expandedIds.has(workspace.id);
 	const [menuOpen, setMenuOpen] = React.useState(false);
-	const { displayPath, isGitHub } = parseWorkspacePath(
-		workspace.path,
-		workspace.sourceType,
-	);
+	const { displayPath, fullPath, workspaceType, wasShortened } =
+		parseWorkspacePath(workspace.path, workspace.sourceType);
 
 	// Fetch sessions when workspace is expanded
 	const { sessions, isLoading: sessionsLoading } = useSessions(
@@ -209,22 +185,21 @@ function WorkspaceNode({
 				role="button"
 				tabIndex={0}
 			>
-				<div className="flex items-center gap-1.5 min-w-0 flex-1">
+				<div
+					className="flex items-center gap-1.5 min-w-0 flex-1"
+					title={wasShortened ? fullPath : undefined}
+				>
 					{isExpanded ? (
 						<ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
 					) : (
 						<ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
 					)}
-					{getWorkspaceStatusIndicator(workspace.status) ??
-						(workspace.sourceType === "git" ? (
-							isGitHub ? (
-								<SiGithub className="h-4 w-4 shrink-0" />
-							) : (
-								<GitBranch className="h-4 w-4 text-orange-500 shrink-0" />
-							)
-						) : (
-							<HardDrive className="h-4 w-4 text-blue-500 shrink-0" />
-						))}
+					{getWorkspaceStatusIndicator(workspace.status) ?? (
+						<WorkspaceIcon
+							workspaceType={workspaceType}
+							className="h-4 w-4 shrink-0"
+						/>
+					)}
 					<span className="font-mono truncate text-sm">{displayPath}</span>
 				</div>
 				<div className="flex items-center gap-0.5">
