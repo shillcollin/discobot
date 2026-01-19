@@ -211,6 +211,7 @@ const (
 	SessionStatusError           = "error"            // Something failed during setup
 	SessionStatusClosed          = "closed"           // Session has been archived
 	SessionStatusRemoving        = "removing"         // Session is being deleted
+	SessionStatusRemoved         = "removed"          // Session has been deleted
 )
 
 // Session represents a chat thread within a workspace.

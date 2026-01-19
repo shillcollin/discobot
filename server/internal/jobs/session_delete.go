@@ -39,5 +39,9 @@ func (e *SessionDeleteExecutor) Execute(ctx context.Context, job *model.Job) err
 		return fmt.Errorf("sessionId is required")
 	}
 
-	return e.sessionService.PerformDeletion(ctx, payload.SessionID)
+	if payload.ProjectID == "" {
+		return fmt.Errorf("projectId is required")
+	}
+
+	return e.sessionService.PerformDeletion(ctx, payload.ProjectID, payload.SessionID)
 }

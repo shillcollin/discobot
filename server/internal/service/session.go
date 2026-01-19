@@ -241,7 +241,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, projectID, sessionID
 
 // PerformDeletion performs the actual session deletion work.
 // This is called by the SessionDeleteExecutor job handler.
-func (s *SessionService) PerformDeletion(ctx context.Context, sessionID string) error {
+func (s *SessionService) PerformDeletion(ctx context.Context, projectID, sessionID string) error {
 	// Step 1: Destroy sandbox (idempotent - handles not found)
 	if s.sandboxProvider != nil {
 		if err := s.sandboxProvider.Remove(ctx, sessionID); err != nil {
@@ -255,6 +255,13 @@ func (s *SessionService) PerformDeletion(ctx context.Context, sessionID string) 
 	// Step 2: Delete from database (messages, terminal history, session)
 	if err := s.store.DeleteSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to delete session from database: %w", err)
+	}
+
+	// Step 3: Emit "removed" event to notify clients
+	if s.eventBroker != nil {
+		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusRemoved); err != nil {
+			log.Printf("Failed to publish session removed event: %v", err)
+		}
 	}
 
 	log.Printf("Session %s deleted successfully", sessionID)

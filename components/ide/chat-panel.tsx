@@ -132,9 +132,21 @@ function getStatusDisplay(status: SessionStatus): {
 				icon: <Loader2 className="h-4 w-4 animate-spin" />,
 				isLoading: true,
 			};
+		case "reinitializing":
+			return {
+				text: "Reinitializing sandbox...",
+				icon: <Loader2 className="h-4 w-4 animate-spin" />,
+				isLoading: true,
+			};
 		case "cloning":
 			return {
 				text: "Cloning repository...",
+				icon: <Loader2 className="h-4 w-4 animate-spin" />,
+				isLoading: true,
+			};
+		case "pulling_image":
+			return {
+				text: "Pulling container image...",
 				icon: <Loader2 className="h-4 w-4 animate-spin" />,
 				isLoading: true,
 			};
@@ -156,28 +168,40 @@ function getStatusDisplay(status: SessionStatus): {
 				icon: <CheckCircle className="h-4 w-4 text-green-500" />,
 				isLoading: false,
 			};
+		case "stopped":
+			return {
+				text: "Session stopped",
+				icon: <AlertCircle className="h-4 w-4 text-yellow-500" />,
+				isLoading: false,
+			};
 		case "error":
 			return {
-				text: "Error",
+				text: "Session error",
 				icon: <AlertCircle className="h-4 w-4 text-destructive" />,
 				isLoading: false,
 			};
 		case "closed":
 			return {
-				text: "Closed",
+				text: "Session closed",
 				icon: <CheckCircle className="h-4 w-4 text-muted-foreground" />,
 				isLoading: false,
 			};
 		case "removing":
 			return {
 				text: "Removing session...",
-				icon: <Loader2 className="h-4 w-4 animate-spin text-red-500" />,
+				icon: <Loader2 className="h-4 w-4 animate-spin text-destructive" />,
 				isLoading: true,
+			};
+		case "removed":
+			return {
+				text: "Session removed",
+				icon: <AlertCircle className="h-4 w-4 text-muted-foreground" />,
+				isLoading: false,
 			};
 		default:
 			return {
 				text: String(status),
-				icon: null,
+				icon: <AlertCircle className="h-4 w-4 text-muted-foreground" />,
 				isLoading: false,
 			};
 	}
@@ -636,30 +660,44 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				)}
 			</AnimatePresence>
 
-			{/* Session status indicator - shows during initialization */}
-			{selectedSession &&
-				selectedSession.status !== "running" &&
-				selectedSession.status !== "closed" && (
-					<div
+			{/* Session status header - shows when not running */}
+			{selectedSession && selectedSession.status !== "running" && (
+				<div
+					className={cn(
+						"flex items-center gap-2 py-3 px-4 border-b",
+						selectedSession.status === "error" ||
+							selectedSession.status === "removing"
+							? "bg-destructive/10 border-destructive/20"
+							: selectedSession.status === "stopped"
+								? "bg-yellow-500/10 border-yellow-500/20"
+								: selectedSession.status === "closed" ||
+									  selectedSession.status === "removed"
+									? "bg-muted/30 border-border"
+									: "bg-muted/50 border-border",
+					)}
+				>
+					{getStatusDisplay(selectedSession.status).icon}
+					<span
 						className={cn(
-							"flex items-center justify-center gap-2 py-3 px-4 border-b",
-							selectedSession.status === "error"
-								? "bg-destructive/10 border-destructive/20 text-destructive"
-								: "bg-muted/50 border-border text-muted-foreground",
+							"text-sm font-medium",
+							selectedSession.status === "error" ||
+								selectedSession.status === "removing"
+								? "text-destructive"
+								: selectedSession.status === "stopped"
+									? "text-yellow-600 dark:text-yellow-500"
+									: "text-muted-foreground",
 						)}
 					>
-						{getStatusDisplay(selectedSession.status).icon}
-						<span className="text-sm font-medium">
-							{getStatusDisplay(selectedSession.status).text}
-						</span>
-						{selectedSession.status === "error" &&
-							selectedSession.errorMessage && (
-								<span className="text-sm">
-									: {selectedSession.errorMessage}
-								</span>
-							)}
-					</div>
-				)}
+						{getStatusDisplay(selectedSession.status).text}
+					</span>
+					{selectedSession.status === "error" &&
+						selectedSession.errorMessage && (
+							<span className="text-sm text-destructive flex-1">
+								- {selectedSession.errorMessage}
+							</span>
+						)}
+				</div>
+			)}
 
 			{/* Messages loading error indicator */}
 			{messagesError && (
