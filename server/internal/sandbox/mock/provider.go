@@ -13,6 +13,12 @@ import (
 	"github.com/obot-platform/octobot/server/internal/sandbox"
 )
 
+// eventSubscriber represents a subscriber to sandbox events.
+type eventSubscriber struct {
+	ch   chan sandbox.StateEvent
+	done chan struct{}
+}
+
 // DefaultMockImage is the default image used by the mock provider.
 const DefaultMockImage = "mock:latest"
 
@@ -23,6 +29,10 @@ type Provider struct {
 	secrets   map[string]string // sessionID -> raw secret
 	image     string            // configured sandbox image
 
+	// Event subscribers for Watch functionality
+	subscribersMu sync.RWMutex
+	subscribers   []*eventSubscriber
+
 	// Configurable behaviors for testing
 	CreateFunc    func(ctx context.Context, sessionID string, opts sandbox.CreateOptions) (*sandbox.Sandbox, error)
 	StartFunc     func(ctx context.Context, sessionID string) error
@@ -32,6 +42,7 @@ type Provider struct {
 	GetSecretFunc func(ctx context.Context, sessionID string) (string, error)
 	ExecFunc      func(ctx context.Context, sessionID string, cmd []string, opts sandbox.ExecOptions) (*sandbox.ExecResult, error)
 	AttachFunc    func(ctx context.Context, sessionID string, opts sandbox.AttachOptions) (sandbox.PTY, error)
+	WatchFunc     func(ctx context.Context) (<-chan sandbox.StateEvent, error)
 }
 
 // NewProvider creates a new mock provider with default behavior.
@@ -90,16 +101,25 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		},
 	}
 
+	now := time.Now()
 	s := &sandbox.Sandbox{
 		ID:        "mock-" + sessionID,
 		SessionID: sessionID,
 		Status:    sandbox.StatusCreated,
 		Image:     p.image,
-		CreatedAt: time.Now(),
+		CreatedAt: now,
 		Metadata:  map[string]string{"mock": "true"},
 		Ports:     ports,
 	}
 	p.sandboxes[sessionID] = s
+
+	// Emit state event
+	p.emitEvent(sandbox.StateEvent{
+		SessionID: sessionID,
+		Status:    sandbox.StatusCreated,
+		Timestamp: now,
+	})
+
 	return s, nil
 }
 
@@ -124,6 +144,14 @@ func (p *Provider) Start(ctx context.Context, sessionID string) error {
 	s.Status = sandbox.StatusRunning
 	now := time.Now()
 	s.StartedAt = &now
+
+	// Emit state event
+	p.emitEvent(sandbox.StateEvent{
+		SessionID: sessionID,
+		Status:    sandbox.StatusRunning,
+		Timestamp: now,
+	})
+
 	return nil
 }
 
@@ -148,6 +176,14 @@ func (p *Provider) Stop(ctx context.Context, sessionID string, timeout time.Dura
 	s.Status = sandbox.StatusStopped
 	now := time.Now()
 	s.StoppedAt = &now
+
+	// Emit state event
+	p.emitEvent(sandbox.StateEvent{
+		SessionID: sessionID,
+		Status:    sandbox.StatusStopped,
+		Timestamp: now,
+	})
+
 	return nil
 }
 
@@ -166,6 +202,14 @@ func (p *Provider) Remove(ctx context.Context, sessionID string) error {
 
 	delete(p.sandboxes, sessionID)
 	delete(p.secrets, sessionID)
+
+	// Emit state event
+	p.emitEvent(sandbox.StateEvent{
+		SessionID: sessionID,
+		Status:    sandbox.StatusRemoved,
+		Timestamp: time.Now(),
+	})
+
 	return nil
 }
 
@@ -321,6 +365,24 @@ func (p *Provider) GetSandboxes() map[string]*sandbox.Sandbox {
 	return result
 }
 
+// SetSandboxPort overrides the port mapping for a sandbox to point to a mock server.
+// This is useful for testing to redirect sandbox traffic to a test HTTP server.
+func (p *Provider) SetSandboxPort(sessionID string, host string, port int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if s, exists := p.sandboxes[sessionID]; exists {
+		s.Ports = []sandbox.AssignedPort{
+			{
+				ContainerPort: 3002,
+				HostPort:      port,
+				HostIP:        host,
+				Protocol:      "tcp",
+			},
+		}
+	}
+}
+
 // PTY is a mock PTY for testing.
 type PTY struct {
 	InputBuffer  []byte
@@ -380,4 +442,104 @@ func (p *PTY) Close() error {
 
 func (p *PTY) Wait(_ context.Context) (int, error) {
 	return 0, nil
+}
+
+// Watch returns a channel that receives sandbox state change events.
+// For the mock provider, this replays current state and then streams events
+// as sandbox state changes occur through the Create/Start/Stop/Remove methods.
+func (p *Provider) Watch(ctx context.Context) (<-chan sandbox.StateEvent, error) {
+	if p.WatchFunc != nil {
+		return p.WatchFunc(ctx)
+	}
+
+	eventCh := make(chan sandbox.StateEvent, 100)
+	done := make(chan struct{})
+
+	sub := &eventSubscriber{
+		ch:   eventCh,
+		done: done,
+	}
+
+	// Register subscriber
+	p.subscribersMu.Lock()
+	p.subscribers = append(p.subscribers, sub)
+	p.subscribersMu.Unlock()
+
+	// Start goroutine to handle replay and context cancellation
+	go func() {
+		defer func() {
+			// Unregister subscriber on exit
+			p.subscribersMu.Lock()
+			for i, s := range p.subscribers {
+				if s == sub {
+					p.subscribers = append(p.subscribers[:i], p.subscribers[i+1:]...)
+					break
+				}
+			}
+			p.subscribersMu.Unlock()
+			close(eventCh)
+		}()
+
+		// Replay current state
+		p.mu.RLock()
+		sandboxes := make([]*sandbox.Sandbox, 0, len(p.sandboxes))
+		for _, sb := range p.sandboxes {
+			cpy := *sb
+			sandboxes = append(sandboxes, &cpy)
+		}
+		p.mu.RUnlock()
+
+		for _, sb := range sandboxes {
+			select {
+			case <-ctx.Done():
+				return
+			case eventCh <- sandbox.StateEvent{
+				SessionID: sb.SessionID,
+				Status:    sb.Status,
+				Timestamp: time.Now(),
+				Error:     sb.Error,
+			}:
+			}
+		}
+
+		// Wait for context cancellation or done signal
+		select {
+		case <-ctx.Done():
+		case <-done:
+		}
+	}()
+
+	return eventCh, nil
+}
+
+// emitEvent sends an event to all subscribers.
+func (p *Provider) emitEvent(event sandbox.StateEvent) {
+	p.subscribersMu.RLock()
+	defer p.subscribersMu.RUnlock()
+
+	for _, sub := range p.subscribers {
+		select {
+		case sub.ch <- event:
+		default:
+			// Channel full, skip (non-blocking)
+		}
+	}
+}
+
+// EmitEvent is a test helper to manually emit an event to all watchers.
+// This is useful for testing the Watch functionality.
+func (p *Provider) EmitEvent(event sandbox.StateEvent) {
+	p.emitEvent(event)
+}
+
+// CloseWatchers closes all active Watch channels.
+// This is useful for testing cleanup.
+func (p *Provider) CloseWatchers() {
+	p.subscribersMu.Lock()
+	defer p.subscribersMu.Unlock()
+
+	for _, sub := range p.subscribers {
+		close(sub.done)
+	}
+	p.subscribers = nil
 }

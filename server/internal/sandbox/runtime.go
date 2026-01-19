@@ -59,6 +59,20 @@ type Provider interface {
 	// The client handles the transport layer (TCP for Docker, vsock for vz, etc.).
 	// The returned client connects to the sandbox's HTTP server (port 3002).
 	HTTPClient(ctx context.Context, sessionID string) (*http.Client, error)
+
+	// Watch returns a channel that receives sandbox state change events.
+	// On subscription, it replays the current state of all existing sandboxes,
+	// then streams state changes as they occur.
+	//
+	// The channel is closed when the context is cancelled or when an
+	// unrecoverable error occurs. Callers should watch for channel closure.
+	//
+	// Events include: created, running, stopped, failed, removed.
+	// The "removed" status indicates a sandbox was deleted (possibly externally).
+	//
+	// For Docker, this watches the Docker events API for container lifecycle events.
+	// For VZ, this uses the VM state change notifications.
+	Watch(ctx context.Context) (<-chan StateEvent, error)
 }
 
 // Sandbox represents a running or stopped sandbox instance.
@@ -92,6 +106,23 @@ const (
 	StatusRunning Status = "running" // Sandbox is running
 	StatusStopped Status = "stopped" // Sandbox has stopped
 	StatusFailed  Status = "failed"  // Sandbox failed to start or crashed
+)
+
+// StateEvent represents a sandbox state change event.
+// These events are emitted when sandboxes are created, started, stopped, or removed.
+type StateEvent struct {
+	SessionID string    // The session ID associated with the sandbox
+	Status    Status    // The new status (or StatusRemoved for deletion)
+	Timestamp time.Time // When the event occurred
+	Error     string    // Error message if status is StatusFailed
+}
+
+// StateEventType indicates what kind of state change occurred.
+// This is used to distinguish between a sandbox being removed vs just stopped.
+const (
+	// StatusRemoved is a pseudo-status indicating the sandbox was deleted.
+	// This is only used in StateEvent, not in Sandbox.Status.
+	StatusRemoved Status = "removed"
 )
 
 // CreateOptions configures sandbox creation.

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types"
 	containerTypes "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 	imageTypes "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
@@ -888,4 +890,160 @@ func (p *Provider) HTTPClient(ctx context.Context, sessionID string) (*http.Clie
 	}
 
 	return &http.Client{Transport: transport}, nil
+}
+
+// Watch returns a channel that receives sandbox state change events.
+// It first replays the current state of all existing sandboxes, then streams
+// state changes as they occur by watching Docker events.
+func (p *Provider) Watch(ctx context.Context) (<-chan sandbox.StateEvent, error) {
+	eventCh := make(chan sandbox.StateEvent, 100)
+
+	// Start a goroutine to handle the watch
+	go func() {
+		defer close(eventCh)
+
+		// First, replay current state of all managed sandboxes
+		sandboxes, err := p.List(ctx)
+		if err != nil {
+			log.Printf("Watch: failed to list sandboxes for replay: %v", err)
+			// Continue anyway - we can still watch for new events
+		} else {
+			for _, sb := range sandboxes {
+				select {
+				case <-ctx.Done():
+					return
+				case eventCh <- sandbox.StateEvent{
+					SessionID: sb.SessionID,
+					Status:    sb.Status,
+					Timestamp: time.Now(),
+					Error:     sb.Error,
+				}:
+				}
+			}
+		}
+
+		// Set up Docker events filter for our managed containers
+		filterArgs := filters.NewArgs(
+			filters.Arg("type", string(events.ContainerEventType)),
+			filters.Arg("label", "octobot.managed=true"),
+		)
+
+		// Watch Docker events
+		p.watchDockerEvents(ctx, eventCh, filterArgs)
+	}()
+
+	return eventCh, nil
+}
+
+// watchDockerEvents watches Docker container events and translates them to sandbox events.
+// It automatically reconnects if the connection is lost.
+func (p *Provider) watchDockerEvents(ctx context.Context, eventCh chan<- sandbox.StateEvent, filterArgs filters.Args) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Start watching Docker events
+		msgCh, errCh := p.client.Events(ctx, events.ListOptions{
+			Filters: filterArgs,
+		})
+
+		// Process events until error or context cancellation
+		if !p.processDockerEvents(ctx, eventCh, msgCh, errCh) {
+			return // Context cancelled or unrecoverable error
+		}
+
+		// If we get here, there was a recoverable error - wait before reconnecting
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+			log.Printf("Watch: reconnecting to Docker events...")
+		}
+	}
+}
+
+// processDockerEvents processes Docker events from the channels.
+// Returns false if the context was cancelled (caller should exit),
+// returns true if reconnection should be attempted.
+func (p *Provider) processDockerEvents(ctx context.Context, eventCh chan<- sandbox.StateEvent, msgCh <-chan events.Message, errCh <-chan error) bool {
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+
+		case err := <-errCh:
+			if err == nil {
+				// Channel closed, reconnect
+				return true
+			}
+			if ctx.Err() != nil {
+				return false
+			}
+			log.Printf("Watch: Docker events error: %v, reconnecting...", err)
+			return true
+
+		case msg := <-msgCh:
+			event := p.translateDockerEvent(msg)
+			if event != nil {
+				select {
+				case <-ctx.Done():
+					return false
+				case eventCh <- *event:
+				}
+			}
+		}
+	}
+}
+
+// translateDockerEvent converts a Docker event to a sandbox StateEvent.
+// Returns nil if the event should be ignored.
+func (p *Provider) translateDockerEvent(msg events.Message) *sandbox.StateEvent {
+	// Extract session ID from container labels
+	sessionID := msg.Actor.Attributes["octobot.session.id"]
+	if sessionID == "" {
+		// Not one of our containers or missing session ID
+		return nil
+	}
+
+	var status sandbox.Status
+	var errMsg string
+
+	switch msg.Action {
+	case "create":
+		status = sandbox.StatusCreated
+	case "start":
+		status = sandbox.StatusRunning
+	case "stop", "kill":
+		status = sandbox.StatusStopped
+	case "die":
+		// Check exit code to determine if stopped or failed
+		exitCode := msg.Actor.Attributes["exitCode"]
+		if exitCode == "137" || exitCode == "143" || exitCode == "0" {
+			// Normal stop (SIGKILL, SIGTERM, or clean exit)
+			status = sandbox.StatusStopped
+		} else {
+			status = sandbox.StatusFailed
+			errMsg = fmt.Sprintf("container died with exit code %s", exitCode)
+		}
+	case "destroy":
+		status = sandbox.StatusRemoved
+		// Clear container ID from cache since it's been deleted
+		p.clearContainerID(sessionID)
+	case "oom":
+		status = sandbox.StatusFailed
+		errMsg = "out of memory"
+	default:
+		// Ignore other events (pause, unpause, attach, etc.)
+		return nil
+	}
+
+	return &sandbox.StateEvent{
+		SessionID: sessionID,
+		Status:    status,
+		Timestamp: time.Unix(msg.Time, msg.TimeNano),
+		Error:     errMsg,
+	}
 }

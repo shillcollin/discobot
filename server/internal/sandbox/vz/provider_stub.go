@@ -91,6 +91,11 @@ func (p *Provider) HTTPClient(_ context.Context, _ string) (*http.Client, error)
 	return nil, fmt.Errorf("vz sandbox provider is only available on macOS")
 }
 
+// Watch returns an error on non-darwin platforms.
+func (p *Provider) Watch(_ context.Context) (<-chan sandbox.StateEvent, error) {
+	return nil, fmt.Errorf("vz sandbox provider is only available on macOS")
+}
+
 // Close is a no-op on non-darwin platforms.
 func (p *Provider) Close() error {
 	return nil

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,12 @@ import (
 	"github.com/obot-platform/octobot/server/internal/config"
 	"github.com/obot-platform/octobot/server/internal/sandbox"
 )
+
+// eventSubscriber represents a subscriber to sandbox events.
+type eventSubscriber struct {
+	ch   chan sandbox.StateEvent
+	done chan struct{}
+}
 
 const (
 	// labelSecret is the metadata key for storing the raw shared secret.
@@ -73,6 +80,10 @@ type Provider struct {
 	// vmInstances maps sessionID -> vmInstance
 	vmInstances   map[string]*vmInstance
 	vmInstancesMu sync.RWMutex
+
+	// Event subscribers for Watch functionality
+	subscribersMu sync.RWMutex
+	subscribers   []*eventSubscriber
 
 	// dataDir is where VM disk images and state are stored
 	dataDir string
@@ -225,6 +236,10 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 	// WORKSPACE_PATH is always the mount point inside the VM
 	// WORKSPACE_SOURCE is the original source (local path or git URL)
 	env := make(map[string]string)
+
+	// Add session ID (required by obot-agent for AgentFS database naming)
+	env["SESSION_ID"] = sessionID
+
 	if opts.SharedSecret != "" {
 		env["OCTOBOT_SECRET"] = hashSecret(opts.SharedSecret)
 	}
@@ -269,6 +284,13 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		os.Remove(diskPath)
 		return nil, fmt.Errorf("%w: failed to save state: %v", sandbox.ErrStartFailed, err)
 	}
+
+	// Emit state event
+	p.emitEvent(sandbox.StateEvent{
+		SessionID: sessionID,
+		Status:    sandbox.StatusCreated,
+		Timestamp: now,
+	})
 
 	return &sandbox.Sandbox{
 		ID:        vmName(sessionID),
@@ -540,10 +562,13 @@ func (p *Provider) monitorVM(sessionID string, vm *vz.VirtualMachine) {
 
 		instance.mu.Lock()
 		stateChanged := false
+		var newStatus sandbox.Status
+		var errMsg string
 		switch state {
 		case vz.VirtualMachineStateRunning:
 			if instance.status != sandbox.StatusRunning {
 				instance.status = sandbox.StatusRunning
+				newStatus = sandbox.StatusRunning
 				stateChanged = true
 			}
 		case vz.VirtualMachineStateStopped:
@@ -551,6 +576,7 @@ func (p *Provider) monitorVM(sessionID string, vm *vz.VirtualMachine) {
 				now := time.Now()
 				instance.status = sandbox.StatusStopped
 				instance.stoppedAt = &now
+				newStatus = sandbox.StatusStopped
 				stateChanged = true
 			}
 		case vz.VirtualMachineStateError:
@@ -558,14 +584,36 @@ func (p *Provider) monitorVM(sessionID string, vm *vz.VirtualMachine) {
 				now := time.Now()
 				instance.status = sandbox.StatusFailed
 				instance.stoppedAt = &now
+				newStatus = sandbox.StatusFailed
+				errMsg = "VM entered error state"
 				stateChanged = true
 			}
 		}
 		instance.mu.Unlock()
 
-		// Persist state change to disk
+		// Persist state change to disk and emit event
 		if stateChanged {
 			p.saveState(instance)
+			p.emitEvent(sandbox.StateEvent{
+				SessionID: sessionID,
+				Status:    newStatus,
+				Timestamp: time.Now(),
+				Error:     errMsg,
+			})
+		}
+	}
+}
+
+// emitEvent sends an event to all subscribers.
+func (p *Provider) emitEvent(event sandbox.StateEvent) {
+	p.subscribersMu.RLock()
+	defer p.subscribersMu.RUnlock()
+
+	for _, sub := range p.subscribers {
+		select {
+		case sub.ch <- event:
+		default:
+			// Channel full, skip (non-blocking)
 		}
 	}
 }
@@ -681,6 +729,13 @@ func (p *Provider) Remove(ctx context.Context, sessionID string) error {
 
 	// Remove metadata directory
 	p.deleteMetadata(sessionID)
+
+	// Emit state event
+	p.emitEvent(sandbox.StateEvent{
+		SessionID: sessionID,
+		Status:    sandbox.StatusRemoved,
+		Timestamp: time.Now(),
+	})
 
 	return nil
 }
@@ -1075,4 +1130,66 @@ func encodeJSON(v interface{}) ([]byte, error) {
 // decodeJSON decodes JSON bytes to a value.
 func decodeJSON(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
+}
+
+// Watch returns a channel that receives sandbox state change events.
+// For the VZ provider, this replays current state and then streams events
+// as VM state changes occur through the internal VM monitoring.
+func (p *Provider) Watch(ctx context.Context) (<-chan sandbox.StateEvent, error) {
+	eventCh := make(chan sandbox.StateEvent, 100)
+	done := make(chan struct{})
+
+	sub := &eventSubscriber{
+		ch:   eventCh,
+		done: done,
+	}
+
+	// Register subscriber
+	p.subscribersMu.Lock()
+	p.subscribers = append(p.subscribers, sub)
+	p.subscribersMu.Unlock()
+
+	// Start goroutine to handle replay and context cancellation
+	go func() {
+		defer func() {
+			// Unregister subscriber on exit
+			p.subscribersMu.Lock()
+			for i, s := range p.subscribers {
+				if s == sub {
+					p.subscribers = append(p.subscribers[:i], p.subscribers[i+1:]...)
+					break
+				}
+			}
+			p.subscribersMu.Unlock()
+			close(eventCh)
+		}()
+
+		// Replay current state
+		sandboxes, err := p.List(ctx)
+		if err != nil {
+			log.Printf("Watch: failed to list VMs for replay: %v", err)
+			// Continue anyway - we can still watch for new events
+		} else {
+			for _, sb := range sandboxes {
+				select {
+				case <-ctx.Done():
+					return
+				case eventCh <- sandbox.StateEvent{
+					SessionID: sb.SessionID,
+					Status:    sb.Status,
+					Timestamp: time.Now(),
+					Error:     sb.Error,
+				}:
+				}
+			}
+		}
+
+		// Wait for context cancellation or done signal
+		select {
+		case <-ctx.Done():
+		case <-done:
+		}
+	}()
+
+	return eventCh, nil
 }

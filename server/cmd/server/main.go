@@ -140,6 +140,20 @@ func main() {
 	}
 	eventBroker := events.NewBroker(s, eventPoller)
 
+	// Start sandbox watcher to sync session states with sandbox states
+	// This handles external changes (e.g., Docker containers deleted outside Octobot)
+	var sandboxWatcherCancel context.CancelFunc
+	if sandboxProvider != nil {
+		sandboxWatcher := service.NewSandboxWatcher(sandboxProvider, s, eventBroker)
+		var watcherCtx context.Context
+		watcherCtx, sandboxWatcherCancel = context.WithCancel(context.Background())
+		go func() {
+			if err := sandboxWatcher.Start(watcherCtx); err != nil && err != context.Canceled {
+				log.Printf("Sandbox watcher stopped with error: %v", err)
+			}
+		}()
+	}
+
 	// Initialize and start job dispatcher
 	var disp *dispatcher.Service
 	if cfg.DispatcherEnabled {
@@ -899,6 +913,20 @@ func main() {
 					Body:        map[string]any{"messages": []map[string]any{{"role": "user", "content": "Hello"}}},
 				},
 			})
+
+			// Chat stream resume endpoint
+			projReg.Register(r, routes.Route{
+				Method: "GET", Pattern: "/chat/{sessionId}/stream",
+				Handler: h.ChatStream,
+				Meta: routes.Meta{
+					Group:       "Chat",
+					Description: "Resume in-progress chat stream (SSE)",
+					Params: []routes.Param{
+						{Name: "projectId", Example: "local"},
+						{Name: "sessionId", Example: "abc123"},
+					},
+				},
+			})
 		})
 	})
 
@@ -926,6 +954,11 @@ func main() {
 
 	log.Println("Shutting down server...")
 
+	// Stop sandbox watcher
+	if sandboxWatcherCancel != nil {
+		sandboxWatcherCancel()
+	}
+
 	// Stop dispatcher first (finish in-flight jobs)
 	if disp != nil {
 		disp.Stop()
@@ -947,3 +980,4 @@ func main() {
 
 	log.Println("Server stopped")
 }
+
