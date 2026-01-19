@@ -1,56 +1,66 @@
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
-import type { UIMessageChunk } from "ai";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, beforeEach, describe, it } from "node:test";
+import type { UIMessage, UIMessageChunk } from "ai";
 import {
 	addCompletionEvent,
+	addMessage,
 	clearCompletionEvents,
+	clearMessages,
 	finishCompletion,
 	getCompletionEvents,
 	getCompletionState,
 	isCompletionRunning,
+	saveMessages,
 	startCompletion,
 } from "./session.js";
 
+// Test directory for message persistence tests
+const TEST_DATA_DIR = join(tmpdir(), `octobot-test-${process.pid}`);
+
 describe("Completion State", () => {
 	// Reset state before each test
-	before(() => {
-		finishCompletion();
+	before(async () => {
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
-	after(() => {
-		finishCompletion();
+	after(async () => {
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
 	describe("startCompletion", () => {
-		it("returns true when no completion is running", () => {
+		it("returns true when no completion is running", async () => {
 			const result = startCompletion("test-completion-1");
 			assert.equal(result, true);
-			finishCompletion(); // Cleanup
+			await finishCompletion(); // Cleanup
 		});
 
-		it("returns false when completion is already running", () => {
+		it("returns false when completion is already running", async () => {
 			startCompletion("test-completion-1");
 			const result = startCompletion("test-completion-2");
 			assert.equal(result, false);
-			finishCompletion(); // Cleanup
+			await finishCompletion(); // Cleanup
 		});
 
-		it("sets isRunning to true", () => {
+		it("sets isRunning to true", async () => {
 			startCompletion("test-completion");
 			assert.equal(isCompletionRunning(), true);
-			finishCompletion(); // Cleanup
+			await finishCompletion(); // Cleanup
 		});
 
-		it("stores completionId in state", () => {
+		it("stores completionId in state", async () => {
 			startCompletion("my-completion-id");
 			const state = getCompletionState();
 			assert.equal(state.completionId, "my-completion-id");
-			finishCompletion(); // Cleanup
+			await finishCompletion(); // Cleanup
 		});
 
-		it("sets startedAt timestamp", () => {
+		it("sets startedAt timestamp", async () => {
 			const beforeStart = new Date().toISOString();
 			startCompletion("test-completion");
 			const state = getCompletionState();
@@ -61,38 +71,38 @@ describe("Completion State", () => {
 				state.startedAt >= beforeStart && state.startedAt <= afterStart,
 				"startedAt should be between before and after timestamps",
 			);
-			finishCompletion(); // Cleanup
+			await finishCompletion(); // Cleanup
 		});
 	});
 
 	describe("finishCompletion", () => {
-		it("sets isRunning to false", () => {
+		it("sets isRunning to false", async () => {
 			startCompletion("test-completion");
-			finishCompletion();
+			await finishCompletion();
 			assert.equal(isCompletionRunning(), false);
 		});
 
-		it("preserves completionId after finishing", () => {
+		it("preserves completionId after finishing", async () => {
 			startCompletion("preserved-id");
-			finishCompletion();
+			await finishCompletion();
 			const state = getCompletionState();
 			assert.equal(state.completionId, "preserved-id");
 		});
 
-		it("stores error message when provided", () => {
+		it("stores error message when provided", async () => {
 			startCompletion("error-completion");
-			finishCompletion("Something went wrong");
+			await finishCompletion("Something went wrong");
 			const state = getCompletionState();
 			assert.equal(state.error, "Something went wrong");
 		});
 
-		it("does not clear completion events on finish (they persist for SSE replay)", () => {
+		it("does not clear completion events on finish (they persist for SSE replay)", async () => {
 			startCompletion("test-completion");
 			const event: UIMessageChunk = { type: "start", messageId: "msg-1" };
 			addCompletionEvent(event);
 			assert.equal(getCompletionEvents().length, 1);
 
-			finishCompletion();
+			await finishCompletion();
 			// Events are NOT cleared on finish - SSE handler needs them
 			// Events are cleared at start of next completion via clearCompletionEvents()
 			assert.equal(getCompletionEvents().length, 1);
@@ -101,35 +111,35 @@ describe("Completion State", () => {
 	});
 
 	describe("isCompletionRunning", () => {
-		it("returns false initially", () => {
-			finishCompletion(); // Ensure clean state
+		it("returns false initially", async () => {
+			await finishCompletion(); // Ensure clean state
 			assert.equal(isCompletionRunning(), false);
 		});
 
-		it("returns true after start", () => {
+		it("returns true after start", async () => {
 			startCompletion("test-completion");
 			assert.equal(isCompletionRunning(), true);
-			finishCompletion(); // Cleanup
+			await finishCompletion(); // Cleanup
 		});
 
-		it("returns false after finish", () => {
+		it("returns false after finish", async () => {
 			startCompletion("test-completion");
-			finishCompletion();
+			await finishCompletion();
 			assert.equal(isCompletionRunning(), false);
 		});
 	});
 
 	describe("getCompletionState", () => {
-		it("returns a copy (not the original object)", () => {
+		it("returns a copy (not the original object)", async () => {
 			startCompletion("test-completion");
 			const state1 = getCompletionState();
 			const state2 = getCompletionState();
 			assert.notEqual(state1, state2);
-			finishCompletion(); // Cleanup
+			await finishCompletion(); // Cleanup
 		});
 
-		it("has correct initial state structure", () => {
-			finishCompletion(); // Reset
+		it("has correct initial state structure", async () => {
+			await finishCompletion(); // Reset
 			const state = getCompletionState();
 
 			assert.equal(typeof state.isRunning, "boolean");
@@ -140,13 +150,13 @@ describe("Completion State", () => {
 
 describe("Completion Events", () => {
 	// Reset state before each test
-	before(() => {
-		finishCompletion();
+	before(async () => {
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
-	after(() => {
-		finishCompletion();
+	after(async () => {
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
@@ -233,17 +243,17 @@ describe("Completion Events", () => {
 });
 
 describe("Completion events workflow", () => {
-	before(() => {
-		finishCompletion();
+	before(async () => {
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
-	after(() => {
-		finishCompletion();
+	after(async () => {
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
-	it("simulates full completion lifecycle with events", () => {
+	it("simulates full completion lifecycle with events", async () => {
 		// Start completion
 		const started = startCompletion("lifecycle-test");
 		assert.ok(started, "Should start successfully");
@@ -269,7 +279,7 @@ describe("Completion events workflow", () => {
 		assert.deepEqual(storedEvents, events);
 
 		// Finish completion
-		finishCompletion();
+		await finishCompletion();
 
 		// Verify state after finish
 		assert.equal(isCompletionRunning(), false);
@@ -279,7 +289,7 @@ describe("Completion events workflow", () => {
 		clearCompletionEvents(); // Cleanup
 	});
 
-	it("handles completion with error", () => {
+	it("handles completion with error", async () => {
 		startCompletion("error-test");
 
 		// Add some events before error
@@ -287,7 +297,7 @@ describe("Completion events workflow", () => {
 		addCompletionEvent({ type: "text-start", id: "text-1" });
 
 		// Finish with error
-		finishCompletion("API rate limit exceeded");
+		await finishCompletion("API rate limit exceeded");
 
 		const state = getCompletionState();
 		assert.equal(state.isRunning, false);
@@ -295,7 +305,7 @@ describe("Completion events workflow", () => {
 		assert.equal(state.completionId, "error-test");
 	});
 
-	it("prevents concurrent completions", () => {
+	it("prevents concurrent completions", async () => {
 		const first = startCompletion("first");
 		const second = startCompletion("second");
 		const third = startCompletion("third");
@@ -307,6 +317,166 @@ describe("Completion events workflow", () => {
 		// Only first completion should be registered
 		assert.equal(getCompletionState().completionId, "first");
 
-		finishCompletion();
+		await finishCompletion();
+	});
+});
+
+describe("Message persistence on completion", () => {
+	// Set up a test directory for message files
+	const testMessagesFile = join(TEST_DATA_DIR, "test-messages.json");
+
+	before(() => {
+		// Create test directory
+		if (!existsSync(TEST_DATA_DIR)) {
+			mkdirSync(TEST_DATA_DIR, { recursive: true });
+		}
+		// Set env var for test messages file
+		process.env.MESSAGES_FILE = testMessagesFile;
+	});
+
+	beforeEach(() => {
+		// Clear messages before each test
+		clearMessages();
+		// Remove test file if exists
+		if (existsSync(testMessagesFile)) {
+			rmSync(testMessagesFile);
+		}
+	});
+
+	after(async () => {
+		await finishCompletion();
+		clearMessages();
+		// Clean up test directory
+		if (existsSync(TEST_DATA_DIR)) {
+			rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+		}
+		// Restore env var
+		delete process.env.MESSAGES_FILE;
+	});
+
+	it("saves messages to disk on successful completion", async () => {
+		// Add messages
+		const msg1: UIMessage = {
+			id: "msg-1",
+			role: "user",
+			parts: [{ type: "text", text: "Hello" }],
+			createdAt: new Date(),
+		};
+		const msg2: UIMessage = {
+			id: "msg-2",
+			role: "assistant",
+			parts: [{ type: "text", text: "Hi there!" }],
+			createdAt: new Date(),
+		};
+		addMessage(msg1);
+		addMessage(msg2);
+
+		// Start and finish completion successfully
+		startCompletion("save-test");
+		await finishCompletion();
+
+		// Verify file was created
+		assert.ok(existsSync(testMessagesFile), "Messages file should exist");
+
+		// Verify content
+		const content = await readFile(testMessagesFile, "utf-8");
+		const savedMessages = JSON.parse(content) as UIMessage[];
+		assert.equal(savedMessages.length, 2);
+		assert.equal(savedMessages[0].id, "msg-1");
+		assert.equal(savedMessages[1].id, "msg-2");
+	});
+
+	it("does not save messages on failed completion", async () => {
+		// Add messages
+		const msg: UIMessage = {
+			id: "msg-fail",
+			role: "user",
+			parts: [{ type: "text", text: "Hello" }],
+			createdAt: new Date(),
+		};
+		addMessage(msg);
+
+		// Start and finish completion with error
+		startCompletion("fail-test");
+		await finishCompletion("Some error occurred");
+
+		// Verify file was NOT created
+		assert.ok(
+			!existsSync(testMessagesFile),
+			"Messages file should not exist after failed completion",
+		);
+	});
+
+	it("does not save during message updates (no debounce)", async () => {
+		// Add a message
+		const msg: UIMessage = {
+			id: "msg-no-debounce",
+			role: "user",
+			parts: [{ type: "text", text: "Hello" }],
+			createdAt: new Date(),
+		};
+		addMessage(msg);
+
+		// Wait a bit (longer than old 500ms debounce)
+		await new Promise((resolve) => setTimeout(resolve, 600));
+
+		// File should NOT exist since we haven't finished a completion
+		assert.ok(
+			!existsSync(testMessagesFile),
+			"Messages file should not exist without completion",
+		);
+	});
+
+	it("saveMessages can be called directly for manual saves", async () => {
+		// Add messages
+		const msg: UIMessage = {
+			id: "msg-manual",
+			role: "user",
+			parts: [{ type: "text", text: "Manual save test" }],
+			createdAt: new Date(),
+		};
+		addMessage(msg);
+
+		// Call saveMessages directly
+		await saveMessages();
+
+		// Verify file was created
+		assert.ok(existsSync(testMessagesFile), "Messages file should exist");
+
+		const content = await readFile(testMessagesFile, "utf-8");
+		const savedMessages = JSON.parse(content) as UIMessage[];
+		assert.equal(savedMessages.length, 1);
+		assert.equal(savedMessages[0].id, "msg-manual");
+	});
+
+	it("preserves messages across multiple completions", async () => {
+		// First completion
+		const msg1: UIMessage = {
+			id: "msg-first",
+			role: "user",
+			parts: [{ type: "text", text: "First" }],
+			createdAt: new Date(),
+		};
+		addMessage(msg1);
+		startCompletion("first-completion");
+		await finishCompletion();
+
+		// Second completion adds more messages
+		const msg2: UIMessage = {
+			id: "msg-second",
+			role: "user",
+			parts: [{ type: "text", text: "Second" }],
+			createdAt: new Date(),
+		};
+		addMessage(msg2);
+		startCompletion("second-completion");
+		await finishCompletion();
+
+		// Verify both messages are in the file
+		const content = await readFile(testMessagesFile, "utf-8");
+		const savedMessages = JSON.parse(content) as UIMessage[];
+		assert.equal(savedMessages.length, 2);
+		assert.equal(savedMessages[0].id, "msg-first");
+		assert.equal(savedMessages[1].id, "msg-second");
 	});
 });

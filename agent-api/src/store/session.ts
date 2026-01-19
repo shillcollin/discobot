@@ -3,10 +3,14 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { UIMessage, UIMessageChunk } from "ai";
 
-const SESSION_FILE =
-	process.env.SESSION_FILE || "/.data/session/agent-session.json";
-const MESSAGES_FILE =
-	process.env.MESSAGES_FILE || "/.data/session/agent-messages.json";
+// Use getters to allow tests to override via env vars after module load
+function getSessionFile(): string {
+	return process.env.SESSION_FILE || "/.data/session/agent-session.json";
+}
+
+function getMessagesFile(): string {
+	return process.env.MESSAGES_FILE || "/.data/session/agent-messages.json";
+}
 
 export interface SessionData {
 	sessionId: string;
@@ -17,9 +21,6 @@ export interface SessionData {
 // In-memory message store using AI SDK's UIMessage type
 let messages: UIMessage[] = [];
 let sessionData: SessionData | null = null;
-
-// Debounce timer for saving messages
-let saveMessagesTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Completion state tracking
 export interface CompletionState {
@@ -53,7 +54,7 @@ export function startCompletion(completionId: string): boolean {
 	return true;
 }
 
-export function finishCompletion(error?: string): void {
+export async function finishCompletion(error?: string): Promise<void> {
 	completionState = {
 		isRunning: false,
 		completionId: completionState.completionId,
@@ -63,6 +64,11 @@ export function finishCompletion(error?: string): void {
 	// Note: Events are NOT cleared here - the SSE handler needs to send final
 	// events after completion finishes. Events are cleared at the start of
 	// the next completion in runCompletion().
+
+	// Only save messages on successful completion
+	if (!error) {
+		await saveMessages();
+	}
 }
 
 export function isCompletionRunning(): boolean {
@@ -91,16 +97,12 @@ export function getMessages(): UIMessage[] {
 
 export function addMessage(message: UIMessage): void {
 	messages.push(message);
-	// Debounce save to avoid too many disk writes
-	scheduleSaveMessages();
 }
 
 export function updateMessage(id: string, updates: Partial<UIMessage>): void {
 	const index = messages.findIndex((m) => m.id === id);
 	if (index !== -1) {
 		messages[index] = { ...messages[index], ...updates };
-		// Debounce save to avoid too many disk writes
-		scheduleSaveMessages();
 	}
 }
 
@@ -115,32 +117,20 @@ export function getLastAssistantMessage(): UIMessage | undefined {
 
 export function clearMessages(): void {
 	messages = [];
-	// Clear any pending save
-	if (saveMessagesTimer) {
-		clearTimeout(saveMessagesTimer);
-		saveMessagesTimer = null;
-	}
 }
 
-function scheduleSaveMessages(): void {
-	if (saveMessagesTimer) {
-		clearTimeout(saveMessagesTimer);
-	}
-	saveMessagesTimer = setTimeout(() => {
-		saveMessages().catch((err) =>
-			console.error("Failed to save messages:", err),
-		);
-	}, 500);
-}
-
-async function saveMessages(): Promise<void> {
+export async function saveMessages(): Promise<void> {
 	try {
-		const dir = dirname(MESSAGES_FILE);
+		const dir = dirname(getMessagesFile());
 		if (!existsSync(dir)) {
 			await mkdir(dir, { recursive: true });
 		}
-		await writeFile(MESSAGES_FILE, JSON.stringify(messages, null, 2), "utf-8");
-		console.log(`Saved ${messages.length} messages to ${MESSAGES_FILE}`);
+		await writeFile(
+			getMessagesFile(),
+			JSON.stringify(messages, null, 2),
+			"utf-8",
+		);
+		console.log(`Saved ${messages.length} messages to ${getMessagesFile()}`);
 	} catch (error) {
 		console.error("Failed to save messages:", error);
 	}
@@ -148,12 +138,12 @@ async function saveMessages(): Promise<void> {
 
 export async function loadMessages(): Promise<UIMessage[]> {
 	try {
-		if (!existsSync(MESSAGES_FILE)) {
+		if (!existsSync(getMessagesFile())) {
 			return [];
 		}
-		const content = await readFile(MESSAGES_FILE, "utf-8");
+		const content = await readFile(getMessagesFile(), "utf-8");
 		messages = JSON.parse(content) as UIMessage[];
-		console.log(`Loaded ${messages.length} messages from ${MESSAGES_FILE}`);
+		console.log(`Loaded ${messages.length} messages from ${getMessagesFile()}`);
 		return messages;
 	} catch (error) {
 		console.error("Failed to load messages:", error);
@@ -167,10 +157,10 @@ export function getSessionData(): SessionData | null {
 
 export async function loadSession(): Promise<SessionData | null> {
 	try {
-		if (!existsSync(SESSION_FILE)) {
+		if (!existsSync(getSessionFile())) {
 			return null;
 		}
-		const content = await readFile(SESSION_FILE, "utf-8");
+		const content = await readFile(getSessionFile(), "utf-8");
 		sessionData = JSON.parse(content) as SessionData;
 		// Also load messages when loading session
 		await loadMessages();
@@ -183,13 +173,13 @@ export async function loadSession(): Promise<SessionData | null> {
 
 export async function saveSession(data: SessionData): Promise<void> {
 	try {
-		const dir = dirname(SESSION_FILE);
+		const dir = dirname(getSessionFile());
 		if (!existsSync(dir)) {
 			await mkdir(dir, { recursive: true });
 		}
-		await writeFile(SESSION_FILE, JSON.stringify(data, null, 2), "utf-8");
+		await writeFile(getSessionFile(), JSON.stringify(data, null, 2), "utf-8");
 		sessionData = data;
-		console.log(`Session saved to ${SESSION_FILE}`);
+		console.log(`Session saved to ${getSessionFile()}`);
 	} catch (error) {
 		console.error("Failed to save session:", error);
 		throw error;
@@ -198,11 +188,11 @@ export async function saveSession(data: SessionData): Promise<void> {
 
 export async function clearSession(): Promise<void> {
 	try {
-		if (existsSync(SESSION_FILE)) {
-			await unlink(SESSION_FILE);
+		if (existsSync(getSessionFile())) {
+			await unlink(getSessionFile());
 		}
-		if (existsSync(MESSAGES_FILE)) {
-			await unlink(MESSAGES_FILE);
+		if (existsSync(getMessagesFile())) {
+			await unlink(getMessagesFile());
 		}
 		console.log("Session cleared");
 		sessionData = null;

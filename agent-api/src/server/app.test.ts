@@ -12,7 +12,7 @@ import { createApp } from "./app.js";
 describe("GET /chat SSE endpoint", () => {
 	let app: ReturnType<typeof createApp>["app"];
 
-	before(() => {
+	before(async () => {
 		// Use 'true' command which exits immediately with success
 		// This prevents the ACP client from trying to parse invalid JSON
 		const result = createApp({
@@ -24,19 +24,19 @@ describe("GET /chat SSE endpoint", () => {
 		app = result.app;
 
 		// Ensure clean state
-		finishCompletion();
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
-	after(() => {
-		finishCompletion();
+	after(async () => {
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
 	describe("SSE mode (Accept: text/event-stream)", () => {
 		it("returns 204 No Content when no completion is running", async () => {
 			// Ensure no completion is running
-			finishCompletion();
+			await finishCompletion();
 
 			const res = await app.request("/chat", {
 				headers: { Accept: "text/event-stream" },
@@ -66,7 +66,7 @@ describe("GET /chat SSE endpoint", () => {
 			}
 
 			// Finish the completion before requesting (synchronous test)
-			finishCompletion();
+			await finishCompletion();
 
 			// Note: Since completion just finished, isCompletionRunning() returns false
 			// This means we need to test while completion is still running
@@ -90,7 +90,7 @@ describe("GET /chat SSE endpoint", () => {
 			);
 
 			// Now finish so the stream completes
-			finishCompletion();
+			await finishCompletion();
 
 			// Read the stream
 			const body = await res.text();
@@ -124,7 +124,7 @@ describe("GET /chat SSE endpoint", () => {
 			});
 
 			// Finish completion so stream ends
-			finishCompletion();
+			await finishCompletion();
 
 			const body = await res.text();
 
@@ -153,7 +153,7 @@ describe("GET /chat SSE endpoint", () => {
 				headers: { Accept: "text/event-stream" },
 			});
 
-			finishCompletion();
+			await finishCompletion();
 
 			const body = await res.text();
 			const lines = body.split("\n");
@@ -166,7 +166,7 @@ describe("GET /chat SSE endpoint", () => {
 describe("POST /chat conflict handling", () => {
 	let app: ReturnType<typeof createApp>["app"];
 
-	before(() => {
+	before(async () => {
 		const result = createApp({
 			agentCommand: "true",
 			agentArgs: [],
@@ -174,12 +174,12 @@ describe("POST /chat conflict handling", () => {
 			enableLogging: false,
 		});
 		app = result.app;
-		finishCompletion();
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
-	after(() => {
-		finishCompletion();
+	after(async () => {
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
@@ -208,7 +208,7 @@ describe("POST /chat conflict handling", () => {
 			assert.equal(body.error, "completion_in_progress");
 			assert.equal(body.completionId, "existing-completion");
 		} finally {
-			finishCompletion();
+			await finishCompletion();
 		}
 	});
 
@@ -248,7 +248,7 @@ describe("POST /chat conflict handling", () => {
 describe("GET /chat/status", () => {
 	let app: ReturnType<typeof createApp>["app"];
 
-	before(() => {
+	before(async () => {
 		const result = createApp({
 			agentCommand: "true",
 			agentArgs: [],
@@ -256,17 +256,17 @@ describe("GET /chat/status", () => {
 			enableLogging: false,
 		});
 		app = result.app;
-		finishCompletion();
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
-	after(() => {
-		finishCompletion();
+	after(async () => {
+		await finishCompletion();
 		clearCompletionEvents();
 	});
 
 	it("returns status when no completion is running", async () => {
-		finishCompletion();
+		await finishCompletion();
 
 		const res = await app.request("/chat/status");
 		assert.equal(res.status, 200);
@@ -287,13 +287,13 @@ describe("GET /chat/status", () => {
 			assert.equal(body.completionId, "status-test-completion");
 			assert.ok(body.startedAt, "Should have startedAt timestamp");
 		} finally {
-			finishCompletion();
+			await finishCompletion();
 		}
 	});
 
 	it("returns error after failed completion", async () => {
 		startCompletion("failed-completion");
-		finishCompletion("Connection timeout");
+		await finishCompletion("Connection timeout");
 
 		const res = await app.request("/chat/status");
 		assert.equal(res.status, 200);

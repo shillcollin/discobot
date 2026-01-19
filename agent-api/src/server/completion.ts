@@ -1,4 +1,5 @@
 import type {
+	Plan,
 	SessionNotification,
 	ToolCall,
 	ToolCallContent,
@@ -202,13 +203,13 @@ function runCompletion(
 			}
 
 			log({ event: "completed" });
-			finishCompletion();
+			await finishCompletion();
 		} catch (error) {
 			const errorText = extractErrorMessage(error);
 			log({ event: "error", error: errorText });
 			// Send error event to SSE stream so the client receives it
 			addCompletionEvent(createErrorChunk(errorText));
-			finishCompletion(errorText);
+			await finishCompletion(errorText);
 		} finally {
 			acpClient.setUpdateCallback(null);
 		}
@@ -268,6 +269,10 @@ function createUpdateHandler(
 			// Reasoning also interrupts text
 			currentTextPartIndex = null;
 			handleReasoningChunk(currentMsg, update.content.text);
+		} else if (update.sessionUpdate === "plan") {
+			// Plan update interrupts text - next text chunk should start a new part
+			currentTextPartIndex = null;
+			handlePlanUpdate(currentMsg, update);
 		}
 	};
 }
@@ -350,6 +355,26 @@ function handleToolUpdate(msg: UIMessage, update: ToolUpdate): void {
  */
 function handleReasoningChunk(msg: UIMessage, text: string): void {
 	msg.parts.push({ type: "reasoning", text });
+	updateMessage(msg.id, { parts: msg.parts });
+}
+
+/**
+ * Handle a plan update - store as a synthetic TodoWrite tool call.
+ */
+function handlePlanUpdate(msg: UIMessage, plan: Plan): void {
+	// Generate a unique tool call ID for this plan
+	const toolCallId = `plan-${Date.now()}`;
+
+	// Add as a dynamic-tool part with plan entries as output
+	msg.parts.push({
+		type: "dynamic-tool",
+		toolCallId,
+		toolName: "TodoWrite",
+		title: "Plan",
+		state: "output-available",
+		input: {},
+		output: plan.entries,
+	});
 	updateMessage(msg.id, { parts: msg.parts });
 }
 

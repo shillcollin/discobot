@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { UIMessage } from "ai";
 import type {
@@ -7,6 +10,11 @@ import type {
 } from "../../src/api/types.js";
 import { createApp } from "../../src/server/app.js";
 import { clearMessages, clearSession } from "../../src/store/session.js";
+
+// Set up test data directory before any imports that might use it
+const TEST_DATA_DIR = join(tmpdir(), `octobot-e2e-test-${process.pid}`);
+process.env.SESSION_FILE = join(TEST_DATA_DIR, "session.json");
+process.env.MESSAGES_FILE = join(TEST_DATA_DIR, "messages.json");
 
 // Response types
 interface StatusResponse {
@@ -76,6 +84,10 @@ describe("Agent Service E2E Tests", () => {
 	after(async () => {
 		await acpClient.disconnect();
 		await clearSession();
+		// Clean up test data directory
+		if (existsSync(TEST_DATA_DIR)) {
+			rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+		}
 	});
 
 	describe("GET /", () => {
