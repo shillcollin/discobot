@@ -4,6 +4,9 @@ const isTauriBuild = isTauri && !isDev;
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+	// Disable compression to prevent SSE buffering
+	// Next.js compression buffers responses, breaking server-sent events
+	compress: false,
 	typescript: {
 		ignoreBuildErrors: true,
 	},
