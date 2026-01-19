@@ -31,7 +31,7 @@ import {
 	MessageResponse,
 	MessageRoleProvider,
 } from "@/components/ai-elements/message";
-import { ToolCall, type ToolCallPart } from "@/components/ai-elements/tool-call";
+import { type PlanEntry, PlanQueue } from "@/components/ai-elements/plan-queue";
 import {
 	Input,
 	PromptInputAttachment,
@@ -41,6 +41,11 @@ import {
 	PromptInputToolbar,
 	PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
+import { Shimmer } from "@/components/ai-elements/shimmer";
+import {
+	ToolCall,
+	type ToolCallPart,
+} from "@/components/ai-elements/tool-call";
 import { IconRenderer } from "@/components/ide/icon-renderer";
 import {
 	getWorkspaceDisplayPath,
@@ -59,6 +64,7 @@ import type { Agent, SessionStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useMessages } from "@/lib/hooks/use-messages";
+import { usePromptPersistence } from "@/lib/hooks/use-prompt-persistence";
 import { useSession } from "@/lib/hooks/use-sessions";
 import { cn } from "@/lib/utils";
 
@@ -72,6 +78,40 @@ function getMessageText(message: UIMessage): string {
 		)
 		.map((part) => part.text)
 		.join("");
+}
+
+// Helper to extract the latest plan from messages
+// Looks for TodoWrite tool calls with plan entries as output
+function extractLatestPlan(messages: UIMessage[]): PlanEntry[] | null {
+	// Iterate backwards through messages to find the most recent plan
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (message.role !== "assistant") continue;
+
+		// Look through parts backwards to find latest TodoWrite tool call
+		for (let j = message.parts.length - 1; j >= 0; j--) {
+			const part = message.parts[j];
+			if (
+				part.type === "dynamic-tool" &&
+				part.toolName === "TodoWrite" &&
+				part.state === "output-available" &&
+				Array.isArray(part.output)
+			) {
+				// Validate that output looks like plan entries
+				const entries = part.output as unknown[];
+				if (
+					entries.length > 0 &&
+					typeof entries[0] === "object" &&
+					entries[0] !== null &&
+					"content" in entries[0] &&
+					"status" in entries[0]
+				) {
+					return entries as PlanEntry[];
+				}
+			}
+		}
+	}
+	return null;
 }
 
 interface ChatPanelProps {
@@ -222,6 +262,12 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		null,
 	);
 	const [isShimmering, setIsShimmering] = React.useState(false);
+	const [isPlanOpen, setIsPlanOpen] = React.useState(true);
+
+	// Use prompt persistence hook for session-scoped draft and browser-scoped history
+	const promptPersistence = usePromptPersistence({
+		sessionId: selectedSessionId,
+	});
 
 	// Fetch session data to check if session exists
 	const { error: sessionError, isLoading: sessionLoading } =
@@ -426,6 +472,12 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		return groups;
 	}, [messages]);
 
+	// Extract the current plan from messages
+	const currentPlan = React.useMemo(
+		() => extractLatestPlan(messages),
+		[messages],
+	);
+
 	// Handle form submission
 	const handleSubmit = async (
 		message: {
@@ -453,6 +505,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 
 		try {
 			await sendMessage({ text: messageText });
+
+			// On successful submit, add to history and clear draft
+			promptPersistence.addToHistory(messageText);
+			promptPersistence.clearDraft();
 
 			// For new chats, notify parent about the session ID AFTER the POST succeeds
 			// This ensures the session exists on the server before the client tries to use it
@@ -635,7 +691,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 							: selectedSession.status === "stopped"
 								? "bg-yellow-500/10 border-yellow-500/20"
 								: selectedSession.status === "closed" ||
-									  selectedSession.status === "removed"
+										selectedSession.status === "removed"
 									? "bg-muted/30 border-border"
 									: "bg-muted/50 border-border",
 					)}
@@ -881,6 +937,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 																{message.parts.map((part, partIdx) => {
 																	if (part.type === "text") {
 																		return (
+																			// biome-ignore lint/suspicious/noArrayIndexKey: Text parts have no unique ID, order is stable
 																			<MessageResponse key={`text-${partIdx}`}>
 																				{part.text}
 																			</MessageResponse>
@@ -923,11 +980,28 @@ export function ChatPanel({ className }: ChatPanelProps) {
 										</div>
 									</div>
 								))}
+								{/* Show shimmer status when waiting for assistant response */}
+								{isLoading && (
+									<div className="flex items-center gap-2 pl-3 py-2">
+										<Shimmer className="text-sm" duration={1.5}>
+											AI is thinking...
+										</Shimmer>
+									</div>
+								)}
 							</div>
 						)}
 					</ConversationContent>
 					<ConversationScrollButton />
 				</Conversation>
+			)}
+
+			{/* Plan queue - shows when there's an active plan in conversation mode */}
+			{!sessionNotFound && mode === "conversation" && currentPlan && (
+				<PlanQueue
+					entries={currentPlan}
+					isOpen={isPlanOpen}
+					onOpenChange={setIsPlanOpen}
+				/>
 			)}
 
 			{/* Input area - transitions from centered/large to bottom/compact */}
@@ -940,7 +1014,18 @@ export function ChatPanel({ className }: ChatPanelProps) {
 							: "px-4 py-4 border-t border-border",
 					)}
 				>
-					<Input onSubmit={handleSubmit} status={status} className="max-w-full">
+					<Input
+						onSubmit={handleSubmit}
+						status={status}
+						className="max-w-full"
+						value={promptPersistence.value}
+						onChange={promptPersistence.setValue}
+						history={promptPersistence.history}
+						historyIndex={promptPersistence.historyIndex}
+						onHistoryIndexChange={promptPersistence.setHistoryIndex}
+						isHistoryOpen={promptPersistence.isHistoryOpen}
+						onHistoryOpenChange={promptPersistence.setIsHistoryOpen}
+					>
 						<PromptInputAttachmentsPreview />
 						<PromptInputTextarea
 							placeholder={
