@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -356,6 +359,133 @@ func TestSandboxChatClient_SendMessages_WithAuthorization(t *testing.T) {
 	if receivedAuth != expected {
 		t.Errorf("Expected Authorization: %s, got: %s", expected, receivedAuth)
 	}
+}
+
+func TestSandboxChatClient_SendMessages_RetriesOnEOF(t *testing.T) {
+	var attempts atomic.Int32
+
+	// Create a round tripper that fails with EOF twice, then succeeds
+	failingTransport := &eofThenSuccessTransport{
+		failCount: 2,
+		attempts:  &attempts,
+	}
+
+	provider := &mockSandboxProviderWithTransport{
+		transport: failingTransport,
+	}
+	client := NewSandboxChatClient(provider)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	messages := json.RawMessage(`[{"role":"user","content":"hello"}]`)
+	ch, err := client.SendMessages(ctx, "test-session", messages, nil)
+	if err != nil {
+		t.Fatalf("SendMessages failed: %v", err)
+	}
+
+	// Drain channel
+	for range ch { //nolint:revive // empty block intentionally drains channel
+	}
+
+	// Should have retried: 2 EOF failures + 1 success for POST + 1 for GET = 4 total
+	// But we only count POST attempts in our transport
+	totalAttempts := attempts.Load()
+	if totalAttempts < 3 {
+		t.Errorf("Expected at least 3 attempts (2 EOF + 1 success), got %d", totalAttempts)
+	}
+}
+
+func TestIsRetryableError_EOF(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"io.EOF", io.EOF, true},
+		{"io.ErrUnexpectedEOF", io.ErrUnexpectedEOF, true},
+		{"wrapped EOF", fmt.Errorf("request failed: %w", io.EOF), true},
+		{"EOF in string", fmt.Errorf("connection closed: EOF"), true},
+		{"unrelated error", fmt.Errorf("some other error"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isRetryableError(tt.err)
+			if result != tt.expected {
+				t.Errorf("isRetryableError(%v) = %v, expected %v", tt.err, result, tt.expected)
+			}
+		})
+	}
+}
+
+// eofThenSuccessTransport returns EOF errors for the first N requests, then succeeds.
+type eofThenSuccessTransport struct {
+	failCount int
+	attempts  *atomic.Int32
+}
+
+func (t *eofThenSuccessTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	attempt := t.attempts.Add(1)
+
+	// Fail with EOF for the first failCount attempts
+	if int(attempt) <= t.failCount {
+		return nil, io.EOF
+	}
+
+	// After failures, return success responses
+	rec := httptest.NewRecorder()
+	if req.Method == "POST" {
+		rec.Header().Set("Content-Type", "application/json")
+		rec.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(rec).Encode(map[string]string{"status": "started"})
+	} else {
+		// GET request for stream
+		rec.Header().Set("Content-Type", "text/event-stream")
+		rec.WriteHeader(http.StatusOK)
+		rec.Write([]byte("data: [DONE]\n\n"))
+	}
+	return rec.Result(), nil
+}
+
+// mockSandboxProviderWithTransport allows injecting a custom transport.
+type mockSandboxProviderWithTransport struct {
+	transport http.RoundTripper
+}
+
+func (m *mockSandboxProviderWithTransport) ImageExists(_ context.Context) bool { return true }
+func (m *mockSandboxProviderWithTransport) Image() string                      { return "test-image" }
+func (m *mockSandboxProviderWithTransport) Create(_ context.Context, _ string, _ sandbox.CreateOptions) (*sandbox.Sandbox, error) {
+	return &sandbox.Sandbox{Status: sandbox.StatusCreated}, nil
+}
+func (m *mockSandboxProviderWithTransport) Get(_ context.Context, _ string) (*sandbox.Sandbox, error) {
+	return &sandbox.Sandbox{Status: sandbox.StatusRunning}, nil
+}
+func (m *mockSandboxProviderWithTransport) Start(_ context.Context, _ string) error { return nil }
+func (m *mockSandboxProviderWithTransport) Stop(_ context.Context, _ string, _ time.Duration) error {
+	return nil
+}
+func (m *mockSandboxProviderWithTransport) Remove(_ context.Context, _ string) error { return nil }
+func (m *mockSandboxProviderWithTransport) Exec(_ context.Context, _ string, _ []string, _ sandbox.ExecOptions) (*sandbox.ExecResult, error) {
+	return &sandbox.ExecResult{ExitCode: 0}, nil
+}
+func (m *mockSandboxProviderWithTransport) Attach(_ context.Context, _ string, _ sandbox.AttachOptions) (sandbox.PTY, error) {
+	return nil, nil
+}
+func (m *mockSandboxProviderWithTransport) List(_ context.Context) ([]*sandbox.Sandbox, error) {
+	return nil, nil
+}
+func (m *mockSandboxProviderWithTransport) GetSecret(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+func (m *mockSandboxProviderWithTransport) HTTPClient(_ context.Context, _ string) (*http.Client, error) {
+	return &http.Client{Transport: m.transport}, nil
+}
+func (m *mockSandboxProviderWithTransport) Watch(_ context.Context) (<-chan sandbox.StateEvent, error) {
+	ch := make(chan sandbox.StateEvent)
+	close(ch)
+	return ch, nil
 }
 
 func contains(s, substr string) bool {

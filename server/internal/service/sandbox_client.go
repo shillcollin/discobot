@@ -51,12 +51,17 @@ func isRetryableError(err error) bool {
 	if errors.Is(err, syscall.ECONNRESET) {
 		return true
 	}
+	// EOF - connection closed before response (container still starting)
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	// Check for common network error patterns in the error string
 	errStr := err.Error()
 	return strings.Contains(errStr, "connection refused") ||
 		strings.Contains(errStr, "connection reset") ||
 		strings.Contains(errStr, "no such host") ||
-		strings.Contains(errStr, "i/o timeout")
+		strings.Contains(errStr, "i/o timeout") ||
+		strings.Contains(errStr, "EOF")
 }
 
 // isRetryableStatus checks if an HTTP status code should trigger a retry.
