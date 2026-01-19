@@ -87,10 +87,10 @@ export function SessionProvider({ children }: SessionProviderProps) {
 
 	const { agentTypes } = useAgentTypes();
 
-	// Selection state (persisted to localStorage for refresh persistence)
+	// Selection state (persisted to sessionStorage for per-tab refresh persistence)
 	const [selectedSessionId, setSelectedSessionId] = usePersistedState<
 		string | null
-	>(STORAGE_KEYS.SELECTED_SESSION_ID, null);
+	>(STORAGE_KEYS.SELECTED_SESSION_ID, null, "session");
 	const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(
 		null,
 	);

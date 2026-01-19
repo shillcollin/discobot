@@ -2,21 +2,27 @@
 
 import * as React from "react";
 
+type StorageType = "local" | "session";
+
 /**
- * A useState hook that persists the value to localStorage.
- * Handles SSR by only reading localStorage after mount.
+ * A useState hook that persists the value to localStorage or sessionStorage.
+ * Handles SSR by only reading storage after mount.
+ *
+ * @param storage - "local" for localStorage (shared across tabs), "session" for sessionStorage (per-tab)
  */
 export function usePersistedState<T>(
 	key: string,
 	defaultValue: T,
+	storage: StorageType = "local",
 ): [T, React.Dispatch<React.SetStateAction<T>>] {
 	const [state, setState] = React.useState<T>(defaultValue);
 	const [isHydrated, setIsHydrated] = React.useState(false);
 
-	// Load from localStorage after mount (to avoid SSR mismatch)
+	// Load from storage after mount (to avoid SSR mismatch)
 	React.useEffect(() => {
+		const store = storage === "local" ? localStorage : sessionStorage;
 		try {
-			const stored = localStorage.getItem(key);
+			const stored = store.getItem(key);
 			if (stored !== null) {
 				setState(JSON.parse(stored));
 			}
@@ -24,18 +30,19 @@ export function usePersistedState<T>(
 			// Ignore errors (e.g., invalid JSON)
 		}
 		setIsHydrated(true);
-	}, [key]);
+	}, [key, storage]);
 
-	// Save to localStorage whenever state changes (after hydration)
+	// Save to storage whenever state changes (after hydration)
 	React.useEffect(() => {
 		if (isHydrated) {
+			const store = storage === "local" ? localStorage : sessionStorage;
 			try {
-				localStorage.setItem(key, JSON.stringify(state));
+				store.setItem(key, JSON.stringify(state));
 			} catch {
 				// Ignore errors (e.g., quota exceeded)
 			}
 		}
-	}, [key, state, isHydrated]);
+	}, [key, state, isHydrated, storage]);
 
 	return [state, setState];
 }
