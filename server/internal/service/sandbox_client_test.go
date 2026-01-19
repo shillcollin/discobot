@@ -14,8 +14,8 @@ import (
 // mockSandboxProvider implements sandbox.Provider for testing SandboxChatClient.
 // Only Get, GetSecret, and HTTPClient are used by SandboxChatClient.
 type mockSandboxProvider struct {
-	baseURL string
 	secret  string
+	handler http.Handler // Handler for HTTPClient to use
 }
 
 func (m *mockSandboxProvider) ImageExists(_ context.Context) bool {
@@ -33,24 +33,7 @@ func (m *mockSandboxProvider) Create(_ context.Context, _ string, _ sandbox.Crea
 func (m *mockSandboxProvider) Get(_ context.Context, _ string) (*sandbox.Sandbox, error) {
 	return &sandbox.Sandbox{
 		Status: sandbox.StatusRunning,
-		Ports: []sandbox.AssignedPort{
-			{ContainerPort: 3002, HostIP: "127.0.0.1", HostPort: m.port()},
-		},
 	}, nil
-}
-
-func (m *mockSandboxProvider) port() int {
-	// Extract port from baseURL like "http://127.0.0.1:12345"
-	var port int
-	for i := len(m.baseURL) - 1; i >= 0; i-- {
-		if m.baseURL[i] == ':' {
-			for j := i + 1; j < len(m.baseURL); j++ {
-				port = port*10 + int(m.baseURL[j]-'0')
-			}
-			break
-		}
-	}
-	return port
 }
 
 func (m *mockSandboxProvider) Start(_ context.Context, _ string) error {
@@ -82,7 +65,21 @@ func (m *mockSandboxProvider) GetSecret(_ context.Context, _ string) (string, er
 }
 
 func (m *mockSandboxProvider) HTTPClient(_ context.Context, _ string) (*http.Client, error) {
+	if m.handler != nil {
+		return &http.Client{Transport: &testRoundTripper{handler: m.handler}}, nil
+	}
 	return &http.Client{}, nil
+}
+
+// testRoundTripper implements http.RoundTripper for testing.
+type testRoundTripper struct {
+	handler http.Handler
+}
+
+func (t *testRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	t.handler.ServeHTTP(rec, req)
+	return rec.Result(), nil
 }
 
 func (m *mockSandboxProvider) Watch(_ context.Context) (<-chan sandbox.StateEvent, error) {
@@ -95,8 +92,8 @@ func TestSandboxChatClient_SendMessages_Returns202ThenStreams(t *testing.T) {
 	// Track request sequence
 	var postCalled, getCalled bool
 
-	// Create mock server that simulates agent-api behavior
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create handler that simulates agent-api behavior
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/chat" {
 			postCalled = true
 			// Return 202 Accepted (completion started)
@@ -118,21 +115,17 @@ func TestSandboxChatClient_SendMessages_Returns202ThenStreams(t *testing.T) {
 			// Return SSE stream
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
-			flusher, _ := w.(http.Flusher)
 			w.Write([]byte("data: {\"type\":\"text\"}\n\n"))
-			flusher.Flush()
 			w.Write([]byte("data: [DONE]\n\n"))
-			flusher.Flush()
 			return
 		}
 
 		t.Errorf("Unexpected request: %s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
+	})
 
 	// Create client with mock provider
-	provider := &mockSandboxProvider{baseURL: server.URL}
+	provider := &mockSandboxProvider{handler: handler}
 	client := NewSandboxChatClient(provider)
 
 	// Send messages
@@ -172,8 +165,8 @@ func TestSandboxChatClient_SendMessages_Returns202ThenStreams(t *testing.T) {
 }
 
 func TestSandboxChatClient_SendMessages_Non202Error(t *testing.T) {
-	// Create mock server that returns 400 Bad Request
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create handler that returns 400 Bad Request
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/chat" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
@@ -183,10 +176,9 @@ func TestSandboxChatClient_SendMessages_Non202Error(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
+	})
 
-	provider := &mockSandboxProvider{baseURL: server.URL}
+	provider := &mockSandboxProvider{handler: handler}
 	client := NewSandboxChatClient(provider)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -205,8 +197,8 @@ func TestSandboxChatClient_SendMessages_Non202Error(t *testing.T) {
 }
 
 func TestSandboxChatClient_SendMessages_409Conflict(t *testing.T) {
-	// Create mock server that returns 409 Conflict (completion already running)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create handler that returns 409 Conflict (completion already running)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/chat" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
@@ -217,10 +209,9 @@ func TestSandboxChatClient_SendMessages_409Conflict(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
+	})
 
-	provider := &mockSandboxProvider{baseURL: server.URL}
+	provider := &mockSandboxProvider{handler: handler}
 	client := NewSandboxChatClient(provider)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -239,17 +230,16 @@ func TestSandboxChatClient_SendMessages_409Conflict(t *testing.T) {
 }
 
 func TestSandboxChatClient_GetStream_NoContent(t *testing.T) {
-	// Create mock server that returns 204 No Content (no completion running)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create handler that returns 204 No Content (no completion running)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && r.URL.Path == "/chat" {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
+	})
 
-	provider := &mockSandboxProvider{baseURL: server.URL}
+	provider := &mockSandboxProvider{handler: handler}
 	client := NewSandboxChatClient(provider)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -273,7 +263,7 @@ func TestSandboxChatClient_GetStream_NoContent(t *testing.T) {
 func TestSandboxChatClient_SendMessages_WithCredentials(t *testing.T) {
 	var receivedCredentials string
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/chat" {
 			receivedCredentials = r.Header.Get("X-Octobot-Credentials")
 			w.WriteHeader(http.StatusAccepted)
@@ -290,10 +280,9 @@ func TestSandboxChatClient_SendMessages_WithCredentials(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
+	})
 
-	provider := &mockSandboxProvider{baseURL: server.URL}
+	provider := &mockSandboxProvider{handler: handler}
 	client := NewSandboxChatClient(provider)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -327,7 +316,7 @@ func TestSandboxChatClient_SendMessages_WithCredentials(t *testing.T) {
 func TestSandboxChatClient_SendMessages_WithAuthorization(t *testing.T) {
 	var receivedAuth string
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/chat" {
 			receivedAuth = r.Header.Get("Authorization")
 			w.WriteHeader(http.StatusAccepted)
@@ -344,10 +333,9 @@ func TestSandboxChatClient_SendMessages_WithAuthorization(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
+	})
 
-	provider := &mockSandboxProvider{baseURL: server.URL, secret: "my-secret-token"}
+	provider := &mockSandboxProvider{handler: handler, secret: "my-secret-token"}
 	client := NewSandboxChatClient(provider)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

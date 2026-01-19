@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,9 +40,21 @@ func skipIfNoDocker(t *testing.T) {
 	}
 }
 
-// pullImage ensures an image is available locally
+// imageExists checks if a Docker image exists locally
+func imageExists(image string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
+	return cmd.Run() == nil
+}
+
+// pullImage ensures an image is available locally (skips if already present)
 func pullImage(t *testing.T, image string) {
 	t.Helper()
+	if imageExists(image) {
+		return // Already have it locally
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -58,6 +71,10 @@ type testSandboxSetup struct {
 	db         *database.DB
 	cfg        *config.Config
 	workingDir string
+
+	// Track session IDs for cleanup (enables parallel tests)
+	mu         sync.Mutex
+	sessionIDs []string
 }
 
 // newTestSandboxSetup creates a new test setup with real Docker
@@ -107,13 +124,16 @@ func newTestSandboxSetup(t *testing.T) *testSandboxSetup {
 	}
 
 	t.Cleanup(func() {
-		// Clean up any sandboxes created during the test
+		// Clean up only sandboxes created by this test (enables parallel tests)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		sandboxes, _ := provider.List(ctx)
-		for _, sb := range sandboxes {
-			_ = provider.Remove(ctx, sb.SessionID)
+		setup.mu.Lock()
+		sessionIDs := setup.sessionIDs
+		setup.mu.Unlock()
+
+		for _, sessionID := range sessionIDs {
+			_ = provider.Remove(ctx, sessionID)
 		}
 
 		provider.Close()
@@ -168,12 +188,22 @@ func (s *testSandboxSetup) createTestSession(t *testing.T, workspace *model.Work
 	return session
 }
 
+// trackSessionID records a session ID for cleanup
+func (s *testSandboxSetup) trackSessionID(sessionID string) {
+	s.mu.Lock()
+	s.sessionIDs = append(s.sessionIDs, sessionID)
+	s.mu.Unlock()
+}
+
 // createSandboxWithImage creates a sandbox with a specific image using a temporary provider.
 // This is used to simulate existing sandboxes from before an image upgrade.
 func (s *testSandboxSetup) createSandboxWithImage(t *testing.T, sessionID, image string) *sandbox.Sandbox {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Track for cleanup
+	s.trackSessionID(sessionID)
 
 	// Create a temporary provider configured with the specific image
 	tempCfg := &config.Config{
@@ -204,6 +234,8 @@ func (s *testSandboxSetup) createSandboxWithImage(t *testing.T, sessionID, image
 }
 
 func TestReconcileSandboxes_ReplacesOutdatedImage(t *testing.T) {
+	
+	
 	setup := newTestSandboxSetup(t)
 	ctx := context.Background()
 
@@ -257,6 +289,7 @@ func TestReconcileSandboxes_ReplacesOutdatedImage(t *testing.T) {
 }
 
 func TestReconcileSandboxes_SkipsCorrectImage(t *testing.T) {
+	
 	setup := newTestSandboxSetup(t)
 	ctx := context.Background()
 
@@ -304,11 +337,12 @@ func TestReconcileSandboxes_SkipsCorrectImage(t *testing.T) {
 }
 
 func TestReconcileSandboxes_RemovesOrphanedSandboxes(t *testing.T) {
+	
 	setup := newTestSandboxSetup(t)
 	ctx := context.Background()
 
 	// Create a sandbox WITHOUT a corresponding session in the database
-	orphanSessionID := "orphan-session-id"
+	orphanSessionID := fmt.Sprintf("orphan-%d", time.Now().UnixNano())
 	t.Logf("Creating orphaned sandbox (no session in DB)")
 	setup.createSandboxWithImage(t, orphanSessionID, testImageOld)
 
@@ -338,6 +372,7 @@ func TestReconcileSandboxes_RemovesOrphanedSandboxes(t *testing.T) {
 }
 
 func TestReconcileSandboxes_MultipleSandboxes(t *testing.T) {
+	
 	setup := newTestSandboxSetup(t)
 	ctx := context.Background()
 
@@ -350,10 +385,13 @@ func TestReconcileSandboxes_MultipleSandboxes(t *testing.T) {
 	session2 := setup.createTestSession(t, workspace, "session-old-2")
 	session3 := setup.createTestSession(t, workspace, "session-new")
 
-	t.Log("Creating sandboxes...")
-	setup.createSandboxWithImage(t, session1.ID, testImageOld)
-	setup.createSandboxWithImage(t, session2.ID, testImageOld)
-	setup.createSandboxWithImage(t, session3.ID, testImageNew)
+	t.Log("Creating sandboxes in parallel...")
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { defer wg.Done(); setup.createSandboxWithImage(t, session1.ID, testImageOld) }()
+	go func() { defer wg.Done(); setup.createSandboxWithImage(t, session2.ID, testImageOld) }()
+	go func() { defer wg.Done(); setup.createSandboxWithImage(t, session3.ID, testImageNew) }()
+	wg.Wait()
 
 	// Get original sandbox IDs
 	sb1, _ := setup.provider.Get(ctx, session1.ID)
@@ -407,6 +445,7 @@ func TestReconcileSandboxes_MultipleSandboxes(t *testing.T) {
 }
 
 func TestReconcileSandboxes_NoSandboxes(t *testing.T) {
+	
 	setup := newTestSandboxSetup(t)
 	ctx := context.Background()
 
@@ -591,8 +630,8 @@ func TestReconcileSessionStates_MarksStoppedSessionWithStoppedSandbox(t *testing
 	t.Log("Creating and stopping sandbox...")
 	setup.createSandboxWithImage(t, session.ID, testImageNew)
 
-	// Stop the sandbox gracefully (simulates idle shutdown)
-	if err := setup.provider.Stop(ctx, session.ID, 10*time.Second); err != nil {
+	// Stop the sandbox (0 timeout = SIGKILL immediately, no graceful shutdown needed for tests)
+	if err := setup.provider.Stop(ctx, session.ID, 0); err != nil {
 		t.Fatalf("Failed to stop sandbox: %v", err)
 	}
 
