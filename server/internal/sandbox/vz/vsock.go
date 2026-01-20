@@ -48,8 +48,8 @@ func (p *Provider) Dial(ctx context.Context, sessionID string, port uint32) (net
 
 	return &vsockConn{
 		VirtioSocketConnection: conn,
-		localAddr:              &vsockAddr{cid: 2, port: 0},         // Host CID is always 2
-		remoteAddr:             &vsockAddr{cid: 3, port: port},      // Guest CID (typically 3)
+		localAddr:              &vsockAddr{cid: 2, port: 0},    // Host CID is always 2
+		remoteAddr:             &vsockAddr{cid: 3, port: port}, // Guest CID (typically 3)
 	}, nil
 }
 

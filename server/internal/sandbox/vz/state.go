@@ -20,17 +20,17 @@ const (
 // vmState is the persistent state for a VM instance.
 // This is saved to disk and reloaded on server restart.
 type vmState struct {
-	SessionID       string                `json:"session_id"`
-	DiskPath        string                `json:"disk_path"`
-	Secret          string                `json:"secret"`
-	Status          sandbox.Status `json:"status"`
-	CreatedAt       time.Time             `json:"created_at"`
-	StartedAt       *time.Time            `json:"started_at,omitempty"`
-	StoppedAt       *time.Time            `json:"stopped_at,omitempty"`
-	Env             map[string]string     `json:"env,omitempty"`
-	Metadata        map[string]string     `json:"metadata,omitempty"`
-	WorkspacePath   string                `json:"workspace_path,omitempty"`
-	WorkspaceCommit string                `json:"workspace_commit,omitempty"`
+	SessionID       string            `json:"session_id"`
+	DiskPath        string            `json:"disk_path"`
+	Secret          string            `json:"secret"`
+	Status          sandbox.Status    `json:"status"`
+	CreatedAt       time.Time         `json:"created_at"`
+	StartedAt       *time.Time        `json:"started_at,omitempty"`
+	StoppedAt       *time.Time        `json:"stopped_at,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+	WorkspacePath   string            `json:"workspace_path,omitempty"`
+	WorkspaceCommit string            `json:"workspace_commit,omitempty"`
 }
 
 // stateFilePath returns the path to the state file for a session.
