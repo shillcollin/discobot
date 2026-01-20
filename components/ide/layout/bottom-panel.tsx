@@ -1,5 +1,6 @@
 "use client";
 
+import { PanelRightClose } from "lucide-react";
 import { ChatPanel } from "@/components/ide/chat-panel";
 import {
 	PanelControls,
@@ -18,7 +19,9 @@ interface BottomPanelProps {
 	view: BottomView;
 	onViewChange: (view: BottomView) => void;
 	onMinimize: () => void;
-	onMaximize: () => void;
+	rightSidebarOpen?: boolean;
+	onToggleRightSidebar?: () => void;
+	changedFilesCount?: number;
 }
 
 export function BottomPanel({
@@ -28,7 +31,9 @@ export function BottomPanel({
 	view,
 	onViewChange,
 	onMinimize,
-	onMaximize,
+	rightSidebarOpen,
+	onToggleRightSidebar,
+	changedFilesCount = 0,
 }: BottomPanelProps) {
 	const { selectedSessionId } = useSessionContext();
 
@@ -54,13 +59,39 @@ export function BottomPanel({
 						Terminal
 					</Button>
 				</div>
-				{showPanelControls && (
-					<PanelControls
-						state={panelState}
-						onMinimize={onMinimize}
-						onMaximize={onMaximize}
-					/>
-				)}
+				<div className="flex items-center gap-2">
+					{showPanelControls && (
+						<PanelControls
+							state={panelState}
+							onMinimize={onMinimize}
+							showMinimize={false}
+							showMaximize={false}
+						/>
+					)}
+					{onToggleRightSidebar &&
+						(rightSidebarOpen ? (
+							<Button
+								variant="ghost"
+								size="icon"
+								className="h-6 w-6"
+								onClick={onToggleRightSidebar}
+								title="Collapse Files"
+							>
+								<PanelRightClose className="h-3.5 w-3.5" />
+							</Button>
+						) : (
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-6 text-xs"
+								onClick={onToggleRightSidebar}
+							>
+								{changedFilesCount > 0
+									? `Changes (${changedFilesCount})`
+									: "Files"}
+							</Button>
+						))}
+				</div>
 			</div>
 			{panelState !== "minimized" && (
 				<div className="flex-1 overflow-hidden">

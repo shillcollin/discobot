@@ -299,7 +299,11 @@ function buildTreeFromChangedFiles(changedFiles: string[]): LazyFileNode[] {
 					isFile: isLast,
 				});
 			}
-			current = current.children.get(part)!;
+			const next = current.children.get(part);
+			if (!next) {
+				continue;
+			}
+			current = next;
 			if (isLast) {
 				current.isFile = true;
 			}

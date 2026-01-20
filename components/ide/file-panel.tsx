@@ -273,7 +273,7 @@ function FileTreeNode({
 					</>
 				)}
 				<span className="truncate">{node.name}</span>
-				{node.changed && node.type === "file" && (
+				{node.changed && (
 					<span className="ml-auto text-xs text-green-500 font-medium">M</span>
 				)}
 			</button>

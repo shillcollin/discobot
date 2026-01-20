@@ -8,9 +8,9 @@ import {
 	MessageSquare,
 	PanelLeft,
 	PanelLeftClose,
-	PanelRight,
-	PanelRightClose,
 	Plus,
+	Trash2,
+	X,
 } from "lucide-react";
 import * as React from "react";
 import { CredentialsDialog } from "@/components/ide/credentials-dialog";
@@ -30,22 +30,21 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { api } from "@/lib/api-client";
 import type { Agent, Workspace } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
+import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
+import { formatTimeAgo } from "@/lib/utils";
 
 interface HeaderProps {
 	leftSidebarOpen: boolean;
 	onToggleSidebar: () => void;
-	rightSidebarOpen: boolean;
-	onToggleRightSidebar: () => void;
 	onNewSession: () => void;
 }
 
 export function Header({
 	leftSidebarOpen,
 	onToggleSidebar,
-	rightSidebarOpen,
-	onToggleRightSidebar,
 	onNewSession,
 }: HeaderProps) {
 	const {
@@ -58,33 +57,69 @@ export function Header({
 	} = useSessionContext();
 
 	const [credentialsOpen, setCredentialsOpen] = React.useState(false);
+	const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(
+		null,
+	);
 
 	const getAgentIcons = (a: Agent) => {
 		const agentType = agentTypes.find((t) => t.id === a.agentType);
 		return agentType?.icons;
 	};
 
-	// Get sessions for current workspace (non-closed only)
+	// Fetch sessions for current workspace via SWR
+	const { sessions: workspaceSessionsRaw } = useSessions(
+		sessionWorkspace?.id ?? null,
+	);
+
+	// Filter to non-closed sessions only
 	const workspaceSessions = React.useMemo(() => {
-		if (!sessionWorkspace) return [];
-		return sessionWorkspace.sessions.filter((s) => s.status !== "closed");
-	}, [sessionWorkspace]);
+		return workspaceSessionsRaw.filter((s) => s.status !== "closed");
+	}, [workspaceSessionsRaw]);
 
 	const hasSession = selectedSession || sessionWorkspace;
 
 	// Handle workspace selection from breadcrumb dropdown
 	const handleWorkspaceSelect = React.useCallback(
-		(workspace: Workspace) => {
-			// Find first non-closed session in this workspace
-			const firstSession = workspace.sessions.find(
-				(s) => s.status !== "closed",
-			);
-			if (firstSession) {
-				handleSessionSelect(firstSession);
+		async (workspace: Workspace) => {
+			// Fetch sessions for this workspace and select the first non-closed one
+			try {
+				const { sessions } = await api.getSessions(workspace.id);
+				const firstSession = sessions.find((s) => s.status !== "closed");
+				if (firstSession) {
+					handleSessionSelect(firstSession);
+				}
+			} catch (error) {
+				console.error("Failed to fetch sessions for workspace:", error);
 			}
 		},
 		[handleSessionSelect],
 	);
+
+	// Handle session deletion with inline confirmation
+	const { deleteSession } = useDeleteSession();
+	const handleDeleteClick = React.useCallback(
+		(e: React.MouseEvent, sessionId: string) => {
+			e.stopPropagation();
+			setConfirmDeleteId(sessionId);
+		},
+		[],
+	);
+	const handleConfirmDelete = React.useCallback(
+		async (e: React.MouseEvent, sessionId: string) => {
+			e.stopPropagation();
+			const isCurrentSession = selectedSession?.id === sessionId;
+			await deleteSession(sessionId);
+			setConfirmDeleteId(null);
+			if (isCurrentSession) {
+				onNewSession();
+			}
+		},
+		[deleteSession, selectedSession?.id, onNewSession],
+	);
+	const handleCancelDelete = React.useCallback((e: React.MouseEvent) => {
+		e.stopPropagation();
+		setConfirmDeleteId(null);
+	}, []);
 
 	// Detect macOS for window control placement
 	const [isMac, setIsMac] = React.useState(false);
@@ -163,9 +198,6 @@ export function Header({
 								<DropdownMenuContent align="start" className="w-64">
 									{workspaces.map((ws) => {
 										const isSelected = ws.id === sessionWorkspace.id;
-										const nonClosedSessions = ws.sessions.filter(
-											(s) => s.status !== "closed",
-										);
 										return (
 											<DropdownMenuItem
 												key={ws.id}
@@ -178,9 +210,6 @@ export function Header({
 												/>
 												<span className="truncate flex-1" title={ws.path}>
 													{getWorkspaceDisplayPath(ws.path, ws.sourceType)}
-												</span>
-												<span className="text-xs text-muted-foreground">
-													{nonClosedSessions.length}
 												</span>
 												{isSelected && (
 													<Check className="h-4 w-4 shrink-0 text-primary" />
@@ -196,7 +225,9 @@ export function Header({
 						{selectedSession && sessionWorkspace && (
 							<>
 								<span className="text-muted-foreground shrink-0">/</span>
-								<DropdownMenu>
+								<DropdownMenu
+									onOpenChange={(open) => !open && setConfirmDeleteId(null)}
+								>
 									<DropdownMenuTrigger asChild>
 										<button
 											type="button"
@@ -213,11 +244,12 @@ export function Header({
 										{workspaceSessions.length > 0 ? (
 											workspaceSessions.map((session) => {
 												const isSelected = session.id === selectedSession.id;
+												const isConfirming = confirmDeleteId === session.id;
 												return (
 													<DropdownMenuItem
 														key={session.id}
 														onClick={() => handleSessionSelect(session)}
-														className="flex items-center gap-2"
+														className="group/item flex items-center gap-2"
 													>
 														<MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
 														<div className="flex-1 min-w-0">
@@ -225,11 +257,44 @@ export function Header({
 																{session.name}
 															</div>
 															<div className="text-xs text-muted-foreground truncate">
-																{session.timestamp}
+																{formatTimeAgo(session.timestamp)}
 															</div>
 														</div>
-														{isSelected && (
+														{isSelected && !isConfirming && (
 															<Check className="h-4 w-4 shrink-0 text-primary" />
+														)}
+														{isConfirming ? (
+															<div className="flex items-center gap-0.5 shrink-0">
+																<button
+																	type="button"
+																	onClick={(e) =>
+																		handleConfirmDelete(e, session.id)
+																	}
+																	className="h-6 w-6 rounded hover:bg-destructive/10 text-destructive flex items-center justify-center"
+																	title="Confirm delete"
+																>
+																	<Check className="h-3.5 w-3.5" />
+																</button>
+																<button
+																	type="button"
+																	onClick={handleCancelDelete}
+																	className="h-6 w-6 rounded hover:bg-muted flex items-center justify-center"
+																	title="Cancel"
+																>
+																	<X className="h-3.5 w-3.5" />
+																</button>
+															</div>
+														) : (
+															<button
+																type="button"
+																onClick={(e) =>
+																	handleDeleteClick(e, session.id)
+																}
+																className="h-6 w-6 shrink-0 rounded hover:bg-destructive/10 hover:text-destructive flex items-center justify-center opacity-0 group-hover/item:opacity-100 transition-opacity"
+																title="Delete session"
+															>
+																<Trash2 className="h-3.5 w-3.5" />
+															</button>
 														)}
 													</DropdownMenuItem>
 												);
@@ -285,19 +350,6 @@ export function Header({
 					<span className="sr-only">API Credentials</span>
 				</Button>
 				<ThemeToggle className="tauri-no-drag" />
-				<Button
-					variant="ghost"
-					size="icon"
-					onClick={onToggleRightSidebar}
-					title={rightSidebarOpen ? "Hide Files" : "Show Files"}
-					className="tauri-no-drag"
-				>
-					{rightSidebarOpen ? (
-						<PanelRightClose className="h-4 w-4" />
-					) : (
-						<PanelRight className="h-4 w-4" />
-					)}
-				</Button>
 				{/* Windows/Linux window controls on the right */}
 				{isTauriEnv && !isMac && <WindowControls />}
 			</div>

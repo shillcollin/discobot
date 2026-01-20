@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { DialogLayer } from "@/components/ide/dialog-layer";
 import { Header, LeftSidebar, MainContent } from "@/components/ide/layout";
 import {
@@ -30,6 +31,39 @@ function IDEContent() {
 		true,
 	);
 
+	// Track sidebar states before maximize to restore them
+	const sidebarStatesBeforeMaximize = React.useRef<{
+		left: boolean;
+		right: boolean;
+	} | null>(null);
+
+	const handleDiffMaximizeChange = React.useCallback(
+		(isMaximized: boolean) => {
+			if (isMaximized) {
+				// Save current states and close sidebars
+				sidebarStatesBeforeMaximize.current = {
+					left: leftSidebarOpen,
+					right: rightSidebarOpen,
+				};
+				setLeftSidebarOpen(false);
+				setRightSidebarOpen(false);
+			} else {
+				// Restore previous states
+				if (sidebarStatesBeforeMaximize.current) {
+					setLeftSidebarOpen(sidebarStatesBeforeMaximize.current.left);
+					setRightSidebarOpen(sidebarStatesBeforeMaximize.current.right);
+					sidebarStatesBeforeMaximize.current = null;
+				}
+			}
+		},
+		[
+			leftSidebarOpen,
+			rightSidebarOpen,
+			setLeftSidebarOpen,
+			setRightSidebarOpen,
+		],
+	);
+
 	const session = useSessionContext();
 
 	// Loading state
@@ -42,14 +76,16 @@ function IDEContent() {
 			<Header
 				leftSidebarOpen={leftSidebarOpen}
 				onToggleSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
-				rightSidebarOpen={rightSidebarOpen}
-				onToggleRightSidebar={() => setRightSidebarOpen(!rightSidebarOpen)}
 				onNewSession={session.handleNewSession}
 			/>
 
 			<div className="flex-1 flex overflow-hidden">
 				<LeftSidebar isOpen={leftSidebarOpen} />
-				<MainContent rightSidebarOpen={rightSidebarOpen} />
+				<MainContent
+					rightSidebarOpen={rightSidebarOpen}
+					onToggleRightSidebar={() => setRightSidebarOpen(!rightSidebarOpen)}
+					onDiffMaximizeChange={handleDiffMaximizeChange}
+				/>
 			</div>
 
 			<DialogLayer />

@@ -7,6 +7,7 @@ import { ResizeHandle } from "@/components/ide/resize-handle";
 import type { FileNode } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { usePanelLayout } from "@/lib/hooks/use-panel-layout";
+import { useSessionFiles } from "@/lib/hooks/use-session-files";
 import { cn } from "@/lib/utils";
 import { BottomPanel } from "./bottom-panel";
 import { DiffPanel } from "./diff-panel";
@@ -15,6 +16,8 @@ type BottomView = "chat" | "terminal";
 
 interface MainContentProps {
 	rightSidebarOpen?: boolean;
+	onToggleRightSidebar?: () => void;
+	onDiffMaximizeChange?: (isMaximized: boolean) => void;
 }
 
 /**
@@ -31,7 +34,11 @@ function createFileNodeFromPath(path: string): FileNode {
 	};
 }
 
-export function MainContent({ rightSidebarOpen = true }: MainContentProps) {
+export function MainContent({
+	rightSidebarOpen = true,
+	onToggleRightSidebar,
+	onDiffMaximizeChange,
+}: MainContentProps) {
 	const { selectedSession, chatResetTrigger } = useSessionContext();
 
 	const [bottomView, setBottomView] = React.useState<BottomView>("chat");
@@ -42,6 +49,27 @@ export function MainContent({ rightSidebarOpen = true }: MainContentProps) {
 
 	// Panel layout hook - now internal to MainContent
 	const panelLayout = usePanelLayout();
+
+	// Get changed files count for the bottom panel toggle
+	const { diffStats, changedFiles } = useSessionFiles(
+		selectedSession?.id ?? null,
+		false, // Only need changed files, not full tree
+	);
+	const changedCount = diffStats?.filesChanged ?? changedFiles.length;
+
+	// Track previous maximize state to detect changes
+	const prevDiffMaximized = React.useRef(
+		panelLayout.diffPanelState === "maximized",
+	);
+
+	// Notify parent when diff maximize state changes
+	React.useEffect(() => {
+		const isMaximized = panelLayout.diffPanelState === "maximized";
+		if (isMaximized !== prevDiffMaximized.current) {
+			prevDiffMaximized.current = isMaximized;
+			onDiffMaximizeChange?.(isMaximized);
+		}
+	}, [panelLayout.diffPanelState, onDiffMaximizeChange]);
 
 	// Destructure stable handlers for use in effects
 	const { handleCloseDiffPanel, resetPanels, showDiff } = panelLayout;
@@ -131,7 +159,6 @@ export function MainContent({ rightSidebarOpen = true }: MainContentProps) {
 					activeFileId={activeFilePath}
 					onTabSelect={handleTabSelect}
 					onTabClose={handleTabClose}
-					onMinimize={panelLayout.handleDiffMinimize}
 					onMaximize={panelLayout.handleDiffMaximize}
 					onClose={handleDiffClose}
 				/>
@@ -147,7 +174,9 @@ export function MainContent({ rightSidebarOpen = true }: MainContentProps) {
 					view={bottomView}
 					onViewChange={setBottomView}
 					onMinimize={panelLayout.handleBottomMinimize}
-					onMaximize={panelLayout.handleBottomMaximize}
+					rightSidebarOpen={rightSidebarOpen}
+					onToggleRightSidebar={onToggleRightSidebar}
+					changedFilesCount={changedCount}
 				/>
 			</main>
 

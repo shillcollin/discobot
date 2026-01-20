@@ -56,7 +56,8 @@ export interface Workspace {
 	commit?: string;
 	/** Working directory path on disk (if initialized) */
 	workDir?: string;
-	sessions: Session[];
+	/** Sessions are only populated when fetching a single workspace, not in list endpoints */
+	sessions?: Session[];
 }
 
 export interface Agent {

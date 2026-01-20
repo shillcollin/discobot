@@ -145,7 +145,8 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 								...current,
 								workspaces: current.workspaces.map((workspace) => ({
 									...workspace,
-									sessions: workspace.sessions.filter(
+									// Sessions may not be populated in list response
+									sessions: workspace.sessions?.filter(
 										(session: Session) => session.id !== sessionData.sessionId,
 									),
 								})),
