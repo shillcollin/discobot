@@ -10,12 +10,6 @@ import (
 	"github.com/obot-platform/octobot/server/internal/sandbox/sandboxapi"
 )
 
-// GetFile returns a single file with diff content
-func (h *Handler) GetFile(w http.ResponseWriter, _ *http.Request) {
-	// TODO: Implement - this will use git service
-	h.Error(w, http.StatusNotImplemented, "Not yet implemented")
-}
-
 // GetSuggestions returns autocomplete suggestions
 func (h *Handler) GetSuggestions(w http.ResponseWriter, _ *http.Request) {
 	// TODO: Implement path/repo suggestions

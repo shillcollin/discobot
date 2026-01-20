@@ -262,7 +262,6 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 				r.Delete("/{agentId}", h.DeleteAgent)
 			})
 
-			r.Get("/files/{fileId}", h.GetFile)
 			r.Get("/suggestions", h.GetSuggestions)
 			r.Get("/events", h.Events)
 

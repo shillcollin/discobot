@@ -811,17 +811,6 @@ func main() {
 				})
 			})
 
-			// Files
-			projReg.Register(r, routes.Route{
-				Method: "GET", Pattern: "/files/{fileId}",
-				Handler: h.GetFile,
-				Meta: routes.Meta{
-					Group:       "Files",
-					Description: "Get file",
-					Params:      []routes.Param{{Name: "projectId", Example: "local"}},
-				},
-			})
-
 			// Suggestions
 			projReg.Register(r, routes.Route{
 				Method: "GET", Pattern: "/suggestions",
@@ -1026,4 +1015,3 @@ func main() {
 
 	log.Println("Server stopped")
 }
-

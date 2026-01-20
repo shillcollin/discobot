@@ -11,7 +11,6 @@ import type {
 	CreateCredentialRequest,
 	CreateWorkspaceRequest,
 	CredentialInfo,
-	FileNode,
 	GitHubCopilotDeviceCodeRequest,
 	GitHubCopilotDeviceCodeResponse,
 	GitHubCopilotPollRequest,
@@ -217,16 +216,6 @@ class ApiClient {
 		if (options?.format) params.set("format", options.format);
 		const query = params.toString();
 		return this.fetch(`/sessions/${sessionId}/diff${query ? `?${query}` : ""}`);
-	}
-
-	// Legacy file methods (for backwards compatibility)
-	/** @deprecated Use listSessionFiles instead */
-	async getSessionFiles(sessionId: string): Promise<{ files: FileNode[] }> {
-		return this.fetch<{ files: FileNode[] }>(`/sessions/${sessionId}/files`);
-	}
-
-	async getFile(id: string): Promise<FileNode> {
-		return this.fetch<FileNode>(`/files/${id}`);
 	}
 
 	// Messages
