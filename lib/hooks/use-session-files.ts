@@ -83,10 +83,10 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 			// Add to expanded set
 			setExpandedPaths((prev) => new Set(prev).add(path));
 
-			// If already cached or loading, don't fetch again
-			if (childrenCache.has(path) || loadingPaths.has(path)) return;
+			// If already loading this path, don't start another fetch
+			if (loadingPaths.has(path)) return;
 
-			// Start loading
+			// Always fetch from API to get fresh directory contents
 			setLoadingPaths((prev) => new Set(prev).add(path));
 
 			try {
@@ -101,7 +101,7 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 				});
 			}
 		},
-		[sessionId, childrenCache, loadingPaths, diffData?.files],
+		[sessionId, loadingPaths, diffData?.files],
 	);
 
 	// Collapse a directory
@@ -197,6 +197,15 @@ export function useSessionFileContent(
 	};
 }
 
+// Helper: Check if a directory has any changed descendants
+function hasChangedDescendant(
+	dirPath: string,
+	changedFiles: string[],
+): boolean {
+	const prefix = dirPath === "." ? "" : `${dirPath}/`;
+	return changedFiles.some((f) => f.startsWith(prefix));
+}
+
 // Helper: Convert API file entries to LazyFileNodes
 function entriesToNodes(
 	entries: SessionFileEntry[],
@@ -204,17 +213,22 @@ function entriesToNodes(
 	changedFiles?: string[],
 ): LazyFileNode[] {
 	const changedSet = new Set(changedFiles || []);
+	const changedList = changedFiles || [];
 
 	return entries.map((entry) => {
 		const path =
 			parentPath === "." ? entry.name : `${parentPath}/${entry.name}`;
+		const isDir = entry.type === "directory";
 		return {
 			name: entry.name,
 			path,
 			type: entry.type,
 			size: entry.size,
-			children: entry.type === "directory" ? undefined : undefined,
-			changed: changedSet.has(path),
+			children: isDir ? undefined : undefined,
+			// Mark as changed if file is changed, or if directory has changed descendants
+			changed: isDir
+				? hasChangedDescendant(path, changedList)
+				: changedSet.has(path),
 		};
 	});
 }
@@ -226,6 +240,7 @@ function buildTreeFromCache(
 	changedFiles?: string[],
 ): LazyFileNode[] {
 	const changedSet = new Set(changedFiles || []);
+	const changedList = changedFiles || [];
 
 	function attachChildren(node: LazyFileNode): LazyFileNode {
 		if (node.type !== "directory") return node;
@@ -235,17 +250,27 @@ function buildTreeFromCache(
 
 		return {
 			...node,
-			children: cachedChildren.map((child) => ({
-				...attachChildren(child),
-				changed: changedSet.has(child.path),
-			})),
+			children: cachedChildren.map((child) => {
+				const isDir = child.type === "directory";
+				return {
+					...attachChildren(child),
+					changed: isDir
+						? hasChangedDescendant(child.path, changedList)
+						: changedSet.has(child.path),
+				};
+			}),
 		};
 	}
 
-	return rootNodes.map((node) => ({
-		...attachChildren(node),
-		changed: changedSet.has(node.path),
-	}));
+	return rootNodes.map((node) => {
+		const isDir = node.type === "directory";
+		return {
+			...attachChildren(node),
+			changed: isDir
+				? hasChangedDescendant(node.path, changedList)
+				: changedSet.has(node.path),
+		};
+	});
 }
 
 // Helper: Build a minimal tree structure from just the changed file paths
@@ -294,7 +319,9 @@ function buildTreeFromChangedFiles(changedFiles: string[]): LazyFileNode[] {
 				path,
 				type: isDir ? "directory" : "file",
 				children: isDir ? convertToNodes(child, path) : undefined,
-				changed: child.isFile,
+				// Directories in this tree always have changed descendants (that's how they're built)
+				// Files are changed if they're in the changed files list
+				changed: isDir ? true : child.isFile,
 			});
 		}
 
