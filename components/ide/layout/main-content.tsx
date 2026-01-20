@@ -7,10 +7,15 @@ import { ResizeHandle } from "@/components/ide/resize-handle";
 import type { FileNode } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { usePanelLayout } from "@/lib/hooks/use-panel-layout";
+import { cn } from "@/lib/utils";
 import { BottomPanel } from "./bottom-panel";
 import { DiffPanel } from "./diff-panel";
 
 type BottomView = "chat" | "terminal";
+
+interface MainContentProps {
+	rightSidebarOpen?: boolean;
+}
 
 /**
  * Create a minimal FileNode from a file path.
@@ -26,7 +31,7 @@ function createFileNodeFromPath(path: string): FileNode {
 	};
 }
 
-export function MainContent() {
+export function MainContent({ rightSidebarOpen = true }: MainContentProps) {
 	const { selectedSession, chatResetTrigger } = useSessionContext();
 
 	const [bottomView, setBottomView] = React.useState<BottomView>("chat");
@@ -152,7 +157,10 @@ export function MainContent() {
 					sessionId={selectedSession?.id ?? null}
 					onFileSelect={handleFileSelect}
 					selectedFilePath={activeFilePath}
-					className="w-56"
+					className={cn(
+						"transition-all duration-300 overflow-hidden",
+						rightSidebarOpen ? "w-56" : "w-0",
+					)}
 				/>
 			)}
 		</>

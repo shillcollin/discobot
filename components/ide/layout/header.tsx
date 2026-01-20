@@ -8,6 +8,8 @@ import {
 	MessageSquare,
 	PanelLeft,
 	PanelLeftClose,
+	PanelRight,
+	PanelRightClose,
 	Plus,
 } from "lucide-react";
 import * as React from "react";
@@ -34,12 +36,16 @@ import { useSessionContext } from "@/lib/contexts/session-context";
 interface HeaderProps {
 	leftSidebarOpen: boolean;
 	onToggleSidebar: () => void;
+	rightSidebarOpen: boolean;
+	onToggleRightSidebar: () => void;
 	onNewSession: () => void;
 }
 
 export function Header({
 	leftSidebarOpen,
 	onToggleSidebar,
+	rightSidebarOpen,
+	onToggleRightSidebar,
 	onNewSession,
 }: HeaderProps) {
 	const {
@@ -279,6 +285,19 @@ export function Header({
 					<span className="sr-only">API Credentials</span>
 				</Button>
 				<ThemeToggle className="tauri-no-drag" />
+				<Button
+					variant="ghost"
+					size="icon"
+					onClick={onToggleRightSidebar}
+					title={rightSidebarOpen ? "Hide Files" : "Show Files"}
+					className="tauri-no-drag"
+				>
+					{rightSidebarOpen ? (
+						<PanelRightClose className="h-4 w-4" />
+					) : (
+						<PanelRight className="h-4 w-4" />
+					)}
+				</Button>
 				{/* Windows/Linux window controls on the right */}
 				{isTauriEnv && !isMac && <WindowControls />}
 			</div>

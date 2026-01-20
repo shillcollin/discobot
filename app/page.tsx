@@ -25,6 +25,10 @@ function IDEContent() {
 		STORAGE_KEYS.LEFT_SIDEBAR_OPEN,
 		true,
 	);
+	const [rightSidebarOpen, setRightSidebarOpen] = usePersistedState(
+		STORAGE_KEYS.RIGHT_SIDEBAR_OPEN,
+		true,
+	);
 
 	const session = useSessionContext();
 
@@ -38,12 +42,14 @@ function IDEContent() {
 			<Header
 				leftSidebarOpen={leftSidebarOpen}
 				onToggleSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
+				rightSidebarOpen={rightSidebarOpen}
+				onToggleRightSidebar={() => setRightSidebarOpen(!rightSidebarOpen)}
 				onNewSession={session.handleNewSession}
 			/>
 
 			<div className="flex-1 flex overflow-hidden">
 				<LeftSidebar isOpen={leftSidebarOpen} />
-				<MainContent />
+				<MainContent rightSidebarOpen={rightSidebarOpen} />
 			</div>
 
 			<DialogLayer />
