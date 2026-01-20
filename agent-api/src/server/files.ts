@@ -527,6 +527,106 @@ function parseDiffOutput(output: string): DiffResponse {
 }
 
 /**
+ * Get list of untracked files (new files not yet staged)
+ */
+async function getUntrackedFiles(workspaceRoot: string): Promise<string[]> {
+	try {
+		const { stdout } = await execAsync(
+			"git ls-files --others --exclude-standard",
+			{
+				cwd: workspaceRoot,
+				maxBuffer: 10 * 1024 * 1024, // 10MB
+			},
+		);
+		return stdout
+			.split("\n")
+			.map((f) => f.trim())
+			.filter((f) => f.length > 0);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Check if a buffer likely contains binary content
+ */
+function isBinaryContent(buffer: Buffer): boolean {
+	// Check for null bytes which typically indicate binary content
+	for (let i = 0; i < Math.min(buffer.length, 8000); i++) {
+		if (buffer[i] === 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Get diff for a single untracked file (shows all lines as additions)
+ */
+async function getUntrackedFileDiff(
+	workspaceRoot: string,
+	filePath: string,
+): Promise<FileDiffEntry> {
+	const fullPath = join(workspaceRoot, filePath);
+
+	try {
+		// Read file as buffer first to check for binary content
+		const buffer = await fsReadFile(fullPath);
+
+		if (isBinaryContent(buffer)) {
+			return {
+				path: filePath,
+				status: "added",
+				additions: 0,
+				deletions: 0,
+				binary: true,
+				patch: `diff --git a/${filePath} b/${filePath}\nnew file mode 100644\nBinary file`,
+			};
+		}
+
+		// Convert to string and create diff patch
+		const content = buffer.toString("utf8");
+		const lines = content.split("\n");
+		// Handle trailing newline - don't count empty last line
+		const actualLines =
+			lines.length > 0 && lines[lines.length - 1] === ""
+				? lines.slice(0, -1)
+				: lines;
+		const additions = actualLines.length;
+
+		// Create a unified diff format patch
+		const patchLines = [
+			`diff --git a/${filePath} b/${filePath}`,
+			"new file mode 100644",
+			"--- /dev/null",
+			`+++ b/${filePath}`,
+			`@@ -0,0 +1,${additions} @@`,
+			...actualLines.map((line: string) => `+${line}`),
+		];
+
+		return {
+			path: filePath,
+			status: "added",
+			additions,
+			deletions: 0,
+			binary: false,
+			patch: patchLines.join("\n"),
+		};
+	} catch (err) {
+		// If we can't read the file, still report it as added but log the error
+		console.error(`Failed to read untracked file ${filePath}:`, err);
+		return {
+			path: filePath,
+			status: "added",
+			additions: 0,
+			deletions: 0,
+			binary: false,
+			patch: `diff --git a/${filePath} b/${filePath}\nnew file mode 100644`,
+		};
+	}
+}
+
+/**
  * Get diff using git
  */
 async function getGitDiff(
@@ -538,24 +638,51 @@ async function getGitDiff(
 		command += ` -- "${singlePath}"`;
 	}
 
+	let trackedDiff: DiffResponse;
 	try {
 		const { stdout } = await execAsync(command, {
 			cwd: workspaceRoot,
 			maxBuffer: 50 * 1024 * 1024, // 50MB for large diffs
 		});
-		return parseDiffOutput(stdout);
+		trackedDiff = parseDiffOutput(stdout);
 	} catch (err: unknown) {
 		// git diff returns exit code 1 when there are differences
 		const execErr = err as { code?: number; stdout?: string };
 		if (execErr.code === 1 && execErr.stdout) {
-			return parseDiffOutput(execErr.stdout);
+			trackedDiff = parseDiffOutput(execErr.stdout);
+		} else {
+			// No differences or other error
+			trackedDiff = {
+				files: [],
+				stats: { filesChanged: 0, additions: 0, deletions: 0 },
+			};
 		}
-		// No differences or other error
-		return {
-			files: [],
-			stats: { filesChanged: 0, additions: 0, deletions: 0 },
-		};
 	}
+
+	// Also get untracked files (new files not yet staged)
+	const untrackedFiles = await getUntrackedFiles(workspaceRoot);
+
+	// Filter untracked files if we're looking for a single path
+	const relevantUntracked = singlePath
+		? untrackedFiles.filter((f) => f === singlePath)
+		: untrackedFiles;
+
+	// Get diff entries for untracked files
+	const untrackedEntries = await Promise.all(
+		relevantUntracked.map((f) => getUntrackedFileDiff(workspaceRoot, f)),
+	);
+
+	// Combine tracked and untracked files
+	const allFiles = [...trackedDiff.files, ...untrackedEntries];
+
+	// Recalculate stats
+	const stats: DiffStats = {
+		filesChanged: allFiles.length,
+		additions: allFiles.reduce((sum, f) => sum + f.additions, 0),
+		deletions: allFiles.reduce((sum, f) => sum + f.deletions, 0),
+	};
+
+	return { files: allFiles, stats };
 }
 
 export interface DiffOptions {
@@ -623,10 +750,14 @@ export async function getDiff(
 		};
 	}
 
-	// Handle format=files request
+	// Handle format=files request - return file entries with status
 	if (options.format === "files") {
 		return {
-			files: diff.files.map((f) => f.path),
+			files: diff.files.map((f) => ({
+				path: f.path,
+				status: f.status,
+				oldPath: f.oldPath,
+			})),
 			stats: diff.stats,
 		};
 	}

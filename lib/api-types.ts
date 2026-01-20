@@ -1,5 +1,8 @@
 // API Types - shared between client and server
 
+/** File status in diff */
+export type FileStatus = "added" | "modified" | "deleted" | "renamed";
+
 export interface FileNode {
 	id: string;
 	name: string;
@@ -8,6 +11,8 @@ export interface FileNode {
 	content?: string;
 	originalContent?: string;
 	changed?: boolean;
+	/** File status: added, modified, deleted, or renamed */
+	status?: FileStatus;
 }
 
 // Session status values representing the lifecycle of a session
@@ -410,9 +415,16 @@ export interface SessionDiffResponse {
 	stats: SessionDiffStats;
 }
 
-/** Files-only diff response */
+/** File entry with status for diff response */
+export interface SessionDiffFileEntry {
+	path: string;
+	status: FileStatus;
+	oldPath?: string; // For renamed files
+}
+
+/** Files-only diff response (with status) */
 export interface SessionDiffFilesResponse {
-	files: string[];
+	files: SessionDiffFileEntry[];
 	stats: SessionDiffStats;
 }
 

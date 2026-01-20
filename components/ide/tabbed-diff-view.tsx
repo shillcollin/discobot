@@ -6,6 +6,8 @@ import {
 	AlertTriangle,
 	Columns2,
 	FileCode,
+	FileMinus,
+	FilePlus,
 	Loader2,
 	Pencil,
 	RotateCcw,
@@ -111,13 +113,52 @@ export function TabbedDiffView({
 								}
 							}}
 						>
-							<FileCode
+							{file.status === "deleted" ? (
+								<FileMinus className="h-4 w-4 text-red-500" />
+							) : file.status === "added" ? (
+								<FilePlus className="h-4 w-4 text-green-500" />
+							) : (
+								<FileCode
+									className={cn(
+										"h-4 w-4",
+										file.status === "modified"
+											? "text-yellow-500"
+											: file.changed
+												? "text-yellow-500"
+												: "text-sky-500",
+									)}
+								/>
+							)}
+							<span
 								className={cn(
-									"h-4 w-4",
-									file.changed ? "text-green-500" : "text-sky-500",
+									"truncate max-w-32",
+									file.status === "deleted" &&
+										"line-through text-muted-foreground",
 								)}
-							/>
-							<span className="truncate max-w-32">{file.name}</span>
+							>
+								{file.name}
+							</span>
+							{file.status && (
+								<span
+									className={cn(
+										"text-xs font-medium",
+										file.status === "added" && "text-green-500",
+										file.status === "modified" && "text-yellow-500",
+										file.status === "deleted" && "text-red-500",
+										file.status === "renamed" && "text-purple-500",
+									)}
+								>
+									{file.status === "added"
+										? "A"
+										: file.status === "modified"
+											? "M"
+											: file.status === "deleted"
+												? "D"
+												: file.status === "renamed"
+													? "R"
+													: ""}
+								</span>
+							)}
 							<button
 								type="button"
 								onClick={(e) => {
@@ -200,12 +241,17 @@ function DiffContent({
 		file.id, // file.id is the file path
 	);
 
+	// Check if the file is deleted (can't edit or view current content)
+	const isDeleted = file.status === "deleted" || diff?.status === "deleted";
+
 	// Check if we should show file content instead of diff (no diff available)
 	const noDiffAvailable =
 		!isDiffLoading && (!diff || diff.status === "unchanged");
 
 	// Load current file content (for edit mode and when no diff available)
-	const shouldLoadContent = viewMode === "edit" || noDiffAvailable;
+	// Don't load content for deleted files
+	const shouldLoadContent =
+		!isDeleted && (viewMode === "edit" || noDiffAvailable);
 	const {
 		content: currentContent,
 		isLoading: isContentLoading,
@@ -308,16 +354,37 @@ function DiffContent({
 					lineDiffType: "word-alt",
 				}}
 				renderHeaderMetadata={() => (
-					<Button
-						variant="ghost"
-						size="sm"
-						className="h-6 px-2 text-xs ml-auto"
-						onClick={() => setViewMode("edit")}
-						title="Edit file"
-					>
-						<Pencil className="h-3 w-3 mr-1" />
-						Edit
-					</Button>
+					<div className="flex items-center gap-2 ml-auto">
+						{/* Show status badge */}
+						{file.status === "added" && (
+							<span className="text-xs text-green-500 font-medium">
+								New File
+							</span>
+						)}
+						{isDeleted && (
+							<span className="text-xs text-red-500 font-medium">
+								File Deleted
+							</span>
+						)}
+						{file.status === "renamed" && (
+							<span className="text-xs text-purple-500 font-medium">
+								Renamed
+							</span>
+						)}
+						{/* Show Edit button for non-deleted files */}
+						{!isDeleted && (
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-6 px-2 text-xs"
+								onClick={() => setViewMode("edit")}
+								title="Edit file"
+							>
+								<Pencil className="h-3 w-3 mr-1" />
+								Edit
+							</Button>
+						)}
+					</div>
 				)}
 			/>
 		</div>

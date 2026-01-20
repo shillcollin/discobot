@@ -4,7 +4,7 @@ import * as React from "react";
 import { ChatPanel } from "@/components/ide/chat-panel";
 import { FilePanel } from "@/components/ide/file-panel";
 import { ResizeHandle } from "@/components/ide/resize-handle";
-import type { FileNode } from "@/lib/api-types";
+import type { FileNode, FileStatus } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { usePanelLayout } from "@/lib/hooks/use-panel-layout";
 import { useSessionFiles } from "@/lib/hooks/use-session-files";
@@ -22,16 +22,17 @@ interface MainContentProps {
 }
 
 /**
- * Create a minimal FileNode from a file path.
+ * Create a minimal FileNode from a file path and optional status.
  * The diff view will fetch actual content via hooks.
  */
-function createFileNodeFromPath(path: string): FileNode {
+function createFileNodeFromPath(path: string, status?: FileStatus): FileNode {
 	const name = path.split("/").pop() || path;
 	return {
 		id: path, // Use path as ID for now
 		name,
 		type: "file",
 		changed: true, // Mark as changed since we're showing it in diff view
+		status,
 	};
 }
 
@@ -54,11 +55,20 @@ export function MainContent({
 	const panelLayout = usePanelLayout();
 
 	// Get changed files count for the bottom panel toggle
-	const { diffStats, changedFiles } = useSessionFiles(
+	const { diffStats, changedFiles, diffEntries } = useSessionFiles(
 		selectedSession?.id ?? null,
 		false, // Only need changed files, not full tree
 	);
 	const changedCount = diffStats?.filesChanged ?? changedFiles.length;
+
+	// Build a map of file path to status for quick lookup
+	const statusMap = React.useMemo(() => {
+		const map = new Map<string, FileStatus>();
+		for (const entry of diffEntries) {
+			map.set(entry.path, entry.status);
+		}
+		return map;
+	}, [diffEntries]);
 
 	// Track previous maximize state to detect changes
 	const prevDiffMaximized = React.useRef(
@@ -91,8 +101,10 @@ export function MainContent({
 
 	const handleFileSelect = React.useCallback(
 		(path: string) => {
+			// Get the status from the diff entries
+			const status = statusMap.get(path);
 			// Create a FileNode from the path for the diff view
-			const fileNode = createFileNodeFromPath(path);
+			const fileNode = createFileNodeFromPath(path, status);
 			setOpenFiles((prev) => {
 				if (!prev.find((f) => f.id === path)) {
 					return [...prev, fileNode];
@@ -102,7 +114,7 @@ export function MainContent({
 			setActiveFilePath(path);
 			showDiff();
 		},
-		[showDiff],
+		[showDiff, statusMap],
 	);
 
 	const handleTabClose = React.useCallback(

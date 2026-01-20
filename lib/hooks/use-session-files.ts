@@ -4,6 +4,8 @@ import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
 import { api } from "../api-client";
 import type {
+	FileStatus,
+	SessionDiffFileEntry,
 	SessionDiffFilesResponse,
 	SessionFileEntry,
 	SessionSingleFileDiffResponse,
@@ -20,8 +22,10 @@ export interface LazyFileNode {
 	size?: number;
 	/** Children loaded from API (undefined = not loaded, empty = loaded with no children) */
 	children?: LazyFileNode[];
-	/** Whether this file has been modified in the session */
+	/** Whether this file has been modified in the session (deprecated - use status instead) */
 	changed?: boolean;
+	/** File status: added, modified, deleted, or renamed */
+	status?: FileStatus;
 }
 
 /**
@@ -60,20 +64,29 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 		},
 	);
 
+	// Build a map of file path to status for quick lookup
+	const diffEntriesMap = useMemo(() => {
+		const map = new Map<string, SessionDiffFileEntry>();
+		for (const entry of diffData?.files || []) {
+			map.set(entry.path, entry);
+		}
+		return map;
+	}, [diffData?.files]);
+
 	// Convert API response to LazyFileNode tree, or build from changed files only
 	const rootNodes = useMemo(() => {
 		if (loadAllFiles) {
 			if (!rootData) return [];
-			return entriesToNodes(rootData.entries, ".", diffData?.files);
+			return entriesToNodes(rootData.entries, ".", diffEntriesMap);
 		}
 		// Build minimal tree from changed files only
 		return buildTreeFromChangedFiles(diffData?.files || []);
-	}, [rootData, diffData?.files, loadAllFiles]);
+	}, [rootData, diffData?.files, diffEntriesMap, loadAllFiles]);
 
 	// Build tree from root nodes and cached children
 	const fileTree = useMemo(() => {
-		return buildTreeFromCache(rootNodes, childrenCache, diffData?.files);
-	}, [rootNodes, childrenCache, diffData?.files]);
+		return buildTreeFromCache(rootNodes, childrenCache, diffEntriesMap);
+	}, [rootNodes, childrenCache, diffEntriesMap]);
 
 	// Expand a directory (triggers lazy load)
 	const expandDirectory = useCallback(
@@ -91,7 +104,7 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 
 			try {
 				const data = await api.listSessionFiles(sessionId, path);
-				const nodes = entriesToNodes(data.entries, path, diffData?.files);
+				const nodes = entriesToNodes(data.entries, path, diffEntriesMap);
 				setChildrenCache((prev) => new Map(prev).set(path, nodes));
 			} finally {
 				setLoadingPaths((prev) => {
@@ -101,7 +114,7 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 				});
 			}
 		},
-		[sessionId, loadingPaths, diffData?.files],
+		[sessionId, loadingPaths, diffEntriesMap],
 	);
 
 	// Collapse a directory
@@ -137,11 +150,20 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 		[loadingPaths],
 	);
 
+	// For backwards compatibility, extract just the paths
+	const changedFilePaths = useMemo(
+		() => (diffData?.files || []).map((f) => f.path),
+		[diffData?.files],
+	);
+
 	return {
 		fileTree,
 		isLoading: isLoadingRoot || isLoadingDiff,
 		diffStats: diffData?.stats,
-		changedFiles: diffData?.files || [],
+		/** Changed file paths (for backwards compatibility) */
+		changedFiles: changedFilePaths,
+		/** Full diff entries with status information */
+		diffEntries: diffData?.files || [],
 		expandedPaths,
 		expandDirectory,
 		collapseDirectory,
@@ -200,25 +222,27 @@ export function useSessionFileContent(
 // Helper: Check if a directory has any changed descendants
 function hasChangedDescendant(
 	dirPath: string,
-	changedFiles: string[],
+	diffEntriesMap: Map<string, SessionDiffFileEntry>,
 ): boolean {
 	const prefix = dirPath === "." ? "" : `${dirPath}/`;
-	return changedFiles.some((f) => f.startsWith(prefix));
+	for (const path of diffEntriesMap.keys()) {
+		if (path.startsWith(prefix)) return true;
+	}
+	return false;
 }
 
 // Helper: Convert API file entries to LazyFileNodes
 function entriesToNodes(
 	entries: SessionFileEntry[],
 	parentPath: string,
-	changedFiles?: string[],
+	diffEntriesMap: Map<string, SessionDiffFileEntry>,
 ): LazyFileNode[] {
-	const changedSet = new Set(changedFiles || []);
-	const changedList = changedFiles || [];
-
 	return entries.map((entry) => {
 		const path =
 			parentPath === "." ? entry.name : `${parentPath}/${entry.name}`;
 		const isDir = entry.type === "directory";
+		const diffEntry = diffEntriesMap.get(path);
+
 		return {
 			name: entry.name,
 			path,
@@ -227,8 +251,10 @@ function entriesToNodes(
 			children: isDir ? undefined : undefined,
 			// Mark as changed if file is changed, or if directory has changed descendants
 			changed: isDir
-				? hasChangedDescendant(path, changedList)
-				: changedSet.has(path),
+				? hasChangedDescendant(path, diffEntriesMap)
+				: diffEntry !== undefined,
+			// Include status for files
+			status: isDir ? undefined : diffEntry?.status,
 		};
 	});
 }
@@ -237,11 +263,8 @@ function entriesToNodes(
 function buildTreeFromCache(
 	rootNodes: LazyFileNode[],
 	cache: Map<string, LazyFileNode[]>,
-	changedFiles?: string[],
+	diffEntriesMap: Map<string, SessionDiffFileEntry>,
 ): LazyFileNode[] {
-	const changedSet = new Set(changedFiles || []);
-	const changedList = changedFiles || [];
-
 	function attachChildren(node: LazyFileNode): LazyFileNode {
 		if (node.type !== "directory") return node;
 
@@ -252,11 +275,13 @@ function buildTreeFromCache(
 			...node,
 			children: cachedChildren.map((child) => {
 				const isDir = child.type === "directory";
+				const diffEntry = diffEntriesMap.get(child.path);
 				return {
 					...attachChildren(child),
 					changed: isDir
-						? hasChangedDescendant(child.path, changedList)
-						: changedSet.has(child.path),
+						? hasChangedDescendant(child.path, diffEntriesMap)
+						: diffEntry !== undefined,
+					status: isDir ? undefined : diffEntry?.status,
 				};
 			}),
 		};
@@ -264,18 +289,28 @@ function buildTreeFromCache(
 
 	return rootNodes.map((node) => {
 		const isDir = node.type === "directory";
+		const diffEntry = diffEntriesMap.get(node.path);
 		return {
 			...attachChildren(node),
 			changed: isDir
-				? hasChangedDescendant(node.path, changedList)
-				: changedSet.has(node.path),
+				? hasChangedDescendant(node.path, diffEntriesMap)
+				: diffEntry !== undefined,
+			status: isDir ? undefined : diffEntry?.status,
 		};
 	});
 }
 
-// Helper: Build a minimal tree structure from just the changed file paths
-function buildTreeFromChangedFiles(changedFiles: string[]): LazyFileNode[] {
-	if (changedFiles.length === 0) return [];
+// Helper: Build a minimal tree structure from just the changed files
+function buildTreeFromChangedFiles(
+	diffEntries: SessionDiffFileEntry[],
+): LazyFileNode[] {
+	if (diffEntries.length === 0) return [];
+
+	// Build a map for quick status lookup
+	const statusMap = new Map<string, FileStatus>();
+	for (const entry of diffEntries) {
+		statusMap.set(entry.path, entry.status);
+	}
 
 	// Build a nested map structure from file paths
 	interface TreeNode {
@@ -285,8 +320,8 @@ function buildTreeFromChangedFiles(changedFiles: string[]): LazyFileNode[] {
 
 	const root: TreeNode = { children: new Map(), isFile: false };
 
-	for (const filePath of changedFiles) {
-		const parts = filePath.split("/");
+	for (const entry of diffEntries) {
+		const parts = entry.path.split("/");
 		let current = root;
 
 		for (let i = 0; i < parts.length; i++) {
@@ -317,6 +352,7 @@ function buildTreeFromChangedFiles(changedFiles: string[]): LazyFileNode[] {
 		for (const [name, child] of node.children) {
 			const path = parentPath === "." ? name : `${parentPath}/${name}`;
 			const isDir = !child.isFile || child.children.size > 0;
+			const status = statusMap.get(path);
 
 			nodes.push({
 				name,
@@ -326,6 +362,8 @@ function buildTreeFromChangedFiles(changedFiles: string[]): LazyFileNode[] {
 				// Directories in this tree always have changed descendants (that's how they're built)
 				// Files are changed if they're in the changed files list
 				changed: isDir ? true : child.isFile,
+				// Include status for files
+				status: isDir ? undefined : status,
 			});
 		}
 

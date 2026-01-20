@@ -175,10 +175,19 @@ export interface DiffResponse {
 }
 
 /**
- * GET /diff?format=files response - just file paths
+ * File entry with status for files-only diff response
+ */
+export interface DiffFileEntry {
+	path: string;
+	status: "added" | "modified" | "deleted" | "renamed";
+	oldPath?: string; // For renamed files
+}
+
+/**
+ * GET /diff?format=files response - file paths with status
  */
 export interface DiffFilesResponse {
-	files: string[];
+	files: DiffFileEntry[];
 	stats: DiffStats;
 }
 

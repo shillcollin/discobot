@@ -1,15 +1,22 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { exec } from "node:child_process";
+import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { promisify } from "node:util";
 import type {
+	DiffFileEntry,
+	DiffFilesResponse,
 	DiffResponse,
 	ErrorResponse,
 	ListFilesResponse,
 	ReadFileResponse,
+	SingleFileDiffResponse,
 	WriteFileResponse,
 } from "../../src/api/types.js";
 import { createApp } from "../../src/server/app.js";
+
+const execAsync = promisify(exec);
 
 describe("File System API Endpoints", () => {
 	const testDir = "/tmp/agent-api-integration-files";
@@ -449,7 +456,7 @@ describe("File System API Endpoints", () => {
 	});
 
 	// =========================================================================
-	// GET /diff - Session Diff
+	// GET /diff - Session Diff (basic tests without git)
 	// =========================================================================
 
 	describe("GET /diff", () => {
@@ -480,6 +487,307 @@ describe("File System API Endpoints", () => {
 
 			const body = (await res.json()) as ErrorResponse;
 			assert.equal(body.error, "Invalid path");
+		});
+	});
+});
+
+// =============================================================================
+// Git Diff Integration Tests
+// =============================================================================
+
+describe("Git Diff API - All Change Types", () => {
+	const gitTestDir = "/tmp/agent-api-git-diff-test";
+	let app: ReturnType<typeof createApp>["app"];
+
+	before(async () => {
+		// Clean up any existing test directory
+		await rm(gitTestDir, { recursive: true, force: true });
+
+		// Create test directory
+		await mkdir(gitTestDir, { recursive: true });
+
+		// Initialize git repo
+		await execAsync("git init", { cwd: gitTestDir });
+		await execAsync('git config user.email "test@test.com"', {
+			cwd: gitTestDir,
+		});
+		await execAsync('git config user.name "Test User"', { cwd: gitTestDir });
+
+		// Create initial files and commit
+		await writeFile(join(gitTestDir, "modified.txt"), "Original content\n");
+		await writeFile(join(gitTestDir, "deleted.txt"), "This will be deleted\n");
+		await writeFile(join(gitTestDir, "unchanged.txt"), "This stays the same\n");
+		await mkdir(join(gitTestDir, "src"), { recursive: true });
+		await writeFile(
+			join(gitTestDir, "src/existing.ts"),
+			'export const x = 1;\n',
+		);
+
+		// Create .gitignore to test that ignored files are excluded
+		await writeFile(join(gitTestDir, ".gitignore"), "ignored.txt\n*.log\n");
+
+		await execAsync("git add .", { cwd: gitTestDir });
+		await execAsync('git commit -m "Initial commit"', { cwd: gitTestDir });
+
+		// Now make changes:
+		// 1. Modify a file
+		await writeFile(
+			join(gitTestDir, "modified.txt"),
+			"Modified content\nWith new lines\n",
+		);
+
+		// 2. Delete a file
+		await unlink(join(gitTestDir, "deleted.txt"));
+
+		// 3. Create a new untracked file
+		await writeFile(join(gitTestDir, "new-file.txt"), "This is a new file\n");
+
+		// 4. Create a new file in a subdirectory
+		await writeFile(
+			join(gitTestDir, "src/new-component.ts"),
+			'export const NewComponent = () => {};\n',
+		);
+
+		// 5. Create an ignored file (should NOT appear in diff)
+		await writeFile(
+			join(gitTestDir, "ignored.txt"),
+			"This should not appear\n",
+		);
+		await writeFile(join(gitTestDir, "debug.log"), "Log file - ignored\n");
+
+		// Create app with git test directory
+		const result = createApp({
+			agentCommand: "true",
+			agentArgs: [],
+			agentCwd: gitTestDir,
+			enableLogging: false,
+		});
+		app = result.app;
+	});
+
+	after(async () => {
+		await rm(gitTestDir, { recursive: true, force: true });
+	});
+
+	describe("GET /diff - Full diff with patches", () => {
+		it("returns all changed files with correct statuses", async () => {
+			const res = await app.request("/diff");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as DiffResponse;
+
+			// Should have 4 changed files: modified, deleted, new-file, src/new-component
+			assert.equal(
+				body.stats.filesChanged,
+				4,
+				`Expected 4 changed files, got ${body.stats.filesChanged}. Files: ${body.files.map((f) => `${f.path}:${f.status}`).join(", ")}`,
+			);
+
+			// Find each file by path
+			const modified = body.files.find((f) => f.path === "modified.txt");
+			const deleted = body.files.find((f) => f.path === "deleted.txt");
+			const newFile = body.files.find((f) => f.path === "new-file.txt");
+			const newComponent = body.files.find(
+				(f) => f.path === "src/new-component.ts",
+			);
+
+			// Verify modified file
+			assert.ok(modified, "Should include modified.txt");
+			assert.equal(modified.status, "modified", "modified.txt should be modified");
+			assert.ok(modified.additions > 0, "Modified file should have additions");
+			assert.ok(modified.deletions > 0, "Modified file should have deletions");
+			assert.ok(modified.patch, "Modified file should have patch");
+
+			// Verify deleted file
+			assert.ok(deleted, "Should include deleted.txt");
+			assert.equal(deleted.status, "deleted", "deleted.txt should be deleted");
+			assert.ok(deleted.deletions > 0, "Deleted file should have deletions");
+			assert.ok(deleted.patch, "Deleted file should have patch");
+
+			// Verify new untracked file
+			assert.ok(newFile, "Should include new-file.txt");
+			assert.equal(newFile.status, "added", "new-file.txt should be added");
+			assert.ok(newFile.additions > 0, "New file should have additions");
+			assert.equal(newFile.deletions, 0, "New file should have no deletions");
+			assert.ok(newFile.patch, "New file should have patch");
+
+			// Verify new file in subdirectory
+			assert.ok(newComponent, "Should include src/new-component.ts");
+			assert.equal(
+				newComponent.status,
+				"added",
+				"src/new-component.ts should be added",
+			);
+
+			// Verify ignored files are NOT included
+			const ignored = body.files.find((f) => f.path === "ignored.txt");
+			const logFile = body.files.find((f) => f.path === "debug.log");
+			assert.ok(!ignored, "Should NOT include ignored.txt");
+			assert.ok(!logFile, "Should NOT include debug.log");
+
+			// Verify unchanged files are NOT included
+			const unchanged = body.files.find((f) => f.path === "unchanged.txt");
+			assert.ok(!unchanged, "Should NOT include unchanged.txt");
+		});
+
+		it("calculates stats correctly", async () => {
+			const res = await app.request("/diff");
+			const body = (await res.json()) as DiffResponse;
+
+			// Stats should match sum of individual files
+			const totalAdditions = body.files.reduce((sum, f) => sum + f.additions, 0);
+			const totalDeletions = body.files.reduce((sum, f) => sum + f.deletions, 0);
+
+			assert.equal(body.stats.additions, totalAdditions);
+			assert.equal(body.stats.deletions, totalDeletions);
+			assert.equal(body.stats.filesChanged, body.files.length);
+		});
+	});
+
+	describe("GET /diff?format=files - File list with status", () => {
+		it("returns file entries with status (not just paths)", async () => {
+			const res = await app.request("/diff?format=files");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as DiffFilesResponse;
+
+			// Files should be objects with path and status, not just strings
+			assert.ok(Array.isArray(body.files), "Should have files array");
+			assert.equal(body.files.length, 4, "Should have 4 changed files");
+
+			// Each file should have path and status
+			for (const file of body.files) {
+				assert.ok(
+					typeof file === "object",
+					"File entry should be an object, not a string",
+				);
+				assert.ok(
+					typeof (file as DiffFileEntry).path === "string",
+					"File entry should have path",
+				);
+				assert.ok(
+					typeof (file as DiffFileEntry).status === "string",
+					"File entry should have status",
+				);
+				assert.ok(
+					["added", "modified", "deleted", "renamed"].includes(
+						(file as DiffFileEntry).status,
+					),
+					`Status should be valid, got: ${(file as DiffFileEntry).status}`,
+				);
+			}
+
+			// Verify specific statuses
+			const files = body.files as DiffFileEntry[];
+			const modified = files.find((f) => f.path === "modified.txt");
+			const deleted = files.find((f) => f.path === "deleted.txt");
+			const newFile = files.find((f) => f.path === "new-file.txt");
+
+			assert.ok(modified, "Should include modified.txt");
+			assert.equal(modified.status, "modified");
+
+			assert.ok(deleted, "Should include deleted.txt");
+			assert.equal(deleted.status, "deleted");
+
+			assert.ok(newFile, "Should include new-file.txt");
+			assert.equal(newFile.status, "added");
+		});
+
+		it("includes stats", async () => {
+			const res = await app.request("/diff?format=files");
+			const body = (await res.json()) as DiffFilesResponse;
+
+			assert.ok(body.stats, "Should have stats");
+			assert.equal(body.stats.filesChanged, 4);
+			assert.ok(body.stats.additions > 0);
+			assert.ok(body.stats.deletions > 0);
+		});
+	});
+
+	describe("GET /diff?path=<file> - Single file diff", () => {
+		it("returns diff for modified file", async () => {
+			const res = await app.request("/diff?path=modified.txt");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as SingleFileDiffResponse;
+			assert.equal(body.path, "modified.txt");
+			assert.equal(body.status, "modified");
+			assert.ok(body.additions > 0);
+			assert.ok(body.deletions > 0);
+			assert.ok(body.patch.length > 0);
+		});
+
+		it("returns diff for deleted file", async () => {
+			const res = await app.request("/diff?path=deleted.txt");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as SingleFileDiffResponse;
+			assert.equal(body.path, "deleted.txt");
+			assert.equal(body.status, "deleted");
+			assert.ok(body.deletions > 0);
+			assert.ok(body.patch.length > 0);
+		});
+
+		it("returns diff for new untracked file", async () => {
+			const res = await app.request("/diff?path=new-file.txt");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as SingleFileDiffResponse;
+			assert.equal(body.path, "new-file.txt");
+			assert.equal(body.status, "added");
+			assert.ok(body.additions > 0);
+			assert.equal(body.deletions, 0);
+			assert.ok(body.patch.length > 0);
+		});
+
+		it("returns patch with actual file content for untracked file", async () => {
+			const res = await app.request("/diff?path=new-file.txt");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as SingleFileDiffResponse;
+
+			// Patch should contain the file content as additions
+			assert.ok(
+				body.patch.includes("+This is a new file"),
+				`Patch should contain file content. Got: ${body.patch}`,
+			);
+			// Patch should have proper unified diff format
+			assert.ok(
+				body.patch.includes("diff --git"),
+				"Patch should have diff header",
+			);
+			assert.ok(
+				body.patch.includes("new file mode"),
+				"Patch should indicate new file",
+			);
+			assert.ok(
+				body.patch.includes("--- /dev/null"),
+				"Patch should show /dev/null as old file",
+			);
+			assert.ok(
+				body.patch.includes("+++ b/new-file.txt"),
+				"Patch should show new file path",
+			);
+			assert.ok(body.patch.includes("@@"), "Patch should have hunk header");
+		});
+
+		it("returns unchanged status for unmodified file", async () => {
+			const res = await app.request("/diff?path=unchanged.txt");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as SingleFileDiffResponse;
+			assert.equal(body.path, "unchanged.txt");
+			assert.equal(body.status, "unchanged");
+			assert.equal(body.additions, 0);
+			assert.equal(body.deletions, 0);
+		});
+
+		it("returns unchanged status for non-existent file", async () => {
+			const res = await app.request("/diff?path=does-not-exist.txt");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as SingleFileDiffResponse;
+			assert.equal(body.status, "unchanged");
 		});
 	});
 });

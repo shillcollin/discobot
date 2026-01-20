@@ -133,10 +133,17 @@ type DiffResponse struct {
 	Stats DiffStats       `json:"stats"`
 }
 
-// DiffFilesResponse is the GET /diff?format=files response (just file paths).
+// DiffFileEntry represents a file entry with status for the files-only diff response.
+type DiffFileEntry struct {
+	Path    string `json:"path"`
+	Status  string `json:"status"` // "added", "modified", "deleted", "renamed"
+	OldPath string `json:"oldPath,omitempty"`
+}
+
+// DiffFilesResponse is the GET /diff?format=files response (file paths with status).
 type DiffFilesResponse struct {
-	Files []string  `json:"files"`
-	Stats DiffStats `json:"stats"`
+	Files []DiffFileEntry `json:"files"`
+	Stats DiffStats       `json:"stats"`
 }
 
 // SingleFileDiffResponse is the GET /diff?path=... response.

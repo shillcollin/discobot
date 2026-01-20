@@ -4,6 +4,8 @@ import {
 	ChevronDown,
 	ChevronRight,
 	FileCode,
+	FileMinus,
+	FilePlus,
 	Files,
 	Filter,
 	Folder,
@@ -320,17 +322,39 @@ function FileTreeNode({
 				) : (
 					<>
 						<span className="w-3.5" />
-						<FileCode
-							className={cn(
-								"h-4 w-4",
-								node.changed ? "text-green-500" : "text-sky-500",
-							)}
-						/>
+						{node.status === "deleted" ? (
+							<FileMinus className="h-4 w-4 text-red-500" />
+						) : node.status === "added" ? (
+							<FilePlus className="h-4 w-4 text-green-500" />
+						) : (
+							<FileCode
+								className={cn(
+									"h-4 w-4",
+									node.changed ? "text-yellow-500" : "text-sky-500",
+								)}
+							/>
+						)}
 					</>
 				)}
-				<span className="truncate">{displayName}</span>
-				{node.changed && (
-					<span className="ml-auto text-xs text-green-500 font-medium">M</span>
+				<span
+					className={cn(
+						"truncate",
+						node.status === "deleted" && "line-through text-muted-foreground",
+					)}
+				>
+					{displayName}
+				</span>
+				{node.status === "added" && (
+					<span className="ml-auto text-xs text-green-500 font-medium">A</span>
+				)}
+				{node.status === "modified" && (
+					<span className="ml-auto text-xs text-yellow-500 font-medium">M</span>
+				)}
+				{node.status === "deleted" && (
+					<span className="ml-auto text-xs text-red-500 font-medium">D</span>
+				)}
+				{node.status === "renamed" && (
+					<span className="ml-auto text-xs text-purple-500 font-medium">R</span>
 				)}
 			</button>
 			{isFolder && isExpanded && childrenToRender && (
