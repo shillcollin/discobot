@@ -1,7 +1,7 @@
 "use client";
 
 import Editor from "@monaco-editor/react";
-import { PatchDiff } from "@pierre/diffs/react";
+import { MultiFileDiff, PatchDiff } from "@pierre/diffs/react";
 import {
 	AlertTriangle,
 	Columns2,
@@ -17,24 +17,27 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import * as React from "react";
+import { useSWRConfig } from "swr";
 import {
 	PanelControls,
 	type PanelState,
 } from "@/components/ide/panel-controls";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import type { FileNode } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useFileEdit } from "@/lib/hooks/use-file-edit";
+import {
+	STORAGE_KEYS,
+	usePersistedState,
+} from "@/lib/hooks/use-persisted-state";
 import {
 	useSessionFileContent,
 	useSessionFileDiff,
@@ -42,6 +45,7 @@ import {
 import { cn } from "@/lib/utils";
 
 type DiffStyle = "unified" | "split";
+type ViewMode = "diff" | "edit";
 
 interface TabbedDiffViewProps {
 	openFiles: FileNode[];
@@ -66,8 +70,32 @@ export function TabbedDiffView({
 	className,
 	hideEmptyState,
 }: TabbedDiffViewProps) {
-	const [diffStyle, setDiffStyle] = React.useState<DiffStyle>("split");
+	const [diffStyle, setDiffStyle] = usePersistedState<DiffStyle>(
+		STORAGE_KEYS.DIFF_STYLE,
+		"split",
+	);
+
+	// Persist view modes per file (diff vs edit) in sessionStorage
+	const [viewModes, setViewModes] = usePersistedState<Record<string, ViewMode>>(
+		STORAGE_KEYS.FILE_VIEW_MODES,
+		{},
+		"session",
+	);
+
 	const activeFile = openFiles.find((f) => f.id === activeFileId);
+
+	// Get/set view mode for a specific file
+	const getViewMode = React.useCallback(
+		(fileId: string): ViewMode => viewModes[fileId] ?? "diff",
+		[viewModes],
+	);
+
+	const setViewMode = React.useCallback(
+		(fileId: string, mode: ViewMode) => {
+			setViewModes((prev) => ({ ...prev, [fileId]: mode }));
+		},
+		[setViewModes],
+	);
 
 	if (openFiles.length === 0 && !hideEmptyState) {
 		return (
@@ -173,36 +201,8 @@ export function TabbedDiffView({
 					))}
 				</div>
 
-				{/* Diff style toggle */}
+				{/* Panel controls */}
 				<div className="flex items-center gap-2 px-2 shrink-0">
-					<div className="flex items-center rounded-md border border-border bg-background">
-						<Button
-							variant="ghost"
-							size="sm"
-							className={cn(
-								"h-6 px-1.5 rounded-r-none",
-								diffStyle === "split" && "bg-muted",
-							)}
-							onClick={() => setDiffStyle("split")}
-							title="Side by side"
-						>
-							<Columns2 className="h-3.5 w-3.5" />
-						</Button>
-						<Button
-							variant="ghost"
-							size="sm"
-							className={cn(
-								"h-6 px-1.5 rounded-l-none border-l border-border",
-								diffStyle === "unified" && "bg-muted",
-							)}
-							onClick={() => setDiffStyle("unified")}
-							title="Unified"
-						>
-							<Rows2 className="h-3.5 w-3.5" />
-						</Button>
-					</div>
-
-					{/* Panel controls */}
 					<PanelControls
 						state={panelState}
 						onMaximize={onMaximize}
@@ -214,23 +214,34 @@ export function TabbedDiffView({
 			</div>
 
 			{/* Diff content */}
-			{activeFile && <DiffContent file={activeFile} diffStyle={diffStyle} />}
+			{activeFile && (
+				<DiffContent
+					file={activeFile}
+					diffStyle={diffStyle}
+					onDiffStyleChange={setDiffStyle}
+					viewMode={getViewMode(activeFile.id)}
+					onViewModeChange={(mode) => setViewMode(activeFile.id, mode)}
+				/>
+			)}
 		</div>
 	);
 }
 
-type ViewMode = "diff" | "edit";
-
 function DiffContent({
 	file,
 	diffStyle,
+	onDiffStyleChange,
+	viewMode,
+	onViewModeChange,
 }: {
 	file: FileNode;
 	diffStyle: DiffStyle;
+	onDiffStyleChange: (style: DiffStyle) => void;
+	viewMode: ViewMode;
+	onViewModeChange: (mode: ViewMode) => void;
 }) {
 	const { selectedSession } = useSessionContext();
 	const { resolvedTheme } = useTheme();
-	const [viewMode, setViewMode] = React.useState<ViewMode>("diff");
 
 	const {
 		diff,
@@ -260,13 +271,6 @@ function DiffContent({
 		shouldLoadContent ? (selectedSession?.id ?? null) : null,
 		shouldLoadContent ? file.id : null,
 	);
-
-	// Reset to diff view when file changes (if diff is available)
-	React.useEffect(() => {
-		if (!noDiffAvailable) {
-			setViewMode("diff");
-		}
-	}, [noDiffAvailable]);
 
 	// Don't wait for original content - show diff immediately, expansion is optional
 	const isLoading =
@@ -314,11 +318,8 @@ function DiffContent({
 				content={currentContent}
 				filePath={file.id}
 				isServerLoading={isContentLoading}
-				onBackToDiff={!noDiffAvailable ? () => setViewMode("diff") : undefined}
-				diffStats={
-					diff
-						? { additions: diff.additions, deletions: diff.deletions }
-						: undefined
+				onBackToDiff={
+					!noDiffAvailable ? () => onViewModeChange("diff") : undefined
 				}
 			/>
 		);
@@ -371,13 +372,40 @@ function DiffContent({
 								Renamed
 							</span>
 						)}
+						{/* Diff style toggle */}
+						<div className="flex items-center rounded-md border border-border bg-background">
+							<Button
+								variant="ghost"
+								size="sm"
+								className={cn(
+									"h-6 px-1.5 rounded-r-none",
+									diffStyle === "split" && "bg-muted",
+								)}
+								onClick={() => onDiffStyleChange("split")}
+								title="Side by side"
+							>
+								<Columns2 className="h-3.5 w-3.5" />
+							</Button>
+							<Button
+								variant="ghost"
+								size="sm"
+								className={cn(
+									"h-6 px-1.5 rounded-l-none border-l border-border",
+									diffStyle === "unified" && "bg-muted",
+								)}
+								onClick={() => onDiffStyleChange("unified")}
+								title="Unified"
+							>
+								<Rows2 className="h-3.5 w-3.5" />
+							</Button>
+						</div>
 						{/* Show Edit button for non-deleted files */}
 						{!isDeleted && (
 							<Button
 								variant="ghost"
 								size="sm"
 								className="h-6 px-2 text-xs"
-								onClick={() => setViewMode("edit")}
+								onClick={() => onViewModeChange("edit")}
 								title="Edit file"
 							>
 								<Pencil className="h-3 w-3 mr-1" />
@@ -452,18 +480,16 @@ function FileContentView({
 	filePath,
 	isServerLoading,
 	onBackToDiff,
-	diffStats,
 }: {
 	content: string;
 	filePath: string;
 	isServerLoading?: boolean;
 	/** Callback to return to diff view (undefined if no diff available) */
 	onBackToDiff?: () => void;
-	/** Diff stats to show in toolbar when available */
-	diffStats?: { additions: number; deletions: number };
 }) {
 	const { selectedSession } = useSessionContext();
 	const { resolvedTheme } = useTheme();
+	const { mutate } = useSWRConfig();
 	const language = getLanguageFromPath(filePath);
 
 	const { state, handleEdit, save, acceptServerContent, forceSave, discard } =
@@ -473,6 +499,16 @@ function FileContentView({
 			serverContent,
 			isServerLoading ?? false,
 		);
+
+	// Track if conflict dialog has been dismissed (to allow continued editing)
+	const [conflictDismissed, setConflictDismissed] = React.useState(false);
+
+	// Reset dismissed state when conflict is resolved
+	React.useEffect(() => {
+		if (!state.hasConflict) {
+			setConflictDismissed(false);
+		}
+	}, [state.hasConflict]);
 
 	const handleEditorChange = React.useCallback(
 		(value: string | undefined) => {
@@ -484,8 +520,20 @@ function FileContentView({
 	);
 
 	const handleSave = React.useCallback(async () => {
-		await save();
-	}, [save]);
+		const success = await save();
+		if (success && selectedSession?.id) {
+			// Refresh diff data after successful save
+			mutate(`session-diff-${selectedSession.id}-files`);
+		}
+	}, [save, selectedSession?.id, mutate]);
+
+	const handleForceSave = React.useCallback(async () => {
+		const success = await forceSave();
+		if (success && selectedSession?.id) {
+			// Refresh diff data after successful save
+			mutate(`session-diff-${selectedSession.id}-files`);
+		}
+	}, [forceSave, selectedSession?.id, mutate]);
 
 	const handleDiscard = React.useCallback(() => {
 		discard();
@@ -510,17 +558,6 @@ function FileContentView({
 			{/* Editor toolbar */}
 			<div className="h-8 flex items-center justify-between px-2 border-b border-border bg-muted/20 shrink-0">
 				<div className="flex items-center gap-3">
-					{/* Show diff stats if available */}
-					{diffStats && (
-						<>
-							<span className="text-xs font-medium text-green-600">
-								+{diffStats.additions}
-							</span>
-							<span className="text-xs font-medium text-red-500">
-								-{diffStats.deletions}
-							</span>
-						</>
-					)}
 					{state.isDirty && (
 						<span className="text-xs text-muted-foreground">Modified</span>
 					)}
@@ -605,29 +642,67 @@ function FileContentView({
 				/>
 			</div>
 
-			{/* Conflict Dialog */}
-			<AlertDialog open={state.hasConflict}>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle className="flex items-center gap-2">
+			{/* Conflict Resolution Dialog */}
+			<Dialog
+				open={state.hasConflict && !conflictDismissed}
+				onOpenChange={(open) => !open && setConflictDismissed(true)}
+			>
+				<DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2">
 							<AlertTriangle className="h-5 w-5 text-yellow-500" />
 							File Modified Externally
-						</AlertDialogTitle>
-						<AlertDialogDescription>
-							This file has been modified by another process. Your local changes
-							may conflict with the remote version.
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel onClick={acceptServerContent}>
-							Reload File
-						</AlertDialogCancel>
-						<AlertDialogAction onClick={forceSave}>
-							Overwrite Remote
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
+						</DialogTitle>
+						<DialogDescription>
+							This file was modified while you were editing. Review the changes
+							below and choose how to resolve the conflict.
+						</DialogDescription>
+					</DialogHeader>
+
+					{/* Diff view showing server (left) vs local (right) */}
+					<div className="flex-1 min-h-0 overflow-auto border rounded-md">
+						{state.conflictContent !== null && (
+							<MultiFileDiff
+								oldFile={{
+									name: `${filePath} (on disk)`,
+									contents: state.conflictContent,
+									lang: language as "typescript" | "javascript" | "go" | "python" | "rust" | "java" | "css" | "html" | "json" | "yaml" | "markdown" | "bash" | "sql" | undefined,
+								}}
+								newFile={{
+									name: `${filePath} (your changes)`,
+									contents: state.content,
+									lang: language as "typescript" | "javascript" | "go" | "python" | "rust" | "java" | "css" | "html" | "json" | "yaml" | "markdown" | "bash" | "sql" | undefined,
+								}}
+								options={{
+									theme: {
+										dark: "github-dark",
+										light: "github-light",
+									},
+									themeType: resolvedTheme === "dark" ? "dark" : "light",
+								}}
+							/>
+						)}
+					</div>
+
+					<DialogFooter className="flex-row justify-between sm:justify-between gap-2">
+						<Button
+							variant="outline"
+							onClick={() => setConflictDismissed(true)}
+						>
+							Keep Editing
+						</Button>
+						<div className="flex gap-2">
+							<Button variant="secondary" onClick={acceptServerContent}>
+								Use Disk Version
+							</Button>
+							<Button onClick={handleForceSave}>
+								<Save className="h-4 w-4 mr-2" />
+								Save My Changes
+							</Button>
+						</div>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

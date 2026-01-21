@@ -61,6 +61,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useSWRConfig } from "swr";
 import { getApiBase } from "@/lib/api-config";
 import type { Agent, SessionStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
@@ -374,8 +375,11 @@ export function ChatPanel({ className }: ChatPanelProps) {
 
 	// Fetch existing messages when a session is selected
 	// Use selectedSessionId directly (not derived selectedSession) to avoid stale cache issues
-	const { messages: existingMessages, error: messagesError } =
-		useMessages(selectedSessionId);
+	const {
+		messages: existingMessages,
+		error: messagesError,
+		isLoading: messagesLoading,
+	} = useMessages(selectedSessionId);
 
 	// Use refs to store the latest selection values for use in fetch
 	// This ensures sendMessage always uses current values even if useChat caches the transport
@@ -453,6 +457,24 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	// Derive loading state from chat status
 	const isLoading = chatStatus === "streaming" || chatStatus === "submitted";
 	const hasError = chatStatus === "error";
+
+	// Refresh diff data when chat finishes
+	const { mutate } = useSWRConfig();
+	const prevChatStatus = React.useRef(chatStatus);
+	React.useEffect(() => {
+		// When status changes from streaming/submitted to ready, refresh the diff
+		const wasLoading =
+			prevChatStatus.current === "streaming" ||
+			prevChatStatus.current === "submitted";
+		const isNowReady = chatStatus === "ready";
+
+		if (wasLoading && isNowReady && selectedSessionId) {
+			// Refresh the diff data for this session
+			mutate(`session-diff-${selectedSessionId}-files`);
+		}
+
+		prevChatStatus.current = chatStatus;
+	}, [chatStatus, selectedSessionId, mutate]);
 
 	// Check if session is not found (fetch returned error and we're not loading)
 	const sessionNotFound =
@@ -1004,7 +1026,17 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			</AnimatePresence>
 
 			{/* Conversation area - expands in conversation mode */}
-			{!sessionNotFound && (
+			{/* Show loading state while fetching messages for existing session */}
+			{!sessionNotFound &&
+				selectedSessionId &&
+				messagesLoading &&
+				mode === "conversation" && (
+					<div className="flex-1 flex items-center justify-center">
+						<Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+					</div>
+				)}
+			{/* Only render Conversation once messages are loaded (or for new sessions) */}
+			{!sessionNotFound && (!selectedSessionId || !messagesLoading) && (
 				<Conversation
 					className={cn(
 						"transition-all duration-300 ease-in-out",

@@ -39,7 +39,7 @@ function IDEContent() {
 	);
 	const [rightSidebarOpen, setRightSidebarOpen] = usePersistedState(
 		STORAGE_KEYS.RIGHT_SIDEBAR_OPEN,
-		true,
+		false,
 	);
 	const [rightSidebarWidth, setRightSidebarWidth] = usePersistedState(
 		STORAGE_KEYS.RIGHT_SIDEBAR_WIDTH,

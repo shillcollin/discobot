@@ -179,7 +179,7 @@ export function usePanelLayout() {
 	const [state, dispatch] = React.useReducer(panelReducer, {
 		diffPanelState: "normal",
 		bottomPanelState: "normal",
-		diffPanelHeight: 50,
+		diffPanelHeight: 67, // Diff takes 67%, chat takes 33%
 		showDiffPanel: false,
 	});
 

@@ -7,6 +7,10 @@ import { ResizeHandle } from "@/components/ide/resize-handle";
 import type { FileNode, FileStatus } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { usePanelLayout } from "@/lib/hooks/use-panel-layout";
+import {
+	STORAGE_KEYS,
+	usePersistedState,
+} from "@/lib/hooks/use-persisted-state";
 import { useSessionFiles } from "@/lib/hooks/use-session-files";
 import { BottomPanel } from "./bottom-panel";
 import { DiffPanel } from "./diff-panel";
@@ -31,7 +35,7 @@ function createFileNodeFromPath(path: string, status?: FileStatus): FileNode {
 		id: path, // Use path as ID for now
 		name,
 		type: "file",
-		changed: true, // Mark as changed since we're showing it in diff view
+		changed: status !== undefined, // Only mark as changed if file has a diff status
 		status,
 	};
 }
@@ -45,10 +49,21 @@ export function MainContent({
 }: MainContentProps) {
 	const { selectedSession, chatResetTrigger } = useSessionContext();
 
-	const [bottomView, setBottomView] = React.useState<BottomView>("chat");
-	const [openFiles, setOpenFiles] = React.useState<FileNode[]>([]);
-	const [activeFilePath, setActiveFilePath] = React.useState<string | null>(
+	const [bottomView, setBottomView] = usePersistedState<BottomView>(
+		STORAGE_KEYS.BOTTOM_VIEW,
+		"chat",
+	);
+
+	// Persist open file paths and active file in sessionStorage (per-tab)
+	const [openFilePaths, setOpenFilePaths] = usePersistedState<string[]>(
+		STORAGE_KEYS.OPEN_FILE_PATHS,
+		[],
+		"session",
+	);
+	const [activeFilePath, setActiveFilePath] = usePersistedState<string | null>(
+		STORAGE_KEYS.ACTIVE_FILE_PATH,
 		null,
+		"session",
 	);
 
 	// Panel layout hook - now internal to MainContent
@@ -70,6 +85,13 @@ export function MainContent({
 		return map;
 	}, [diffEntries]);
 
+	// Derive FileNode objects from persisted paths
+	const openFiles = React.useMemo(() => {
+		return openFilePaths.map((path) =>
+			createFileNodeFromPath(path, statusMap.get(path)),
+		);
+	}, [openFilePaths, statusMap]);
+
 	// Track previous maximize state to detect changes
 	const prevDiffMaximized = React.useRef(
 		panelLayout.diffPanelState === "maximized",
@@ -87,65 +109,80 @@ export function MainContent({
 	// Destructure stable handlers for use in effects
 	const { handleCloseDiffPanel, resetPanels, showDiff } = panelLayout;
 
+	// Show diff panel on mount if there are persisted open files
+	const hasInitializedDiffPanel = React.useRef(false);
+	React.useEffect(() => {
+		if (!hasInitializedDiffPanel.current && openFilePaths.length > 0) {
+			hasInitializedDiffPanel.current = true;
+			showDiff();
+		}
+	}, [openFilePaths.length, showDiff]);
+
 	// Reset files when session changes
 	const prevSessionId = React.useRef<string | null>(null);
 	React.useEffect(() => {
 		if (selectedSession?.id !== prevSessionId.current) {
-			setOpenFiles([]);
+			setOpenFilePaths([]);
 			setActiveFilePath(null);
 			handleCloseDiffPanel();
 			resetPanels();
 			prevSessionId.current = selectedSession?.id ?? null;
 		}
-	}, [selectedSession?.id, handleCloseDiffPanel, resetPanels]);
+	}, [
+		selectedSession?.id,
+		handleCloseDiffPanel,
+		resetPanels,
+		setOpenFilePaths,
+		setActiveFilePath,
+	]);
 
 	const handleFileSelect = React.useCallback(
 		(path: string) => {
-			// Get the status from the diff entries
-			const status = statusMap.get(path);
-			// Create a FileNode from the path for the diff view
-			const fileNode = createFileNodeFromPath(path, status);
-			setOpenFiles((prev) => {
-				if (!prev.find((f) => f.id === path)) {
-					return [...prev, fileNode];
+			// Add path to open files if not already open
+			setOpenFilePaths((prev) => {
+				if (!prev.includes(path)) {
+					return [...prev, path];
 				}
 				return prev;
 			});
 			setActiveFilePath(path);
 			showDiff();
 		},
-		[showDiff, statusMap],
+		[showDiff, setOpenFilePaths, setActiveFilePath],
 	);
 
 	const handleTabClose = React.useCallback(
 		(fileId: string) => {
-			setOpenFiles((prev) => {
-				const newOpenFiles = prev.filter((f) => f.id !== fileId);
+			setOpenFilePaths((prev) => {
+				const newOpenPaths = prev.filter((path) => path !== fileId);
 
 				if (activeFilePath === fileId) {
-					if (newOpenFiles.length > 0) {
-						setActiveFilePath(newOpenFiles[newOpenFiles.length - 1].id);
+					if (newOpenPaths.length > 0) {
+						setActiveFilePath(newOpenPaths[newOpenPaths.length - 1]);
 					} else {
 						setActiveFilePath(null);
 						handleCloseDiffPanel();
 					}
 				}
 
-				return newOpenFiles;
+				return newOpenPaths;
 			});
 		},
-		[activeFilePath, handleCloseDiffPanel],
+		[activeFilePath, handleCloseDiffPanel, setOpenFilePaths, setActiveFilePath],
 	);
 
-	const handleTabSelect = React.useCallback((file: FileNode) => {
-		setActiveFilePath(file.id);
-	}, []);
+	const handleTabSelect = React.useCallback(
+		(file: FileNode) => {
+			setActiveFilePath(file.id);
+		},
+		[setActiveFilePath],
+	);
 
 	const handleDiffClose = React.useCallback(() => {
-		setOpenFiles([]);
+		setOpenFilePaths([]);
 		setActiveFilePath(null);
 		handleCloseDiffPanel();
-	}, [handleCloseDiffPanel]);
+	}, [handleCloseDiffPanel, setOpenFilePaths, setActiveFilePath]);
 
 	// Computed
 	const showCenteredChat = selectedSession === null;
