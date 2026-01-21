@@ -55,32 +55,34 @@ This separation allows a session to be `ready` and `committing` at the same time
 | Status | Description |
 |--------|-------------|
 | `initializing` | Session just created, starting setup process |
-| `reinitializing` | Recreating sandbox after it was deleted (e.g., Docker container removed externally) |
+| `reinitializing` | Recreating sandbox after it was deleted |
 | `cloning` | Cloning git repository for the workspace |
 | `pulling_image` | Pulling the sandbox Docker image |
 | `creating_sandbox` | Creating the sandbox container environment |
-| `ready` | Session is ready for use. Sandbox is running and accepting commands. |
-| `stopped` | Sandbox is stopped. Will be restarted on demand when user sends a message. |
-| `error` | Something failed during setup. Check `errorMessage` for details. |
+| `ready` | Session is ready for use. Sandbox is running. |
+| `stopped` | Sandbox is stopped. Will restart on demand. |
+| `error` | Something failed during setup. Check `errorMessage`. |
 | `removing` | Session is being deleted asynchronously |
-| `removed` | Session has been deleted. Client should remove from UI. |
+| `removed` | Session has been deleted. |
+
+---
 
 ## Commit Status (Orthogonal)
 
 ### State Diagram
 
 ```
-    ┌─────────┐     commit()     ┌──────────┐     job starts    ┌────────────┐
-    │  none   │ ───────────────► │ pending  │ ────────────────► │ committing │
-    └─────────┘                  └──────────┘                   └──────┬─────┘
-         ▲                                                             │
-         │                                                   ┌─────────┴─────────┐
-         │                                                   │                   │
-         │                                           success │           failure │
-         │                                                   ▼                   ▼
-         │                                           ┌────────────┐       ┌──────────┐
-         └─────────────────────────────────────────  │ completed  │       │  failed  │
-              (can commit again after completed)     └────────────┘       └──────────┘
+    ┌─────────┐     commit()     ┌──────────┐     /commit sent    ┌────────────┐
+    │  none   │ ───────────────► │ pending  │ ──────────────────► │ committing │
+    └─────────┘                  └──────────┘                     └──────┬─────┘
+         ▲                                                               │
+         │                                                     ┌─────────┴─────────┐
+         │                                                     │                   │
+         │                                             success │           failure │
+         │                                                     ▼                   ▼
+         │                                             ┌────────────┐       ┌──────────┐
+         └─────────────────────────────────────────────│ completed  │       │  failed  │
+              (can commit again after completed/failed)└────────────┘       └──────────┘
 ```
 
 ### Status Values
@@ -88,154 +90,253 @@ This separation allows a session to be `ready` and `committing` at the same time
 | Status | Description |
 |--------|-------------|
 | `""` (empty) | No commit in progress (default state) |
-| `pending` | Commit requested, waiting for job to start |
-| `committing` | Commit job is actively running |
+| `pending` | Commit requested, job enqueued, waiting to send to agent |
+| `committing` | `/commit` sent to agent, waiting for patches or applying |
 | `completed` | Commit completed successfully |
-| `failed` | Commit failed |
+| `failed` | Commit failed. Check `commitError` for details. |
 
-## Combined State Display
+### Session Commit Fields
 
-The UI displays a consolidated view of both states:
+| Field | Type | Description |
+|-------|------|-------------|
+| `commitStatus` | string | Current commit state |
+| `commitError` | string | Error message if `commitStatus = "failed"` |
+| `baseCommit` | string | Workspace commit SHA when commit started (expected parent) |
+| `appliedCommit` | string | Final commit SHA after patches applied to workspace |
 
-1. **If `commitStatus` is `pending` or `committing`**: Show commit progress indicator (takes priority)
-2. **Otherwise**: Show the session `status` indicator
+---
 
-### UI Indicators
+## Commit Flow
 
-| State | Sidebar Indicator | Chat Header |
-|-------|-------------------|-------------|
-| Lifecycle states (initializing, cloning, etc.) | Yellow spinner | Status banner |
-| `ready` | Green dot | No banner |
-| `stopped` | Pause icon | Yellow banner |
-| `error` | Red dot | Red banner with error message |
-| `removing` | Red spinner | Red banner |
-| `pending` / `committing` | Blue spinner | Blue banner |
-| `completed` | Green dot (returns to `ready` display) | Brief success banner |
-| `failed` | Red dot | Error banner |
+### 1. User Clicks Commit Button
+
+**API**: `POST /api/projects/{projectId}/sessions/{sessionId}/commit`
+
+1. Get current commit SHA of the workspace (from git)
+2. Save as `baseCommit` on session
+3. Clear `appliedCommit` and `commitError`
+4. Set `commitStatus` to `pending`
+5. Fire `session_updated` SSE event
+6. Enqueue `session_commit` job
+
+### 2. Job Execution (PerformCommit)
+
+```go
+func PerformCommit(ctx, projectID, sessionID) error {
+    session := getSession(sessionID)
+
+    // Idempotency: Skip if already completed
+    if session.CommitStatus == "completed" {
+        return nil
+    }
+
+    // Check baseCommit still matches workspace (handles server restart)
+    currentCommit := getWorkspaceCurrentCommit(session.WorkspaceID)
+    if session.BaseCommit != currentCommit {
+        setCommitFailed(session, "Workspace has changed since commit started")
+        return nil
+    }
+
+    // Step 1: Send /commit to agent (if pending)
+    if session.CommitStatus == "pending" {
+        err := sendChatMessage(sessionID, "/commit " + session.BaseCommit)
+        if err != nil {
+            setCommitFailed(session, "Failed to send commit command: " + err.Error())
+            return nil
+        }
+        // Wait for stream to close (turn complete)
+
+        session.CommitStatus = "committing"
+        updateSession(session)
+        fireSessionUpdatedEvent(projectID, sessionID)
+    }
+
+    // Step 2: Fetch and apply patches (if not yet done)
+    if session.AppliedCommit == "" {
+        // Call agent-api to get format-patch output
+        patches, err := agentAPI.GetCommits(sessionID, session.BaseCommit)
+        if err != nil {
+            setCommitFailed(session, "Failed to get commits: " + err.Error())
+            return nil
+        }
+
+        if patches.ParentMismatch {
+            setCommitFailed(session, "Agent commits have wrong parent")
+            return nil
+        }
+
+        if len(patches.Data) == 0 {
+            setCommitFailed(session, "No commits from agent")
+            return nil
+        }
+
+        // Apply patches to workspace (git am)
+        finalCommit, err := applyPatches(session.WorkspaceID, patches.Data)
+        if err != nil {
+            setCommitFailed(session, "Failed to apply patches: " + err.Error())
+            return nil
+        }
+
+        session.AppliedCommit = finalCommit
+        updateSession(session)
+        fireSessionUpdatedEvent(projectID, sessionID)
+    }
+
+    // Step 3: Verify and complete
+    if commitExistsInWorkspace(session.WorkspaceID, session.AppliedCommit) {
+        session.CommitStatus = "completed"
+        session.CommitError = ""
+        updateSession(session)
+        fireSessionUpdatedEvent(projectID, sessionID)
+    } else {
+        setCommitFailed(session, "Applied commit not found in workspace")
+    }
+
+    return nil
+}
+
+func setCommitFailed(session, errorMsg) {
+    session.CommitStatus = "failed"
+    session.CommitError = errorMsg
+    updateSession(session)
+    fireSessionUpdatedEvent(session.ProjectID, session.ID)
+}
+```
+
+### 3. Agent-API Endpoint
+
+```
+GET /commits?parent={expectedParent}
+```
+
+**Response (success)**:
+```json
+{
+    "patches": "<git format-patch output>",
+    "commitCount": 2
+}
+```
+
+**Response (error)**:
+```json
+{
+    "error": "parent_mismatch" | "no_commits"
+}
+```
+
+- Uses `git format-patch` to preserve all metadata (author, date, signatures)
+- Validates that the commits' parent matches the expected parent
+- Returns patches in order, ready for `git am`
+
+### 4. Apply Patches to Workspace
+
+```bash
+# In workspace directory
+git am --keep-cr < patches.patch
+```
+
+- Applies commits exactly as-is with original metadata
+- Preserves commit signatures if present
+- Returns the final commit SHA
+
+---
+
+## Idempotency
+
+The job is designed to handle server restarts safely:
+
+| Job restarts when... | State | Action |
+|---------------------|-------|--------|
+| Before sending to agent | `pending`, `appliedCommit=""` | Check baseCommit matches, send `/commit` |
+| After sending, before apply | `committing`, `appliedCommit=""` | Check baseCommit matches, fetch patches, apply |
+| After apply, before complete | `committing`, `appliedCommit` set | Verify commit exists, mark `completed` |
+| Already done | `completed` | No-op |
+| Workspace changed | Any | Set `failed` with error |
+
+**Key idempotency checks**:
+1. Always verify `baseCommit` matches current workspace commit before proceeding
+2. `appliedCommit` being set indicates patches were applied
+3. Agent is idempotent: `/commit` sent twice returns same patches
+
+---
+
+## Error Handling
+
+| Error | Result | User Action |
+|-------|--------|-------------|
+| Workspace changed since commit started | `failed` + error message | Click Commit to retry with new baseCommit |
+| Agent-api returns no commits | `failed` + error message | Click Commit to retry |
+| Agent-api parent mismatch | `failed` + error message | Click Commit to retry |
+| Patch application fails | `failed` + error message | Click Commit to retry |
+| Verification fails | `failed` + error message | Click Commit to retry |
+
+User can always click Commit again to retry - it starts fresh with a new `baseCommit`.
+
+---
 
 ## Chat Behavior
 
 | Session Status | Commit Status | Chat Allowed |
 |---------------|---------------|--------------|
-| Any | `pending` | **No** - Input disabled with "Chat disabled during commit..." |
-| Any | `committing` | **No** - Input disabled with "Chat disabled during commit..." |
-| `ready` | `""` / `completed` | Yes |
-| `stopped` | `""` / `completed` | Yes (restarts sandbox) |
+| Any | `pending` | **No** - Input disabled |
+| Any | `committing` | **No** - Input disabled |
+| `ready` | `""` / `completed` / `failed` | Yes |
+| `stopped` | `""` / `completed` / `failed` | Yes (restarts sandbox) |
 | `error` | Any | No |
-| Initialization states | Any | Yes (queued until ready) |
-| `removing` / `removed` | Any | No |
 
-## Server Restart Handling
+---
 
-The commit job is designed to handle server restarts:
+## SSE Events
 
-1. **Job persists in database**: The `session_commit` job is stored with `pending` status
-2. **Session state persists**: `commitStatus` is stored in the session record
-3. **On restart**:
-   - Job dispatcher picks up pending jobs
-   - `PerformCommit()` checks `commitStatus`:
-     - If `pending`: Continues normally (transitions to `committing`)
-     - If `committing`: Continues from where it left off
-     - If neither: Job exits gracefully (state was manually changed)
+All `commitStatus` changes fire `session_updated` SSE event:
 
-## Implementation Details
+```json
+{
+    "type": "session_updated",
+    "data": {
+        "sessionId": "abc123",
+        "status": ""
+    }
+}
+```
 
-### Backend Components
+Client re-fetches session to get updated `commitStatus`, `commitError`, `appliedCommit`.
 
-- **Model**: `server/internal/model/model.go`
-  - `Session.Status` - Lifecycle status
-  - `Session.CommitStatus` - Commit status (new field)
-  - Status and CommitStatus constants
+---
 
-- **Service**: `server/internal/service/session.go`
-  - `CommitSession()` - Initiates commit (sets `commitStatus = "pending"`)
-  - `PerformCommit()` - Executes commit job (transitions through commit states)
-  - `updateCommitStatusWithEvent()` - Updates status and emits SSE
+## Implementation Components
 
-- **Job**: `server/internal/jobs/session_commit.go`
-  - `SessionCommitExecutor` - Handles the commit job
+### Backend
 
-- **Handler**: `server/internal/handler/sessions.go`
-  - `POST /sessions/{id}/commit` - Initiates commit
+| Component | File | Changes |
+|-----------|------|---------|
+| Model | `server/internal/model/model.go` | Add `CommitError`, `BaseCommit`, `AppliedCommit` fields |
+| Service | `server/internal/service/session.go` | Update `CommitSession()`, `PerformCommit()` |
+| Job | `server/internal/jobs/session_commit.go` | Already exists, update executor |
+| Git | `server/internal/service/git.go` | Add `ApplyPatches()` method |
+| Handler | `server/internal/handler/chat.go` | Block chat during commit |
 
-- **Chat Handler**: `server/internal/handler/chat.go`
-  - Blocks chat when `commitStatus` is `pending` or `committing`
+### Agent-API
 
-### Frontend Components
+| Component | File | Changes |
+|-----------|------|---------|
+| Handler | `agent-api/internal/server/commits.go` | New endpoint |
+| Git | `agent-api/internal/...` | `git format-patch` execution |
 
-- **Types**: `lib/api-types.ts`
-  - `SessionStatus` - Lifecycle status type
-  - `CommitStatus` - Commit status type
-  - `Session.commitStatus` - New field
+### Frontend
 
-- **Chat Panel**: `components/ide/chat-panel.tsx`
-  - `getStatusDisplay()` - Session lifecycle status
-  - `getCommitStatusDisplay()` - Commit status
-  - Input locking based on `commitStatus`
+| Component | File | Changes |
+|-----------|------|---------|
+| Types | `lib/api-types.ts` | Add `commitError`, `baseCommit`, `appliedCommit` |
+| Chat Panel | `components/ide/chat-panel.tsx` | Display `commitError` |
+| Sidebar | `components/ide/sidebar-tree.tsx` | Show failed state |
 
-- **Sidebar**: `components/ide/sidebar-tree.tsx`
-  - `getSessionStatusIndicator()` - Combined status indicator
+---
 
-- **Bottom Panel**: `components/ide/layout/bottom-panel.tsx`
-  - Commit button with loading state based on `commitStatus`
-
-### Database Schema
+## Database Schema
 
 ```sql
--- Session table
-ALTER TABLE sessions ADD COLUMN commit_status TEXT DEFAULT '';
+ALTER TABLE sessions ADD COLUMN commit_error TEXT DEFAULT '';
+ALTER TABLE sessions ADD COLUMN base_commit TEXT DEFAULT '';
+ALTER TABLE sessions ADD COLUMN applied_commit TEXT DEFAULT '';
 ```
-
-### API Endpoints
-
-**Initiate Commit**
-```
-POST /api/projects/{projectId}/sessions/{sessionId}/commit
-```
-
-**Response**:
-- `200 OK`: `{ "success": true }` - Commit initiated
-- `404 Not Found`: Session not found
-- `409 Conflict`: Commit already in progress
-
-**Session Response** (includes new field)
-```json
-{
-  "id": "abc123",
-  "status": "ready",
-  "commitStatus": "committing",
-  ...
-}
-```
-
-### SSE Events
-
-Session updates are broadcast via SSE when commit status changes:
-
-```json
-{
-  "type": "session_updated",
-  "data": {
-    "sessionId": "abc123",
-    "status": ""
-  }
-}
-```
-
-The client should re-fetch the session to get the updated `commitStatus`.
-
-## Future Considerations
-
-1. **Commit Parameters**: The commit job currently sleeps for 10 seconds as a placeholder. Future implementation will:
-   - Generate commit message from AI
-   - Stage changed files
-   - Create git commit
-   - Optionally push to remote
-
-2. **Commit Cancellation**: Allow cancelling a commit when `commitStatus` is `pending`.
-
-3. **Commit History**: Track commit history per session.
-
-4. **Branch Management**: Handle branch creation/switching as part of commit flow.
-
-5. **Error Recovery**: Allow retrying failed commits without resetting the session.
