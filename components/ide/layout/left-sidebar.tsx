@@ -4,6 +4,10 @@ import * as React from "react";
 import { AgentsPanel } from "@/components/ide/agents-panel";
 import { ResizeHandle } from "@/components/ide/resize-handle";
 import { SidebarTree } from "@/components/ide/sidebar-tree";
+import {
+	STORAGE_KEYS,
+	usePersistedState,
+} from "@/lib/hooks/use-persisted-state";
 
 interface LeftSidebarProps {
 	isOpen: boolean;
@@ -12,18 +16,27 @@ interface LeftSidebarProps {
 }
 
 export function LeftSidebar({ isOpen, width, onResize }: LeftSidebarProps) {
-	const [agentsPanelMinimized, setAgentsPanelMinimized] = React.useState(false);
-	const [agentsPanelHeight, setAgentsPanelHeight] = React.useState(20);
+	const [agentsPanelMinimized, setAgentsPanelMinimized] = usePersistedState(
+		STORAGE_KEYS.AGENTS_PANEL_MINIMIZED,
+		false,
+	);
+	const [agentsPanelHeight, setAgentsPanelHeight] = usePersistedState(
+		STORAGE_KEYS.AGENTS_PANEL_HEIGHT,
+		20,
+	);
 	const sidebarRef = React.useRef<HTMLDivElement>(null);
 
-	const handleAgentsPanelResize = React.useCallback((delta: number) => {
-		if (!sidebarRef.current) return;
-		const containerHeight = sidebarRef.current.clientHeight;
-		const deltaPercent = (delta / containerHeight) * 100;
-		setAgentsPanelHeight((prev) =>
-			Math.min(60, Math.max(15, prev - deltaPercent)),
-		);
-	}, []);
+	const handleAgentsPanelResize = React.useCallback(
+		(delta: number) => {
+			if (!sidebarRef.current) return;
+			const containerHeight = sidebarRef.current.clientHeight;
+			const deltaPercent = (delta / containerHeight) * 100;
+			setAgentsPanelHeight((prev) =>
+				Math.min(60, Math.max(15, prev - deltaPercent)),
+			);
+		},
+		[setAgentsPanelHeight],
+	);
 
 	if (!isOpen) {
 		return null;

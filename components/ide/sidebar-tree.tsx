@@ -1,6 +1,7 @@
 "use client";
 
 import {
+	AlertCircle,
 	ChevronDown,
 	ChevronRight,
 	Circle,
@@ -21,6 +22,11 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { Session, Workspace, WorkspaceStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
@@ -252,6 +258,11 @@ function WorkspaceNode({
 }
 
 function getSessionHoverText(session: Session): string {
+	// Show commit error if commit failed
+	if (session.commitStatus === "failed" && session.commitError) {
+		return `Commit Failed: ${session.commitError}`;
+	}
+
 	const status = session.status
 		.replace(/_/g, " ")
 		.replace(/\b\w/g, (c) => c.toUpperCase());
@@ -262,9 +273,15 @@ function getSessionHoverText(session: Session): string {
 }
 
 function getSessionStatusIndicator(session: Session) {
-	// Show commit status indicator if commit is in progress
-	if (session.commitStatus === "pending" || session.commitStatus === "committing") {
+	// Show commit status indicator if commit is in progress or failed
+	if (
+		session.commitStatus === "pending" ||
+		session.commitStatus === "committing"
+	) {
 		return <Loader2 className="h-2.5 w-2.5 text-blue-500 animate-spin" />;
+	}
+	if (session.commitStatus === "failed") {
+		return <AlertCircle className="h-3 w-3 text-destructive" />;
 	}
 
 	// Show session lifecycle status
@@ -329,6 +346,28 @@ function SessionNode({
 		}
 	};
 
+	const showTooltip =
+		session.commitStatus === "failed" || session.status === "error";
+	const tooltipText = getSessionHoverText(session);
+
+	const sessionButton = (
+		<button
+			type="button"
+			onClick={() => onSessionSelect(session)}
+			className="flex items-center gap-1.5 min-w-0 flex-1"
+			title={
+				!showTooltip && session.status !== "ready"
+					? tooltipText
+					: undefined
+			}
+		>
+			<span className="shrink-0 flex items-center justify-center w-4 h-4">
+				{getSessionStatusIndicator(session)}
+			</span>
+			<span className="truncate text-sm">{session.name}</span>
+		</button>
+	);
+
 	return (
 		<div
 			className={cn(
@@ -337,19 +376,19 @@ function SessionNode({
 			)}
 			style={{ paddingLeft: "20px", paddingRight: "8px" }}
 		>
-			<button
-				type="button"
-				onClick={() => onSessionSelect(session)}
-				className="flex items-center gap-1.5 min-w-0 flex-1"
-				title={
-					session.status !== "ready" ? getSessionHoverText(session) : undefined
-				}
-			>
-				<span className="shrink-0 flex items-center justify-center w-4 h-4">
-					{getSessionStatusIndicator(session)}
-				</span>
-				<span className="truncate text-sm">{session.name}</span>
-			</button>
+			{showTooltip ? (
+				<Tooltip>
+					<TooltipTrigger asChild>{sessionButton}</TooltipTrigger>
+					<TooltipContent
+						side="right"
+						className="max-w-xs bg-destructive text-destructive-foreground"
+					>
+						{tooltipText}
+					</TooltipContent>
+				</Tooltip>
+			) : (
+				sessionButton
+			)}
 			<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
 				<DropdownMenuTrigger asChild>
 					<button

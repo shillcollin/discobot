@@ -44,6 +44,12 @@ export interface Session {
 	status: SessionStatus;
 	/** Commit status (orthogonal to session status) */
 	commitStatus?: CommitStatus;
+	/** Error message if commit status is "failed" */
+	commitError?: string;
+	/** Workspace commit SHA when commit started (expected parent) */
+	baseCommit?: string;
+	/** Final commit SHA after patches applied to workspace */
+	appliedCommit?: string;
 	/** Error message if status is "error" */
 	errorMessage?: string;
 	files: FileNode[];

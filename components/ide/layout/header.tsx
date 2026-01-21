@@ -1,13 +1,16 @@
 "use client";
 
 import {
+	AlertCircle,
 	Bot,
 	Check,
 	ChevronDown,
+	Circle,
 	Key,
-	MessageSquare,
+	Loader2,
 	PanelLeft,
 	PanelLeftClose,
+	Pause,
 	Plus,
 	Trash2,
 	X,
@@ -31,10 +34,58 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api-client";
-import type { Agent, Workspace } from "@/lib/api-types";
+import type { Agent, Session, Workspace } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
 import { formatTimeAgo } from "@/lib/utils";
+
+function getSessionHoverText(session: Session): string {
+	// Show commit error if commit failed
+	if (session.commitStatus === "failed" && session.commitError) {
+		return `Commit Failed: ${session.commitError}`;
+	}
+
+	const status = session.status
+		.replace(/_/g, " ")
+		.replace(/\b\w/g, (c) => c.toUpperCase());
+	if (session.status === "error" && session.errorMessage) {
+		return `${status}: ${session.errorMessage}`;
+	}
+	return status;
+}
+
+function getSessionStatusIndicator(session: Session) {
+	// Show commit status indicator if commit is in progress or failed
+	if (
+		session.commitStatus === "pending" ||
+		session.commitStatus === "committing"
+	) {
+		return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+	}
+	if (session.commitStatus === "failed") {
+		return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
+	}
+
+	// Show session lifecycle status
+	switch (session.status) {
+		case "initializing":
+		case "reinitializing":
+		case "cloning":
+		case "pulling_image":
+		case "creating_sandbox":
+			return <Loader2 className="h-3.5 w-3.5 text-yellow-500 animate-spin" />;
+		case "ready":
+			return <Circle className="h-3 w-3 text-green-500 fill-green-500" />;
+		case "stopped":
+			return <Pause className="h-3.5 w-3.5 text-muted-foreground" />;
+		case "error":
+			return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
+		case "removing":
+			return <Loader2 className="h-3.5 w-3.5 text-red-500 animate-spin" />;
+		default:
+			return <Circle className="h-3 w-3 text-muted-foreground" />;
+	}
+}
 
 interface HeaderProps {
 	leftSidebarOpen: boolean;
@@ -227,8 +278,14 @@ export function Header({
 										<button
 											type="button"
 											className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
+											title={
+												selectedSession.commitStatus === "failed" ||
+												selectedSession.status === "error"
+													? getSessionHoverText(selectedSession)
+													: undefined
+											}
 										>
-											<MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
+											{getSessionStatusIndicator(selectedSession)}
 											<span className="truncate max-w-[200px] font-medium">
 												{selectedSession.name}
 											</span>
@@ -240,21 +297,36 @@ export function Header({
 											workspaceSessions.map((session) => {
 												const isSelected = session.id === selectedSession.id;
 												const isConfirming = confirmDeleteId === session.id;
+												const statusIndicator =
+													getSessionStatusIndicator(session);
+												const showTooltip =
+													session.commitStatus === "failed" ||
+													session.status === "error";
+												const tooltipText = getSessionHoverText(session);
+
+												const sessionContent = (
+													<>
+														{statusIndicator}
+														<div className="flex-1 min-w-0">
+															<div className="truncate font-medium">
+																{session.name}
+															</div>
+															<div className="text-xs text-muted-foreground truncate">
+																{showTooltip
+																	? tooltipText
+																	: formatTimeAgo(session.timestamp)}
+															</div>
+														</div>
+													</>
+												);
+
 												return (
 													<DropdownMenuItem
 														key={session.id}
 														onClick={() => handleSessionSelect(session)}
 														className="group/item flex items-center gap-2"
 													>
-														<MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
-														<div className="flex-1 min-w-0">
-															<div className="truncate font-medium">
-																{session.name}
-															</div>
-															<div className="text-xs text-muted-foreground truncate">
-																{formatTimeAgo(session.timestamp)}
-															</div>
-														</div>
+														{sessionContent}
 														{isSelected && !isConfirming && (
 															<Check className="h-4 w-4 shrink-0 text-primary" />
 														)}
