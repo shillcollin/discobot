@@ -3,13 +3,17 @@
 import {
 	ChevronDown,
 	ChevronRight,
+	ChevronsDownUp,
+	ChevronsUpDown,
 	FileCode,
 	FileMinus,
 	FilePlus,
 	Files,
 	Filter,
 	Folder,
+	FolderMinus,
 	FolderOpen,
+	FolderPlus,
 	Loader2,
 	X,
 } from "lucide-react";
@@ -22,10 +26,39 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+	STORAGE_KEYS,
+	usePersistedState,
+} from "@/lib/hooks/use-persisted-state";
+import {
 	type LazyFileNode,
 	useSessionFiles,
 } from "@/lib/hooks/use-session-files";
+import type { FileStatus, SessionDiffFileEntry } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
+
+/**
+ * Calculate the derived status for a folder based on its descendant files.
+ * Returns: "deleted" if all descendants are deleted, "added" if all are added,
+ * "modified" if there's a mix, or undefined if no changed descendants.
+ */
+function getFolderStatus(
+	folderPath: string,
+	diffEntries: SessionDiffFileEntry[],
+): FileStatus | undefined {
+	const prefix = folderPath === "." ? "" : `${folderPath}/`;
+	const descendants = diffEntries.filter((e) =>
+		folderPath === "." ? true : e.path.startsWith(prefix),
+	);
+
+	if (descendants.length === 0) return undefined;
+
+	const allDeleted = descendants.every((e) => e.status === "deleted");
+	const allAdded = descendants.every((e) => e.status === "added");
+
+	if (allDeleted) return "deleted";
+	if (allAdded) return "added";
+	return "modified";
+}
 
 interface FilePanelProps {
 	sessionId: string | null;
@@ -44,15 +77,21 @@ export function FilePanel({
 	style,
 	onCloseSession,
 }: FilePanelProps) {
-	const [showChangedOnly, setShowChangedOnly] = React.useState(true);
+	const [showChangedOnly, setShowChangedOnly] = usePersistedState(
+		STORAGE_KEYS.SHOW_CHANGED_ONLY,
+		true,
+	);
 
 	const {
 		fileTree,
 		isLoading,
 		diffStats,
 		changedFiles,
+		diffEntries,
 		expandedPaths,
 		toggleDirectory,
+		expandAll,
+		collapseAll,
 		isPathLoading,
 	} = useSessionFiles(sessionId, !showChangedOnly);
 
@@ -88,6 +127,36 @@ export function FilePanel({
 
 	const filteredFiles = filterFiles(fileTree);
 	const changedCount = diffStats?.filesChanged ?? changedFiles.length;
+
+	// Check if all directories are expanded
+	const allExpanded = React.useMemo(() => {
+		function countDirs(nodes: LazyFileNode[]): number {
+			let count = 0;
+			for (const node of nodes) {
+				if (node.type === "directory") {
+					count++;
+					if (node.children) {
+						count += countDirs(node.children);
+					}
+				}
+			}
+			return count;
+		}
+		const dirCount = countDirs(filteredFiles);
+		// Check if all dirs are in expandedPaths (minus root ".")
+		return dirCount > 0 && expandedPaths.size > dirCount;
+	}, [filteredFiles, expandedPaths]);
+
+	// Check if there are any directories to expand
+	const hasDirs = React.useMemo(() => {
+		function hasDir(nodes: LazyFileNode[]): boolean {
+			for (const node of nodes) {
+				if (node.type === "directory") return true;
+			}
+			return false;
+		}
+		return hasDir(filteredFiles);
+	}, [filteredFiles]);
 
 	if (!sessionId) {
 		return (
@@ -164,10 +233,35 @@ export function FilePanel({
 							onFileSelect={onFileSelect}
 							selectedFilePath={selectedFilePath}
 							isPathLoading={isPathLoading}
+							diffEntries={diffEntries}
 						/>
 					))
 				)}
 			</div>
+
+			{/* Expand/Collapse All button - subtle footer */}
+			{showChangedOnly && hasDirs && filteredFiles.length > 0 && (
+				<div className="px-3 py-1.5 border-t border-sidebar-border flex justify-center">
+					<Button
+						variant="ghost"
+						size="sm"
+						className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+						onClick={allExpanded ? collapseAll : expandAll}
+					>
+						{allExpanded ? (
+							<>
+								<ChevronsDownUp className="h-3 w-3 mr-1" />
+								Collapse All
+							</>
+						) : (
+							<>
+								<ChevronsUpDown className="h-3 w-3 mr-1" />
+								Expand All
+							</>
+						)}
+					</Button>
+				</div>
+			)}
 
 			{/* Close Session footer */}
 			{onCloseSession && (
@@ -253,6 +347,7 @@ function FileTreeNode({
 	onFileSelect,
 	selectedFilePath,
 	isPathLoading,
+	diffEntries,
 }: {
 	node: LazyFileNode;
 	depth: number;
@@ -261,6 +356,7 @@ function FileTreeNode({
 	onFileSelect: (path: string) => void;
 	selectedFilePath: string | null;
 	isPathLoading: (path: string) => boolean;
+	diffEntries: SessionDiffFileEntry[];
 }) {
 	const isFolder = node.type === "directory";
 
@@ -274,6 +370,11 @@ function FileTreeNode({
 		isFolder && collapsedPaths.every((p) => expandedPaths.has(p));
 	const isSelected = selectedFilePath === node.path;
 	const isLoading = collapsedPaths.some((p) => isPathLoading(p));
+
+	// Calculate folder status based on descendants
+	const folderStatus = isFolder
+		? getFolderStatus(finalNode.path, diffEntries)
+		: undefined;
 
 	const handleClick = () => {
 		if (isFolder) {
@@ -313,10 +414,28 @@ function FileTreeNode({
 						) : (
 							<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
 						)}
-						{isExpanded ? (
-							<FolderOpen className="h-4 w-4 text-amber-500" />
+						{folderStatus === "deleted" ? (
+							<FolderMinus className="h-4 w-4 text-red-500" />
+						) : folderStatus === "added" ? (
+							<FolderPlus className="h-4 w-4 text-green-500" />
+						) : isExpanded ? (
+							<FolderOpen
+								className={cn(
+									"h-4 w-4",
+									folderStatus === "modified"
+										? "text-yellow-500"
+										: "text-amber-500",
+								)}
+							/>
 						) : (
-							<Folder className="h-4 w-4 text-amber-500" />
+							<Folder
+								className={cn(
+									"h-4 w-4",
+									folderStatus === "modified"
+										? "text-yellow-500"
+										: "text-amber-500",
+								)}
+							/>
 						)}
 					</>
 				) : (
@@ -330,7 +449,11 @@ function FileTreeNode({
 							<FileCode
 								className={cn(
 									"h-4 w-4",
-									node.changed ? "text-yellow-500" : "text-sky-500",
+									node.status === "modified"
+										? "text-yellow-500"
+										: node.changed
+											? "text-yellow-500"
+											: "text-sky-500",
 								)}
 							/>
 						)}
@@ -339,22 +462,34 @@ function FileTreeNode({
 				<span
 					className={cn(
 						"truncate",
-						node.status === "deleted" && "line-through text-muted-foreground",
+						(node.status === "deleted" || folderStatus === "deleted") &&
+							"line-through text-muted-foreground",
 					)}
 				>
 					{displayName}
 				</span>
-				{node.status === "added" && (
+				{/* File status badges */}
+				{!isFolder && node.status === "added" && (
 					<span className="ml-auto text-xs text-green-500 font-medium">A</span>
 				)}
-				{node.status === "modified" && (
+				{!isFolder && node.status === "modified" && (
 					<span className="ml-auto text-xs text-yellow-500 font-medium">M</span>
 				)}
-				{node.status === "deleted" && (
+				{!isFolder && node.status === "deleted" && (
 					<span className="ml-auto text-xs text-red-500 font-medium">D</span>
 				)}
-				{node.status === "renamed" && (
+				{!isFolder && node.status === "renamed" && (
 					<span className="ml-auto text-xs text-purple-500 font-medium">R</span>
+				)}
+				{/* Folder status badges */}
+				{isFolder && folderStatus === "added" && (
+					<span className="ml-auto text-xs text-green-500 font-medium">A</span>
+				)}
+				{isFolder && folderStatus === "modified" && (
+					<span className="ml-auto text-xs text-yellow-500 font-medium">M</span>
+				)}
+				{isFolder && folderStatus === "deleted" && (
+					<span className="ml-auto text-xs text-red-500 font-medium">D</span>
 				)}
 			</button>
 			{isFolder && isExpanded && childrenToRender && (
@@ -369,6 +504,7 @@ function FileTreeNode({
 							onFileSelect={onFileSelect}
 							selectedFilePath={selectedFilePath}
 							isPathLoading={isPathLoading}
+							diffEntries={diffEntries}
 						/>
 					))}
 				</div>

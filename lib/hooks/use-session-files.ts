@@ -55,7 +55,11 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 	);
 
 	// Load diff status (files that have changed) - always load
-	const { data: diffData, isLoading: isLoadingDiff } = useSWR(
+	const {
+		data: diffData,
+		isLoading: isLoadingDiff,
+		mutate: mutateDiff,
+	} = useSWR(
 		sessionId ? `session-diff-${sessionId}-files` : null,
 		async () => {
 			if (!sessionId) return null;
@@ -106,6 +110,11 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 				const data = await api.listSessionFiles(sessionId, path);
 				const nodes = entriesToNodes(data.entries, path, diffEntriesMap);
 				setChildrenCache((prev) => new Map(prev).set(path, nodes));
+			} catch {
+				// Directory may not exist (ghost directory for deleted files)
+				// Use empty entries - entriesToNodes will still add deleted files from diff
+				const nodes = entriesToNodes([], path, diffEntriesMap);
+				setChildrenCache((prev) => new Map(prev).set(path, nodes));
 			} finally {
 				setLoadingPaths((prev) => {
 					const next = new Set(prev);
@@ -138,9 +147,34 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 		[expandedPaths, expandDirectory, collapseDirectory],
 	);
 
-	// Refresh files (clear cache and reload)
+	// Refresh files (clear cache and reload diff)
 	const refresh = useCallback(() => {
 		setChildrenCache(new Map());
+		setExpandedPaths(new Set(["."]));
+		mutateDiff();
+	}, [mutateDiff]);
+
+	// Expand all directories in the current tree
+	const expandAll = useCallback(() => {
+		const allDirPaths = new Set<string>(["."]);
+
+		function collectDirPaths(nodes: LazyFileNode[]) {
+			for (const node of nodes) {
+				if (node.type === "directory") {
+					allDirPaths.add(node.path);
+					if (node.children) {
+						collectDirPaths(node.children);
+					}
+				}
+			}
+		}
+
+		collectDirPaths(fileTree);
+		setExpandedPaths(allDirPaths);
+	}, [fileTree]);
+
+	// Collapse all directories
+	const collapseAll = useCallback(() => {
 		setExpandedPaths(new Set(["."]));
 	}, []);
 
@@ -168,6 +202,8 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 		expandDirectory,
 		collapseDirectory,
 		toggleDirectory,
+		expandAll,
+		collapseAll,
 		isPathLoading,
 		refresh,
 	};
@@ -237,7 +273,14 @@ function entriesToNodes(
 	parentPath: string,
 	diffEntriesMap: Map<string, SessionDiffFileEntry>,
 ): LazyFileNode[] {
-	return entries.map((entry) => {
+	// Convert existing filesystem entries
+	const existingPaths = new Set(
+		entries.map((e) =>
+			parentPath === "." ? e.name : `${parentPath}/${e.name}`,
+		),
+	);
+
+	const nodes: LazyFileNode[] = entries.map((entry) => {
 		const path =
 			parentPath === "." ? entry.name : `${parentPath}/${entry.name}`;
 		const isDir = entry.type === "directory";
@@ -256,6 +299,71 @@ function entriesToNodes(
 			// Include status for files
 			status: isDir ? undefined : diffEntry?.status,
 		};
+	});
+
+	// Add deleted files and ghost directories for deleted files not on filesystem
+	const addedPaths = new Set<string>();
+	for (const [filePath, diffEntry] of diffEntriesMap) {
+		if (diffEntry.status !== "deleted") continue;
+
+		// Check if this deleted file is under parentPath
+		const isDirectChild = (() => {
+			const parentDir = filePath.includes("/")
+				? filePath.substring(0, filePath.lastIndexOf("/"))
+				: ".";
+			return parentDir === parentPath;
+		})();
+
+		const isUnderParent =
+			parentPath === "."
+				? true
+				: filePath.startsWith(`${parentPath}/`);
+
+		if (!isUnderParent) continue;
+
+		if (isDirectChild) {
+			// Direct child - add the deleted file
+			if (existingPaths.has(filePath) || addedPaths.has(filePath)) continue;
+
+			const name = filePath.split("/").pop() || filePath;
+			nodes.push({
+				name,
+				path: filePath,
+				type: "file",
+				changed: true,
+				status: "deleted",
+			});
+			addedPaths.add(filePath);
+		} else {
+			// Nested under a subdirectory - may need to create ghost directory
+			const relativePath =
+				parentPath === "."
+					? filePath
+					: filePath.substring(parentPath.length + 1);
+			const firstPart = relativePath.split("/")[0];
+			const ghostDirPath =
+				parentPath === "." ? firstPart : `${parentPath}/${firstPart}`;
+
+			if (existingPaths.has(ghostDirPath) || addedPaths.has(ghostDirPath)) continue;
+
+			// Create ghost directory for deleted files
+			nodes.push({
+				name: firstPart,
+				path: ghostDirPath,
+				type: "directory",
+				changed: true,
+				children: undefined, // Will be populated when expanded
+			});
+			addedPaths.add(ghostDirPath);
+		}
+	}
+
+	// Sort: directories first, then alphabetically
+	return nodes.sort((a, b) => {
+		if (a.type !== b.type) {
+			return a.type === "directory" ? -1 : 1;
+		}
+		return a.name.localeCompare(b.name);
 	});
 }
 

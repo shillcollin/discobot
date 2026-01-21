@@ -60,7 +60,14 @@ export const STORAGE_KEYS = {
 	DIFF_PANEL_STATE: "octobot:diffPanelState",
 	BOTTOM_PANEL_STATE: "octobot:bottomPanelState",
 	DIFF_PANEL_HEIGHT: "octobot:diffPanelHeight",
+	BOTTOM_VIEW: "octobot:bottomView",
+	DIFF_STYLE: "octobot:diffStyle",
+	SHOW_CHANGED_ONLY: "octobot:showChangedOnly",
 	SELECTED_SESSION_ID: "octobot:selectedSessionId",
 	LAST_AGENT_TYPE_ID: "octobot:lastAgentTypeId",
 	LAST_WORKSPACE_PATH: "octobot:lastWorkspacePath",
+	// Per-session state (sessionStorage)
+	OPEN_FILE_PATHS: "octobot:openFilePaths",
+	ACTIVE_FILE_PATH: "octobot:activeFilePath",
+	FILE_VIEW_MODES: "octobot:fileViewModes",
 } as const;
