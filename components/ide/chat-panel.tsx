@@ -410,13 +410,15 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		onError: handleChatError,
 	});
 
-	// Sync existingMessages to useChat state when they load
+	// Sync existingMessages to useChat state when they load or when chatId changes
 	// This is needed because the messages prop only sets initial state
+	// When chatId changes (session switch), we MUST update messages immediately to prevent
+	// stale messages from the previous session appearing after a stream finishes
 	React.useEffect(() => {
-		if (existingMessages.length > 0) {
-			setMessages(existingMessages);
-		}
-	}, [existingMessages, setMessages]);
+		// Always set messages when chatId changes, even if existingMessages is empty
+		// This clears out any stale messages from previous session
+		setMessages(existingMessages);
+	}, [existingMessages, setMessages, chatId]);
 
 	// Derive loading state from chat status
 	const isLoading = chatStatus === "streaming" || chatStatus === "submitted";
@@ -425,20 +427,24 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	// Refresh diff data when chat finishes
 	const { mutate } = useSWRConfig();
 	const prevChatStatus = React.useRef(chatStatus);
+	const prevChatId = React.useRef(chatId);
 	React.useEffect(() => {
 		// When status changes from streaming/submitted to ready, refresh the diff
 		const wasLoading =
 			prevChatStatus.current === "streaming" ||
 			prevChatStatus.current === "submitted";
 		const isNowReady = chatStatus === "ready";
+		// Only refresh if chatId hasn't changed (user didn't switch sessions mid-stream)
+		const isSameChat = prevChatId.current === chatId;
 
-		if (wasLoading && isNowReady && selectedSessionId) {
+		if (wasLoading && isNowReady && selectedSessionId && isSameChat) {
 			// Refresh the diff data for this session
 			mutate(`session-diff-${selectedSessionId}-files`);
 		}
 
 		prevChatStatus.current = chatStatus;
-	}, [chatStatus, selectedSessionId, mutate]);
+		prevChatId.current = chatId;
+	}, [chatStatus, selectedSessionId, mutate, chatId]);
 
 	// Check if session is not found (fetch returned error and we're not loading)
 	const sessionNotFound =
@@ -602,7 +608,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 
 				// For new chats, notify parent about the session ID AFTER the POST succeeds
 				// This ensures the session exists on the server before the client tries to use it
-				if (isNewSession) {
+				// IMPORTANT: Only call handleSessionCreated if the user hasn't switched sessions
+				// during the async sendMessage operation. Use selectionRef to get the CURRENT
+				// selectedSessionId, not the one captured in the callback closure.
+				if (isNewSession && selectionRef.current.sessionId === null) {
 					handleSessionCreated(pendingSessionId);
 				}
 			} catch (err) {
