@@ -1010,3 +1010,129 @@ describe("Git Diff API - baseCommit parameter", () => {
 		});
 	});
 });
+
+// =============================================================================
+// Git Diff with baseCommit from remote (fetch required)
+// =============================================================================
+
+describe("Git Diff API - baseCommit fetch from origin", () => {
+	const originDir = "/tmp/agent-api-origin-repo";
+	const cloneDir = "/tmp/agent-api-clone-repo";
+	let app: ReturnType<typeof createApp>["app"];
+	let remoteOnlyCommitSha: string;
+
+	before(async () => {
+		// Clean up any existing test directories
+		await rm(originDir, { recursive: true, force: true });
+		await rm(cloneDir, { recursive: true, force: true });
+
+		// Create origin (bare) repository
+		await mkdir(originDir, { recursive: true });
+		await execAsync("git init --bare", { cwd: originDir });
+
+		// Create a temporary working directory to make initial commits
+		const tempWorkDir = "/tmp/agent-api-temp-work";
+		await rm(tempWorkDir, { recursive: true, force: true });
+		await mkdir(tempWorkDir, { recursive: true });
+
+		// Clone origin to temp working directory
+		await execAsync(`git clone ${originDir} ${tempWorkDir}`);
+		await execAsync('git config user.email "test@test.com"', {
+			cwd: tempWorkDir,
+		});
+		await execAsync('git config user.name "Test User"', { cwd: tempWorkDir });
+
+		// Create initial commit and push
+		await writeFile(join(tempWorkDir, "file1.txt"), "Initial content\n");
+		await execAsync("git add .", { cwd: tempWorkDir });
+		await execAsync('git commit -m "Initial commit"', { cwd: tempWorkDir });
+		await execAsync("git push origin main", { cwd: tempWorkDir });
+
+		// Clone origin to the test clone directory (this is our "container" workspace)
+		await execAsync(`git clone ${originDir} ${cloneDir}`);
+		await execAsync('git config user.email "test@test.com"', {
+			cwd: cloneDir,
+		});
+		await execAsync('git config user.name "Test User"', { cwd: cloneDir });
+
+		// Now make a new commit in origin (via temp working dir) that clone doesn't have
+		await writeFile(
+			join(tempWorkDir, "file1.txt"),
+			"Modified in remote commit\n",
+		);
+		await writeFile(join(tempWorkDir, "file2.txt"), "New file in remote\n");
+		await execAsync("git add .", { cwd: tempWorkDir });
+		await execAsync('git commit -m "Remote-only commit"', { cwd: tempWorkDir });
+		await execAsync("git push origin main", { cwd: tempWorkDir });
+
+		// Get the SHA of the remote-only commit
+		const { stdout: sha } = await execAsync("git rev-parse HEAD", {
+			cwd: tempWorkDir,
+		});
+		remoteOnlyCommitSha = sha.trim();
+
+		// Clean up temp working dir
+		await rm(tempWorkDir, { recursive: true, force: true });
+
+		// Make local changes in clone (working tree changes)
+		await writeFile(join(cloneDir, "file1.txt"), "Local uncommitted changes\n");
+
+		// Create app with clone directory as workspace (simulating container)
+		const result = createApp({
+			agentCommand: "true",
+			agentArgs: [],
+			agentCwd: cloneDir,
+			enableLogging: false,
+		});
+		app = result.app;
+	});
+
+	after(async () => {
+		await rm(originDir, { recursive: true, force: true });
+		await rm(cloneDir, { recursive: true, force: true });
+	});
+
+	describe("GET /diff?baseCommit=<sha> - Commit not in local repo", () => {
+		it("fetches commit from origin when baseCommit does not exist locally", async () => {
+			// Verify the commit doesn't exist locally before the request
+			try {
+				await execAsync(`git cat-file -e ${remoteOnlyCommitSha}^{commit}`, {
+					cwd: cloneDir,
+				});
+				// If we get here, the commit exists - that's unexpected but let's note it
+				console.warn(
+					"Warning: commit already exists locally, test may not be accurate",
+				);
+			} catch {
+				// Expected - commit should not exist locally yet
+			}
+
+			// Make the diff request with the remote-only commit as baseCommit
+			const res = await app.request(`/diff?baseCommit=${remoteOnlyCommitSha}`);
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as DiffResponse;
+
+			// The diff should work - it should show changes between the remote commit
+			// and our local working tree
+			// file1.txt: "Modified in remote commit" -> "Local uncommitted changes" = modified
+			// file2.txt: exists in remote commit but not in our working tree = deleted
+			assert.ok(body.files.length > 0, "Should have diff results after fetch");
+
+			const file1 = body.files.find((f) => f.path === "file1.txt");
+			assert.ok(file1, "Should include file1.txt in diff");
+			assert.equal(file1.status, "modified", "file1.txt should be modified");
+
+			// Verify the commit now exists locally (was fetched)
+			const { stdout: catResult } = await execAsync(
+				`git cat-file -t ${remoteOnlyCommitSha}`,
+				{ cwd: cloneDir },
+			);
+			assert.equal(
+				catResult.trim(),
+				"commit",
+				"Commit should now exist locally after fetch",
+			);
+		});
+	});
+});

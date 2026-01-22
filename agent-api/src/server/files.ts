@@ -627,6 +627,40 @@ async function getUntrackedFileDiff(
 }
 
 /**
+ * Check if a commit exists in the local repository
+ */
+async function commitExists(
+	workspaceRoot: string,
+	commit: string,
+): Promise<boolean> {
+	try {
+		await execAsync(`git cat-file -e ${commit}^{commit}`, {
+			cwd: workspaceRoot,
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Fetch a specific commit from origin
+ */
+async function fetchCommit(
+	workspaceRoot: string,
+	commit: string,
+): Promise<void> {
+	try {
+		await execAsync(`git fetch origin ${commit}`, {
+			cwd: workspaceRoot,
+			timeout: 60000, // 60 second timeout for fetch
+		});
+	} catch (err) {
+		console.warn(`Failed to fetch commit ${commit} from origin:`, err);
+	}
+}
+
+/**
  * Get diff using git
  * @param workspaceRoot - The workspace root directory
  * @param singlePath - Optional single file path to get diff for
@@ -637,6 +671,12 @@ async function getGitDiff(
 	singlePath?: string,
 	baseCommit?: string,
 ): Promise<DiffResponse> {
+	// If baseCommit is provided, check if it exists locally.
+	// If not, fetch the specific commit from origin.
+	if (baseCommit && !(await commitExists(workspaceRoot, baseCommit))) {
+		await fetchCommit(workspaceRoot, baseCommit);
+	}
+
 	let command = "git diff --no-color";
 	// If baseCommit is provided, diff working tree against that commit
 	// Otherwise, diffs working tree against HEAD (default git diff behavior)
