@@ -267,7 +267,7 @@ func (s *SessionService) CommitSession(ctx context.Context, projectID, sessionID
 	}
 
 	// Get current workspace commit to use as baseCommit
-	gitStatus, err := s.gitProvider.Status(ctx, sess.WorkspaceID)
+	gitStatus, err := s.gitService.Status(ctx, sess.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get workspace status: %w", err)
 	}
@@ -594,6 +594,10 @@ func ptrString(s string) *string {
 // The job is idempotent and handles server restart scenarios.
 //
 // Flow:
+// 0. If workspace commit changed, update baseCommit and check for existing patches
+//   - If patches exist, skip to step 2 (apply them)
+//   - If no patches, continue with step 1
+//
 // 1. If pending: send /octobot-commit to agent, transition to committing
 // 2. If appliedCommit not set: fetch patches from agent-api, apply to workspace
 // 3. Verify applied commit exists, transition to completed
@@ -622,15 +626,58 @@ func (s *SessionService) PerformCommit(ctx context.Context, projectID, sessionID
 		return nil
 	}
 
-	// Check that baseCommit still matches current workspace commit (handles server restart with workspace changes)
-	gitStatus, err := s.gitProvider.Status(ctx, sess.WorkspaceID)
+	// Check if workspace commit has changed - if so, update baseCommit and check for existing patches
+	gitStatus, err := s.gitService.Status(ctx, sess.WorkspaceID)
 	if err != nil {
 		s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to get workspace status: %v", err))
 		return nil
 	}
+
+	// If workspace commit changed, update baseCommit and optimistically check for patches
 	if gitStatus.Commit != *sess.BaseCommit {
-		s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Workspace has changed since commit started (expected %s, got %s)", *sess.BaseCommit, gitStatus.Commit))
-		return nil
+		log.Printf("Session %s: workspace commit changed from %s to %s, updating baseCommit", sessionID, *sess.BaseCommit, gitStatus.Commit)
+		sess.BaseCommit = ptrString(gitStatus.Commit)
+		if err := s.store.UpdateSession(ctx, sess); err != nil {
+			return fmt.Errorf("failed to update session baseCommit: %w", err)
+		}
+
+		// Optimistically check if agent already has patches available for the new baseCommit
+		if s.sandboxClient != nil && sess.CommitStatus == model.CommitStatusPending {
+			log.Printf("Session %s: checking if agent has existing patches for commit %s", sessionID, gitStatus.Commit)
+			commitsResp, err := s.sandboxClient.GetCommits(ctx, sessionID, gitStatus.Commit)
+			if err == nil && commitsResp.CommitCount > 0 {
+				// Agent has patches ready - skip to committing state and apply them
+				log.Printf("Session %s: agent has %d existing commits, skipping prompt and applying patches", sessionID, commitsResp.CommitCount)
+				sess.CommitStatus = model.CommitStatusCommitting
+				if err := s.store.UpdateSession(ctx, sess); err != nil {
+					return fmt.Errorf("failed to update session status: %w", err)
+				}
+				s.publishCommitStatusChanged(ctx, projectID, sessionID, model.CommitStatusCommitting)
+
+				// Apply patches directly
+				finalCommit, err := s.gitService.ApplyPatches(ctx, sess.WorkspaceID, []byte(commitsResp.Patches))
+				if err != nil {
+					s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to apply patches to workspace: %v", err))
+					return nil
+				}
+
+				sess.AppliedCommit = ptrString(finalCommit)
+				if err := s.store.UpdateSession(ctx, sess); err != nil {
+					return fmt.Errorf("failed to update session applied commit: %w", err)
+				}
+				s.publishCommitStatusChanged(ctx, projectID, sessionID, model.CommitStatusCommitting)
+				log.Printf("Session %s: patches applied, final commit=%s", sessionID, finalCommit)
+
+				// Jump to completion
+				goto complete
+			}
+			// No patches available (error or CommitCount == 0) - continue with normal flow
+			if err != nil {
+				log.Printf("Session %s: no existing patches available (error: %v), continuing with prompt", sessionID, err)
+			} else {
+				log.Printf("Session %s: no existing patches available (commit count: 0), continuing with prompt", sessionID)
+			}
+		}
 	}
 
 	// Step 1: Send /octobot-commit to agent (if pending)
@@ -701,7 +748,7 @@ func (s *SessionService) PerformCommit(ctx context.Context, projectID, sessionID
 		log.Printf("Session %s: received %d commits from agent, applying patches to workspace", sessionID, commitsResp.CommitCount)
 
 		// Apply patches to workspace with git am
-		finalCommit, err := s.gitProvider.ApplyPatches(ctx, sess.WorkspaceID, []byte(commitsResp.Patches))
+		finalCommit, err := s.gitService.ApplyPatches(ctx, sess.WorkspaceID, []byte(commitsResp.Patches))
 		if err != nil {
 			s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to apply patches to workspace: %v", err))
 			return nil
@@ -715,6 +762,7 @@ func (s *SessionService) PerformCommit(ctx context.Context, projectID, sessionID
 		log.Printf("Session %s: patches applied, final commit=%s", sessionID, finalCommit)
 	}
 
+complete:
 	// Step 3: Verify and complete
 	log.Printf("Session %s: commit completed with applied commit %s", sessionID, *sess.AppliedCommit)
 

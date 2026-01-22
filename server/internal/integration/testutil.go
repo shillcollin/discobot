@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -107,8 +108,9 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	s := store.New(db.DB)
 
-	// Create git provider
-	gitProvider, err := git.NewLocalProvider(workspaceDir)
+	// Create git provider with workspace source for lookup
+	workspaceSource := git.NewStoreWorkspaceSource(s)
+	gitProvider, err := git.NewLocalProvider(workspaceDir, git.WithWorkspaceSource(workspaceSource))
 	if err != nil {
 		t.Fatalf("Failed to create git provider: %v", err)
 	}
@@ -137,7 +139,8 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
 
-	sessionSvc := service.NewSessionService(s, gitProvider, mockSandbox, eventBroker)
+	gitSvc := service.NewGitService(s, gitProvider)
+	sessionSvc := service.NewSessionService(s, gitSvc, mockSandbox, eventBroker)
 
 	disp := dispatcher.NewService(s, cfg)
 	disp.RegisterExecutor(jobs.NewWorkspaceInitExecutor(workspaceSvc))
@@ -330,8 +333,9 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 
 	s := store.New(db.DB)
 
-	// Create git provider
-	gitProvider, err := git.NewLocalProvider(workspaceDir)
+	// Create git provider with workspace source for lookup
+	workspaceSource := git.NewStoreWorkspaceSource(s)
+	gitProvider, err := git.NewLocalProvider(workspaceDir, git.WithWorkspaceSource(workspaceSource))
 	if err != nil {
 		t.Fatalf("Failed to create git provider: %v", err)
 	}
@@ -360,7 +364,8 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 
 	workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
 
-	sessionSvc := service.NewSessionService(s, gitProvider, mockSandbox, eventBroker)
+	gitSvc := service.NewGitService(s, gitProvider)
+	sessionSvc := service.NewSessionService(s, gitSvc, mockSandbox, eventBroker)
 
 	disp := dispatcher.NewService(s, cfg)
 	disp.RegisterExecutor(jobs.NewWorkspaceInitExecutor(workspaceSvc))
@@ -483,6 +488,59 @@ func (ts *TestServer) CreateTestWorkspace(project *model.Project, path string) *
 	}
 
 	return workspace
+}
+
+// CreateTestGitRepo creates a temporary git repository for testing and returns its path.
+func (ts *TestServer) CreateTestGitRepo() string {
+	ts.T.Helper()
+
+	// Create a temp directory for the repo
+	repoDir := ts.T.TempDir()
+
+	// Initialize git repo
+	if err := execGit(repoDir, "init"); err != nil {
+		ts.T.Fatalf("Failed to init git repo: %v", err)
+	}
+
+	// Configure git user for commits
+	if err := execGit(repoDir, "config", "user.email", "test@example.com"); err != nil {
+		ts.T.Fatalf("Failed to configure git email: %v", err)
+	}
+	if err := execGit(repoDir, "config", "user.name", "Test User"); err != nil {
+		ts.T.Fatalf("Failed to configure git name: %v", err)
+	}
+
+	// Create initial commit
+	readmePath := repoDir + "/README.md"
+	if err := os.WriteFile(readmePath, []byte("# Test Repo\n"), 0644); err != nil {
+		ts.T.Fatalf("Failed to create README: %v", err)
+	}
+	if err := execGit(repoDir, "add", "."); err != nil {
+		ts.T.Fatalf("Failed to git add: %v", err)
+	}
+	if err := execGit(repoDir, "commit", "-m", "Initial commit"); err != nil {
+		ts.T.Fatalf("Failed to create initial commit: %v", err)
+	}
+
+	return repoDir
+}
+
+// CreateTestWorkspaceWithGitRepo creates a test workspace with a real git repository.
+// This is needed for tests that exercise the git provider with local workspaces.
+func (ts *TestServer) CreateTestWorkspaceWithGitRepo(project *model.Project) *model.Workspace {
+	ts.T.Helper()
+
+	repoPath := ts.CreateTestGitRepo()
+	return ts.CreateTestWorkspace(project, repoPath)
+}
+
+// execGit runs a git command in the specified directory.
+func execGit(dir string, args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run()
 }
 
 // CreateTestSession creates a test session

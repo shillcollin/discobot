@@ -20,6 +20,20 @@ var (
 	ErrDirtyWorkTree  = errors.New("working tree has uncommitted changes")
 )
 
+// WorkspaceSource provides workspace information to the git provider.
+// This allows the provider to lookup workspace details from a store.
+type WorkspaceSource interface {
+	GetWorkspaceInfo(ctx context.Context, workspaceID string) (*WorkspaceInfo, error)
+}
+
+// WorkspaceInfo contains workspace details needed for git operations.
+type WorkspaceInfo struct {
+	WorkspaceID string
+	ProjectID   string
+	Path        string // git URL or local path
+	SourceType  string // "local" or "git"
+}
+
 // Provider defines the interface for git operations.
 // Implementations can be local (using git CLI) or remote (using a service).
 type Provider interface {

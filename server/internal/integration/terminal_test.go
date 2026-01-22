@@ -128,7 +128,7 @@ func TestCreateSession_CreatesSandbox(t *testing.T) {
 	ts := NewTestServer(t)
 	user := ts.CreateTestUser("test@example.com")
 	project := ts.CreateTestProject(user, "Test Project")
-	workspace := ts.CreateTestWorkspace(project, "/home/user/code")
+	workspace := ts.CreateTestWorkspaceWithGitRepo(project) // Local workspaces need real git repos
 	agent := ts.CreateTestAgent(project, "Claude", "claude-code")
 	client := ts.AuthenticatedClient(user)
 

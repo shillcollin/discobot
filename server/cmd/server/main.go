@@ -73,7 +73,9 @@ func main() {
 	s := store.New(db.DB)
 
 	// Initialize git provider (required)
-	gitProvider, err := git.NewLocalProvider(cfg.WorkspaceDir)
+	// Create workspace source for git provider to lookup workspace info
+	workspaceSource := git.NewStoreWorkspaceSource(s)
+	gitProvider, err := git.NewLocalProvider(cfg.WorkspaceDir, git.WithWorkspaceSource(workspaceSource))
 	if err != nil {
 		log.Fatalf("Failed to initialize git provider: %v", err)
 	}
@@ -165,7 +167,8 @@ func main() {
 
 		// Register session init, delete, and commit executors if sandbox provider is available
 		if sandboxProvider != nil {
-			sessionSvc := service.NewSessionService(s, gitProvider, sandboxProvider, eventBroker)
+			gitSvc := service.NewGitService(s, gitProvider)
+			sessionSvc := service.NewSessionService(s, gitSvc, sandboxProvider, eventBroker)
 			disp.RegisterExecutor(jobs.NewSessionInitExecutor(sessionSvc))
 			disp.RegisterExecutor(jobs.NewSessionDeleteExecutor(sessionSvc))
 			disp.RegisterExecutor(jobs.NewSessionCommitExecutor(sessionSvc))

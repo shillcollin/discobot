@@ -25,15 +25,20 @@ func NewGitService(s *store.Store, provider git.Provider) *GitService {
 
 // EnsureWorkspaceRepo ensures the workspace's repository is set up.
 // For git-sourced workspaces, this clones/fetches the repo.
-// For local workspaces, this validates the path.
+// For local workspaces, this registers them in-place (validates .git exists).
 // Returns the working directory path and the current HEAD commit SHA.
 func (s *GitService) EnsureWorkspaceRepo(ctx context.Context, workspaceID string) (string, string, error) {
+	// Try the simplified path if provider supports EnsureWorkspaceByID
+	if lp, ok := s.provider.(*git.LocalProvider); ok {
+		return lp.EnsureWorkspaceByID(ctx, workspaceID)
+	}
+
+	// Fallback: lookup workspace and call EnsureWorkspace directly
 	ws, err := s.store.GetWorkspaceByID(ctx, workspaceID)
 	if err != nil {
 		return "", "", fmt.Errorf("workspace not found: %w", err)
 	}
 
-	// Use Path as source - could be a git URL or local path
 	return s.provider.EnsureWorkspace(ctx, ws.ProjectID, workspaceID, ws.Path, "")
 }
 
@@ -101,6 +106,11 @@ func (s *GitService) GetWorkDir(ctx context.Context, workspaceID string) string 
 // RemoveWorkspace cleans up the workspace's git working directory.
 func (s *GitService) RemoveWorkspace(ctx context.Context, workspaceID string) error {
 	return s.provider.RemoveWorkspace(ctx, workspaceID)
+}
+
+// ApplyPatches applies mbox-format patches to the workspace.
+func (s *GitService) ApplyPatches(ctx context.Context, workspaceID string, patches []byte) (string, error) {
+	return s.provider.ApplyPatches(ctx, workspaceID, patches)
 }
 
 // Provider returns the underlying git provider.
