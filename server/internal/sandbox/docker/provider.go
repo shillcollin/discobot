@@ -197,6 +197,7 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		Image:        image,
 		Env:          env,
 		Labels:       labels,
+		Hostname:     "octobot",
 		Tty:          true,
 		OpenStdin:    true,
 		AttachStdin:  true,
