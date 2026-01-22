@@ -424,12 +424,48 @@ func initAgentFS(sessionID string, u *userInfo) error {
 }
 
 // mountAgentFS mounts the agentfs database over /home/octobot
+// It retries up to 3 times, then attempts foreground mode for debug output
 func mountAgentFS(sessionID string, u *userInfo) error {
-	fmt.Printf("octobot-agent: mounting agentfs %s at %s\n", sessionID, mountHome)
+	const maxRetries = 3
 
-	// -a: auto-unmount on exit
-	// --allow-root: allow root to access the FUSE mount
-	cmd := exec.Command("agentfs", "mount", "-a", "--allow-root", sessionID, mountHome)
+	// Try mounting in daemon mode (with -a flag) up to maxRetries times
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		fmt.Printf("octobot-agent: mounting agentfs %s at %s (attempt %d/%d)\n", sessionID, mountHome, attempt, maxRetries)
+
+		// -a: auto-unmount on exit (daemon mode)
+		// --allow-root: allow root to access the FUSE mount
+		cmd := exec.Command("agentfs", "mount", "-a", "--allow-root", sessionID, mountHome)
+		cmd.Dir = dataDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{
+				Uid:    uint32(u.uid),
+				Gid:    uint32(u.gid),
+				Groups: u.groups,
+			},
+		}
+
+		if err := cmd.Run(); err != nil {
+			lastErr = err
+			fmt.Fprintf(os.Stderr, "octobot-agent: agentfs mount attempt %d failed: %v\n", attempt, err)
+			if attempt < maxRetries {
+				time.Sleep(time.Second) // Brief delay before retry
+			}
+			continue
+		}
+
+		fmt.Printf("octobot-agent: agentfs mounted successfully\n")
+		return nil
+	}
+
+	// All retries failed - try foreground mode to capture debug output
+	fmt.Fprintf(os.Stderr, "octobot-agent: ERROR: agentfs mount failed %d times\n", maxRetries)
+	fmt.Fprintf(os.Stderr, "octobot-agent: attempting foreground mount to capture debug logs...\n")
+
+	// Run with -f flag for foreground mode to capture debug output
+	cmd := exec.Command("agentfs", "mount", "-a", "-f", "--allow-root", sessionID, mountHome)
 	cmd.Dir = dataDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -442,10 +478,17 @@ func mountAgentFS(sessionID string, u *userInfo) error {
 	}
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("agentfs mount failed: %w", err)
+		fmt.Fprintf(os.Stderr, "octobot-agent: foreground mount also failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "octobot-agent: sleeping forever for debug (docker exec to investigate)\n")
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig)
+		<-sig
+		// Won't reach here, but return for completeness
+		return fmt.Errorf("agentfs mount failed after %d retries and foreground attempt: %w", maxRetries, lastErr)
 	}
 
-	fmt.Printf("octobot-agent: agentfs mounted successfully\n")
+	// Foreground mount succeeded (unexpected but handle it)
+	fmt.Printf("octobot-agent: agentfs foreground mount succeeded\n")
 	return nil
 }
 
