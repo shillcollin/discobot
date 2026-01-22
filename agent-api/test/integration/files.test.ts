@@ -803,223 +803,13 @@ describe("Git Diff API - All Change Types", () => {
 });
 
 // =============================================================================
-// Git Diff with baseCommit Tests
+// Git Diff with automatic merge-base calculation
 // =============================================================================
 
-describe("Git Diff API - baseCommit parameter", () => {
-	const gitTestDir = "/tmp/agent-api-basecommit-test";
+describe("Git Diff API - automatic merge-base calculation", () => {
+	const originDir = "/tmp/agent-api-mergebase-origin";
+	const cloneDir = "/tmp/agent-api-mergebase-clone";
 	let app: ReturnType<typeof createApp>["app"];
-	let firstCommitSha: string;
-	let secondCommitSha: string;
-
-	before(async () => {
-		// Clean up any existing test directory
-		await rm(gitTestDir, { recursive: true, force: true });
-
-		// Create test directory
-		await mkdir(gitTestDir, { recursive: true });
-
-		// Initialize git repo
-		await execAsync("git init", { cwd: gitTestDir });
-		await execAsync('git config user.email "test@test.com"', {
-			cwd: gitTestDir,
-		});
-		await execAsync('git config user.name "Test User"', { cwd: gitTestDir });
-
-		// Create initial commit
-		await writeFile(join(gitTestDir, "file1.txt"), "Initial content\n");
-		await writeFile(join(gitTestDir, "file2.txt"), "File 2 content\n");
-		await execAsync("git add .", { cwd: gitTestDir });
-		await execAsync('git commit -m "Initial commit"', { cwd: gitTestDir });
-
-		// Get first commit SHA
-		const { stdout: sha1 } = await execAsync("git rev-parse HEAD", {
-			cwd: gitTestDir,
-		});
-		firstCommitSha = sha1.trim();
-
-		// Make second commit
-		await writeFile(
-			join(gitTestDir, "file1.txt"),
-			"Modified in second commit\n",
-		);
-		await writeFile(
-			join(gitTestDir, "file3.txt"),
-			"New file in second commit\n",
-		);
-		await execAsync("git add .", { cwd: gitTestDir });
-		await execAsync('git commit -m "Second commit"', { cwd: gitTestDir });
-
-		// Get second commit SHA
-		const { stdout: sha2 } = await execAsync("git rev-parse HEAD", {
-			cwd: gitTestDir,
-		});
-		secondCommitSha = sha2.trim();
-
-		// Make uncommitted changes (these will show as working tree changes)
-		await writeFile(
-			join(gitTestDir, "file1.txt"),
-			"Uncommitted working tree changes\n",
-		);
-		await writeFile(join(gitTestDir, "file4.txt"), "New uncommitted file\n");
-
-		// Create app with git test directory
-		const result = createApp({
-			agentCommand: "true",
-			agentArgs: [],
-			agentCwd: gitTestDir,
-			enableLogging: false,
-		});
-		app = result.app;
-	});
-
-	after(async () => {
-		await rm(gitTestDir, { recursive: true, force: true });
-	});
-
-	describe("GET /diff?baseCommit=<sha> - Diff against specific commit", () => {
-		it("diffs against HEAD when no baseCommit is provided", async () => {
-			const res = await app.request("/diff");
-			assert.equal(res.status, 200);
-
-			const body = (await res.json()) as DiffResponse;
-
-			// Should only show uncommitted changes (file1 modified, file4 new)
-			assert.equal(
-				body.stats.filesChanged,
-				2,
-				`Expected 2 changed files (uncommitted changes only), got ${body.stats.filesChanged}. Files: ${body.files.map((f) => `${f.path}:${f.status}`).join(", ")}`,
-			);
-
-			const file1 = body.files.find((f) => f.path === "file1.txt");
-			const file4 = body.files.find((f) => f.path === "file4.txt");
-
-			assert.ok(file1, "Should include file1.txt (modified in working tree)");
-			assert.equal(file1.status, "modified");
-
-			assert.ok(file4, "Should include file4.txt (new untracked)");
-			assert.equal(file4.status, "added");
-
-			// file3 should NOT be included (no changes since HEAD)
-			const file3 = body.files.find((f) => f.path === "file3.txt");
-			assert.ok(!file3, "file3.txt should not appear (unchanged since HEAD)");
-		});
-
-		it("diffs against first commit showing all changes since then", async () => {
-			const res = await app.request(`/diff?baseCommit=${firstCommitSha}`);
-			assert.equal(res.status, 200);
-
-			const body = (await res.json()) as DiffResponse;
-
-			// Should show all changes since first commit:
-			// - file1.txt modified (both second commit and working tree)
-			// - file3.txt added (second commit)
-			// - file4.txt added (working tree, untracked)
-			assert.equal(
-				body.stats.filesChanged,
-				3,
-				`Expected 3 changed files since first commit, got ${body.stats.filesChanged}. Files: ${body.files.map((f) => `${f.path}:${f.status}`).join(", ")}`,
-			);
-
-			const file1 = body.files.find((f) => f.path === "file1.txt");
-			const file3 = body.files.find((f) => f.path === "file3.txt");
-			const file4 = body.files.find((f) => f.path === "file4.txt");
-
-			assert.ok(file1, "Should include file1.txt");
-			assert.equal(file1.status, "modified");
-
-			assert.ok(file3, "Should include file3.txt (added in second commit)");
-			assert.equal(file3.status, "added");
-
-			assert.ok(file4, "Should include file4.txt (new untracked)");
-			assert.equal(file4.status, "added");
-		});
-
-		it("diffs against second commit showing only working tree changes", async () => {
-			const res = await app.request(`/diff?baseCommit=${secondCommitSha}`);
-			assert.equal(res.status, 200);
-
-			const body = (await res.json()) as DiffResponse;
-
-			// Same as HEAD (second commit IS HEAD), should only show uncommitted changes
-			assert.equal(
-				body.stats.filesChanged,
-				2,
-				`Expected 2 changed files since second commit, got ${body.stats.filesChanged}. Files: ${body.files.map((f) => `${f.path}:${f.status}`).join(", ")}`,
-			);
-
-			const file1 = body.files.find((f) => f.path === "file1.txt");
-			const file4 = body.files.find((f) => f.path === "file4.txt");
-
-			assert.ok(file1, "Should include file1.txt (modified in working tree)");
-			assert.ok(file4, "Should include file4.txt (new untracked)");
-		});
-
-		it("works with format=files and baseCommit", async () => {
-			const res = await app.request(
-				`/diff?format=files&baseCommit=${firstCommitSha}`,
-			);
-			assert.equal(res.status, 200);
-
-			const body = (await res.json()) as DiffFilesResponse;
-
-			assert.ok(Array.isArray(body.files), "Should have files array");
-			assert.equal(body.files.length, 3, "Should have 3 changed files");
-
-			// Verify file entries have proper structure
-			for (const file of body.files) {
-				assert.ok(
-					typeof (file as DiffFileEntry).path === "string",
-					"Should have path",
-				);
-				assert.ok(
-					typeof (file as DiffFileEntry).status === "string",
-					"Should have status",
-				);
-			}
-		});
-
-		it("works with single file path and baseCommit", async () => {
-			const res = await app.request(
-				`/diff?path=file3.txt&baseCommit=${firstCommitSha}`,
-			);
-			assert.equal(res.status, 200);
-
-			const body = (await res.json()) as SingleFileDiffResponse;
-
-			// file3.txt was added in second commit, so against first commit it shows as added
-			assert.equal(body.path, "file3.txt");
-			assert.equal(body.status, "added");
-			assert.ok(body.additions > 0, "Should have additions");
-			assert.ok(body.patch.length > 0, "Should have patch content");
-		});
-
-		it("returns unchanged for file not changed since baseCommit", async () => {
-			const res = await app.request(
-				`/diff?path=file2.txt&baseCommit=${firstCommitSha}`,
-			);
-			assert.equal(res.status, 200);
-
-			const body = (await res.json()) as SingleFileDiffResponse;
-
-			// file2.txt hasn't changed since initial commit
-			assert.equal(body.path, "file2.txt");
-			assert.equal(body.status, "unchanged");
-			assert.equal(body.additions, 0);
-			assert.equal(body.deletions, 0);
-		});
-	});
-});
-
-// =============================================================================
-// Git Diff with baseCommit from remote (fetch required)
-// =============================================================================
-
-describe("Git Diff API - baseCommit fetch from origin", () => {
-	const originDir = "/tmp/agent-api-origin-repo";
-	const cloneDir = "/tmp/agent-api-clone-repo";
-	let app: ReturnType<typeof createApp>["app"];
-	let remoteOnlyCommitSha: string;
 
 	before(async () => {
 		// Clean up any existing test directories
@@ -1031,7 +821,124 @@ describe("Git Diff API - baseCommit fetch from origin", () => {
 		await execAsync("git init --bare", { cwd: originDir });
 
 		// Create a temporary working directory to make initial commits
-		const tempWorkDir = "/tmp/agent-api-temp-work";
+		const tempWorkDir = "/tmp/agent-api-mergebase-temp";
+		await rm(tempWorkDir, { recursive: true, force: true });
+		await mkdir(tempWorkDir, { recursive: true });
+
+		// Clone origin to temp working directory
+		await execAsync(`git clone ${originDir} ${tempWorkDir}`);
+		await execAsync('git config user.email "test@test.com"', {
+			cwd: tempWorkDir,
+		});
+		await execAsync('git config user.name "Test User"', { cwd: tempWorkDir });
+
+		// Create initial commit and push to origin
+		await writeFile(join(tempWorkDir, "file1.txt"), "Initial content\n");
+		await writeFile(join(tempWorkDir, "file2.txt"), "File 2 content\n");
+		await execAsync("git add .", { cwd: tempWorkDir });
+		await execAsync('git commit -m "Initial commit"', { cwd: tempWorkDir });
+		await execAsync("git push origin main", { cwd: tempWorkDir });
+
+		// Clean up temp working dir
+		await rm(tempWorkDir, { recursive: true, force: true });
+
+		// Clone origin to the test clone directory (simulating agent workspace)
+		await execAsync(`git clone ${originDir} ${cloneDir}`);
+		await execAsync('git config user.email "test@test.com"', {
+			cwd: cloneDir,
+		});
+		await execAsync('git config user.name "Test User"', { cwd: cloneDir });
+
+		// Make a local commit in clone (agent's work)
+		await writeFile(join(cloneDir, "file1.txt"), "Modified by agent\n");
+		await writeFile(join(cloneDir, "file3.txt"), "New file by agent\n");
+		await execAsync("git add .", { cwd: cloneDir });
+		await execAsync('git commit -m "Agent commit"', { cwd: cloneDir });
+
+		// Also make uncommitted changes (working tree)
+		await writeFile(
+			join(cloneDir, "file1.txt"),
+			"Further uncommitted changes\n",
+		);
+
+		// Create app with clone directory as workspace
+		const result = createApp({
+			agentCommand: "true",
+			agentArgs: [],
+			agentCwd: cloneDir,
+			enableLogging: false,
+		});
+		app = result.app;
+	});
+
+	after(async () => {
+		await rm(originDir, { recursive: true, force: true });
+		await rm(cloneDir, { recursive: true, force: true });
+	});
+
+	describe("GET /diff - uses merge-base automatically", () => {
+		it("diffs against merge-base showing all changes since fork point", async () => {
+			const res = await app.request("/diff");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as DiffResponse;
+
+			// Should show all changes since initial commit (merge-base):
+			// - file1.txt modified (both committed and uncommitted changes)
+			// - file3.txt added (agent commit)
+			assert.ok(
+				body.stats.filesChanged >= 2,
+				`Expected at least 2 changed files since merge-base, got ${body.stats.filesChanged}. Files: ${body.files.map((f) => `${f.path}:${f.status}`).join(", ")}`,
+			);
+
+			const file1 = body.files.find((f) => f.path === "file1.txt");
+			const file3 = body.files.find((f) => f.path === "file3.txt");
+
+			assert.ok(file1, "Should include file1.txt (modified since merge-base)");
+			assert.equal(file1.status, "modified");
+
+			assert.ok(file3, "Should include file3.txt (added since merge-base)");
+			assert.equal(file3.status, "added");
+
+			// file2 should NOT be included (unchanged since merge-base)
+			const file2 = body.files.find((f) => f.path === "file2.txt");
+			assert.ok(
+				!file2,
+				"file2.txt should not appear (unchanged since merge-base)",
+			);
+		});
+
+		it("includes both committed and uncommitted changes in diff", async () => {
+			const res = await app.request("/diff?path=file1.txt");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as SingleFileDiffResponse;
+
+			assert.equal(body.path, "file1.txt");
+			assert.equal(body.status, "modified");
+			// The patch should show change from "Initial content" to "Further uncommitted changes"
+			assert.ok(body.patch.includes("-Initial content"));
+			assert.ok(body.patch.includes("+Further uncommitted changes"));
+		});
+	});
+});
+
+describe("Git Diff API - merge-base with remote updates", () => {
+	const originDir = "/tmp/agent-api-remote-update-origin";
+	const cloneDir = "/tmp/agent-api-remote-update-clone";
+	let app: ReturnType<typeof createApp>["app"];
+
+	before(async () => {
+		// Clean up any existing test directories
+		await rm(originDir, { recursive: true, force: true });
+		await rm(cloneDir, { recursive: true, force: true });
+
+		// Create origin (bare) repository
+		await mkdir(originDir, { recursive: true });
+		await execAsync("git init --bare", { cwd: originDir });
+
+		// Create a temporary working directory
+		const tempWorkDir = "/tmp/agent-api-remote-update-temp";
 		await rm(tempWorkDir, { recursive: true, force: true });
 		await mkdir(tempWorkDir, { recursive: true });
 
@@ -1048,36 +955,28 @@ describe("Git Diff API - baseCommit fetch from origin", () => {
 		await execAsync('git commit -m "Initial commit"', { cwd: tempWorkDir });
 		await execAsync("git push origin main", { cwd: tempWorkDir });
 
-		// Clone origin to the test clone directory (this is our "container" workspace)
+		// Clone to agent workspace
 		await execAsync(`git clone ${originDir} ${cloneDir}`);
 		await execAsync('git config user.email "test@test.com"', {
 			cwd: cloneDir,
 		});
 		await execAsync('git config user.name "Test User"', { cwd: cloneDir });
 
-		// Now make a new commit in origin (via temp working dir) that clone doesn't have
-		await writeFile(
-			join(tempWorkDir, "file1.txt"),
-			"Modified in remote commit\n",
-		);
-		await writeFile(join(tempWorkDir, "file2.txt"), "New file in remote\n");
-		await execAsync("git add .", { cwd: tempWorkDir });
-		await execAsync('git commit -m "Remote-only commit"', { cwd: tempWorkDir });
-		await execAsync("git push origin main", { cwd: tempWorkDir });
+		// Make agent commit
+		await writeFile(join(cloneDir, "file1.txt"), "Agent changes\n");
+		await execAsync("git add .", { cwd: cloneDir });
+		await execAsync('git commit -m "Agent work"', { cwd: cloneDir });
 
-		// Get the SHA of the remote-only commit
-		const { stdout: sha } = await execAsync("git rev-parse HEAD", {
-			cwd: tempWorkDir,
-		});
-		remoteOnlyCommitSha = sha.trim();
+		// Now push a new commit to origin (simulating workspace update)
+		await writeFile(join(tempWorkDir, "file2.txt"), "New file in origin\n");
+		await execAsync("git add .", { cwd: tempWorkDir });
+		await execAsync('git commit -m "Origin update"', { cwd: tempWorkDir });
+		await execAsync("git push origin main", { cwd: tempWorkDir });
 
 		// Clean up temp working dir
 		await rm(tempWorkDir, { recursive: true, force: true });
 
-		// Make local changes in clone (working tree changes)
-		await writeFile(join(cloneDir, "file1.txt"), "Local uncommitted changes\n");
-
-		// Create app with clone directory as workspace (simulating container)
+		// Create app with clone directory as workspace
 		const result = createApp({
 			agentCommand: "true",
 			agentArgs: [],
@@ -1092,47 +991,90 @@ describe("Git Diff API - baseCommit fetch from origin", () => {
 		await rm(cloneDir, { recursive: true, force: true });
 	});
 
-	describe("GET /diff?baseCommit=<sha> - Commit not in local repo", () => {
-		it("fetches commit from origin when baseCommit does not exist locally", async () => {
-			// Verify the commit doesn't exist locally before the request
-			try {
-				await execAsync(`git cat-file -e ${remoteOnlyCommitSha}^{commit}`, {
-					cwd: cloneDir,
-				});
-				// If we get here, the commit exists - that's unexpected but let's note it
-				console.warn(
-					"Warning: commit already exists locally, test may not be accurate",
-				);
-			} catch {
-				// Expected - commit should not exist locally yet
-			}
-
-			// Make the diff request with the remote-only commit as baseCommit
-			const res = await app.request(`/diff?baseCommit=${remoteOnlyCommitSha}`);
+	describe("GET /diff - fetches origin before calculating merge-base", () => {
+		it("fetches origin and uses correct merge-base even when origin has advanced", async () => {
+			const res = await app.request("/diff");
 			assert.equal(res.status, 200);
 
 			const body = (await res.json()) as DiffResponse;
 
-			// The diff should work - it should show changes between the remote commit
-			// and our local working tree
-			// file1.txt: "Modified in remote commit" -> "Local uncommitted changes" = modified
-			// file2.txt: exists in remote commit but not in our working tree = deleted
-			assert.ok(body.files.length > 0, "Should have diff results after fetch");
-
+			// Should show agent's changes from the merge-base (initial commit)
+			// The origin has advanced, but merge-base is still the initial commit
 			const file1 = body.files.find((f) => f.path === "file1.txt");
-			assert.ok(file1, "Should include file1.txt in diff");
-			assert.equal(file1.status, "modified", "file1.txt should be modified");
+			assert.ok(file1, "Should include file1.txt (agent's modification)");
+			assert.equal(file1.status, "modified");
 
-			// Verify the commit now exists locally (was fetched)
-			const { stdout: catResult } = await execAsync(
-				`git cat-file -t ${remoteOnlyCommitSha}`,
-				{ cwd: cloneDir },
-			);
-			assert.equal(
-				catResult.trim(),
-				"commit",
-				"Commit should now exist locally after fetch",
-			);
+			// file2.txt was added in origin after clone, so it shouldn't appear
+			// in the diff (it's not in our working tree)
+			// This verifies we're diffing from merge-base, not from origin/main HEAD
 		});
 	});
 });
+
+describe("Git Diff API - no remote (local repo only)", () => {
+	const gitTestDir = "/tmp/agent-api-no-remote-test";
+	let app: ReturnType<typeof createApp>["app"];
+
+	before(async () => {
+		// Clean up any existing test directory
+		await rm(gitTestDir, { recursive: true, force: true });
+
+		// Create test directory
+		await mkdir(gitTestDir, { recursive: true });
+
+		// Initialize git repo (no remote)
+		await execAsync("git init", { cwd: gitTestDir });
+		await execAsync('git config user.email "test@test.com"', {
+			cwd: gitTestDir,
+		});
+		await execAsync('git config user.name "Test User"', { cwd: gitTestDir });
+
+		// Create initial commit
+		await writeFile(join(gitTestDir, "file1.txt"), "Initial content\n");
+		await execAsync("git add .", { cwd: gitTestDir });
+		await execAsync('git commit -m "Initial commit"', { cwd: gitTestDir });
+
+		// Make uncommitted changes
+		await writeFile(join(gitTestDir, "file1.txt"), "Modified content\n");
+		await writeFile(join(gitTestDir, "file2.txt"), "New file\n");
+
+		// Create app with git test directory
+		const result = createApp({
+			agentCommand: "true",
+			agentArgs: [],
+			agentCwd: gitTestDir,
+			enableLogging: false,
+		});
+		app = result.app;
+	});
+
+	after(async () => {
+		await rm(gitTestDir, { recursive: true, force: true });
+	});
+
+	describe("GET /diff - falls back to HEAD when no remote", () => {
+		it("diffs against HEAD when no origin remote exists", async () => {
+			const res = await app.request("/diff");
+			assert.equal(res.status, 200);
+
+			const body = (await res.json()) as DiffResponse;
+
+			// Should show only uncommitted changes (working tree vs HEAD)
+			assert.equal(
+				body.stats.filesChanged,
+				2,
+				`Expected 2 changed files (uncommitted changes only), got ${body.stats.filesChanged}`,
+			);
+
+			const file1 = body.files.find((f) => f.path === "file1.txt");
+			const file2 = body.files.find((f) => f.path === "file2.txt");
+
+			assert.ok(file1, "Should include file1.txt");
+			assert.equal(file1.status, "modified");
+
+			assert.ok(file2, "Should include file2.txt");
+			assert.equal(file2.status, "added");
+		});
+	});
+});
+

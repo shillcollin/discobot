@@ -501,113 +501,6 @@ func containsHelper(s, substr string) bool {
 	return false
 }
 
-func TestSandboxChatClient_GetDiff_PassesBaseCommit(t *testing.T) {
-	tests := []struct {
-		name           string
-		path           string
-		format         string
-		baseCommit     string
-		expectedParams map[string]string
-	}{
-		{
-			name:           "no parameters",
-			path:           "",
-			format:         "",
-			baseCommit:     "",
-			expectedParams: map[string]string{},
-		},
-		{
-			name:       "with baseCommit only",
-			path:       "",
-			format:     "",
-			baseCommit: "abc123def",
-			expectedParams: map[string]string{
-				"baseCommit": "abc123def",
-			},
-		},
-		{
-			name:       "with path and baseCommit",
-			path:       "src/main.go",
-			format:     "",
-			baseCommit: "xyz789",
-			expectedParams: map[string]string{
-				"path":       "src/main.go",
-				"baseCommit": "xyz789",
-			},
-		},
-		{
-			name:       "with format and baseCommit",
-			path:       "",
-			format:     "files",
-			baseCommit: "commit456",
-			expectedParams: map[string]string{
-				"format":     "files",
-				"baseCommit": "commit456",
-			},
-		},
-		{
-			name:       "with all parameters",
-			path:       "README.md",
-			format:     "files",
-			baseCommit: "fullsha123abc",
-			expectedParams: map[string]string{
-				"path":       "README.md",
-				"format":     "files",
-				"baseCommit": "fullsha123abc",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var receivedURL string
-
-			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == "GET" && r.URL.Path == "/diff" {
-					receivedURL = r.URL.String()
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					// Return empty diff response
-					json.NewEncoder(w).Encode(map[string]any{
-						"files": []any{},
-						"stats": map[string]int{
-							"filesChanged": 0,
-							"additions":    0,
-							"deletions":    0,
-						},
-					})
-					return
-				}
-				t.Errorf("Unexpected request: %s %s", r.Method, r.URL.Path)
-				w.WriteHeader(http.StatusNotFound)
-			})
-
-			provider := &mockSandboxProvider{handler: handler}
-			client := NewSandboxChatClient(provider)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			_, err := client.GetDiff(ctx, "test-session", tt.path, tt.format, tt.baseCommit)
-			if err != nil {
-				t.Fatalf("GetDiff failed: %v", err)
-			}
-
-			// Verify expected query parameters
-			for key, expectedValue := range tt.expectedParams {
-				if !contains(receivedURL, key+"="+expectedValue) {
-					t.Errorf("Expected URL to contain %s=%s, got URL: %s", key, expectedValue, receivedURL)
-				}
-			}
-
-			// Verify unexpected parameters are not present
-			if tt.baseCommit == "" && contains(receivedURL, "baseCommit") {
-				t.Errorf("Expected URL to NOT contain baseCommit, got URL: %s", receivedURL)
-			}
-		})
-	}
-}
-
 func TestSandboxChatClient_GetDiff_ReturnsCorrectResponseType(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -687,7 +580,7 @@ func TestSandboxChatClient_GetDiff_ReturnsCorrectResponseType(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			result, err := client.GetDiff(ctx, "test-session", tt.path, tt.format, "")
+			result, err := client.GetDiff(ctx, "test-session", tt.path, tt.format)
 			if err != nil {
 				t.Fatalf("GetDiff failed: %v", err)
 			}

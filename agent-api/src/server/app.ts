@@ -225,16 +225,15 @@ export function createApp(options: AppOptions) {
 	// Query params:
 	//   - path: optional single file path to get diff for
 	//   - format: "full" (default) or "files" (file list only)
-	//   - baseCommit: optional commit to diff against (defaults to HEAD)
+	// The merge-base is calculated automatically by fetching origin and finding
+	// the common ancestor between HEAD and the workspace branch.
 	app.get("/diff", async (c) => {
 		const path = c.req.query("path");
 		const format = c.req.query("format") as "full" | "files" | undefined;
-		const baseCommit = c.req.query("baseCommit");
 
 		const result = await getDiff(options.agentCwd, {
 			path,
 			format,
-			baseCommit,
 		});
 
 		if (isFileError(result)) {

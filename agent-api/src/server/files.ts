@@ -627,36 +627,76 @@ async function getUntrackedFileDiff(
 }
 
 /**
- * Check if a commit exists in the local repository
+ * Fetch from origin to get the latest refs
  */
-async function commitExists(
-	workspaceRoot: string,
-	commit: string,
-): Promise<boolean> {
+async function fetchOrigin(workspaceRoot: string): Promise<void> {
 	try {
-		await execAsync(`git cat-file -e ${commit}^{commit}`, {
+		await execAsync("git fetch origin", {
 			cwd: workspaceRoot,
+			timeout: 60000, // 60 second timeout
 		});
-		return true;
-	} catch {
-		return false;
+	} catch (err) {
+		console.warn("Failed to fetch from origin:", err);
 	}
 }
 
 /**
- * Fetch a specific commit from origin
+ * Get the remote tracking branch (e.g., origin/main)
+ * Tries origin/HEAD first, then falls back to origin/main or origin/master
  */
-async function fetchCommit(
+async function getRemoteTrackingBranch(
 	workspaceRoot: string,
-	commit: string,
-): Promise<void> {
+): Promise<string | null> {
+	// Try origin/HEAD first (points to the default branch)
 	try {
-		await execAsync(`git fetch origin ${commit}`, {
+		await execAsync("git rev-parse --verify origin/HEAD", {
 			cwd: workspaceRoot,
-			timeout: 60000, // 60 second timeout for fetch
 		});
+		return "origin/HEAD";
+	} catch {
+		// origin/HEAD not set
+	}
+
+	// Try origin/main
+	try {
+		await execAsync("git rev-parse --verify origin/main", {
+			cwd: workspaceRoot,
+		});
+		return "origin/main";
+	} catch {
+		// origin/main doesn't exist
+	}
+
+	// Try origin/master
+	try {
+		await execAsync("git rev-parse --verify origin/master", {
+			cwd: workspaceRoot,
+		});
+		return "origin/master";
+	} catch {
+		// origin/master doesn't exist
+	}
+
+	return null;
+}
+
+/**
+ * Calculate merge-base between HEAD and the remote tracking branch
+ */
+async function getMergeBase(workspaceRoot: string): Promise<string | null> {
+	const remoteBranch = await getRemoteTrackingBranch(workspaceRoot);
+	if (!remoteBranch) {
+		return null;
+	}
+
+	try {
+		const { stdout } = await execAsync(`git merge-base HEAD ${remoteBranch}`, {
+			cwd: workspaceRoot,
+		});
+		return stdout.trim();
 	} catch (err) {
-		console.warn(`Failed to fetch commit ${commit} from origin:`, err);
+		console.warn(`Failed to find merge-base with ${remoteBranch}:`, err);
+		return null;
 	}
 }
 
@@ -664,24 +704,27 @@ async function fetchCommit(
  * Get diff using git
  * @param workspaceRoot - The workspace root directory
  * @param singlePath - Optional single file path to get diff for
- * @param baseCommit - Optional base commit to diff against. If not provided, diffs working tree against HEAD.
+ *
+ * Automatically calculates the merge-base by:
+ * 1. Fetching from origin to get the latest refs
+ * 2. Finding the merge-base between HEAD and the remote tracking branch
+ * 3. Diffing from that merge-base to the current working tree
  */
 async function getGitDiff(
 	workspaceRoot: string,
 	singlePath?: string,
-	baseCommit?: string,
 ): Promise<DiffResponse> {
-	// If baseCommit is provided, check if it exists locally.
-	// If not, fetch the specific commit from origin.
-	if (baseCommit && !(await commitExists(workspaceRoot, baseCommit))) {
-		await fetchCommit(workspaceRoot, baseCommit);
-	}
+	// Fetch from origin to get the latest refs
+	await fetchOrigin(workspaceRoot);
+
+	// Calculate merge-base with the remote tracking branch
+	const mergeBase = await getMergeBase(workspaceRoot);
 
 	let command = "git diff --no-color";
-	// If baseCommit is provided, diff working tree against that commit
+	// If merge-base was found, diff working tree against that commit
 	// Otherwise, diffs working tree against HEAD (default git diff behavior)
-	if (baseCommit) {
-		command += ` ${baseCommit}`;
+	if (mergeBase) {
+		command += ` ${mergeBase}`;
 	}
 	if (singlePath) {
 		command += ` -- "${singlePath}"`;
@@ -737,8 +780,6 @@ async function getGitDiff(
 export interface DiffOptions {
 	path?: string;
 	format?: "full" | "files";
-	/** Base commit to diff against. If not provided, diffs against HEAD (working tree changes). */
-	baseCommit?: string;
 }
 
 /**
@@ -768,7 +809,7 @@ export async function getDiff(
 	// Get the diff (only works for git repos)
 	let diff: DiffResponse;
 	if (isGit) {
-		diff = await getGitDiff(workspaceRoot, options.path, options.baseCommit);
+		diff = await getGitDiff(workspaceRoot, options.path);
 	} else {
 		// Not a git repo - return empty diff
 		diff = {
