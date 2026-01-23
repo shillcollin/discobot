@@ -8,7 +8,7 @@ Container environments require a proper init process (PID 1) to handle:
 
 1. **Home Directory Setup**: Copy user home directory template to persistent storage
 2. **Workspace Initialization**: Clone git repositories to persistent storage
-3. **Filesystem Setup**: Configure AgentFS copy-on-write mount
+3. **Filesystem Setup**: Configure copy-on-write mount (OverlayFS for new sessions, AgentFS for existing)
 4. **Zombie Reaping**: Orphaned processes become zombies without a parent to call `wait()`
 5. **Signal Handling**: PID 1 has special signal semantics in Linux
 6. **Graceful Shutdown**: Containers need orderly shutdown on `docker stop`
@@ -27,7 +27,7 @@ Previously, the container used `tini` as an init, but this didn't provide:
 A custom Go-based init process that combines:
 - Home directory initialization (copy template)
 - Workspace initialization (git clone)
-- AgentFS database init and mount (directly over /home/octobot)
+- Filesystem detection and mount (OverlayFS for new sessions, AgentFS for existing)
 - Symlink creation for /workspace convenience
 - Minimal init responsibilities (reaping, signal forwarding)
 - User switching (`setuid`/`setgid`)
@@ -102,9 +102,78 @@ This ensures:
 - Concurrent container starts are safe
 - Specific commits can be checked out
 
-### AgentFS Integration
+### Filesystem Setup
 
-AgentFS provides copy-on-write semantics:
+The init process supports two filesystem backends for copy-on-write semantics:
+
+#### Filesystem Detection
+
+```go
+func detectFilesystemType(sessionID string) filesystemType {
+    // Check for environment variable override
+    if fsOverride := os.Getenv("OCTOBOT_FILESYSTEM"); fsOverride != "" {
+        switch strings.ToLower(fsOverride) {
+        case "agentfs":
+            return fsTypeAgentFS
+        case "overlayfs":
+            return fsTypeOverlayFS
+        }
+    }
+
+    // Default: check for existing agentfs database
+    dbPath := filepath.Join(agentFSDir, sessionID+".db")
+    if _, err := os.Stat(dbPath); err == nil {
+        return fsTypeAgentFS
+    }
+    return fsTypeOverlayFS
+}
+```
+
+Detection logic:
+- If `OCTOBOT_FILESYSTEM` env var is set, use that filesystem
+- If `/.data/.agentfs/{SESSION_ID}.db` exists, use AgentFS (backwards compatibility)
+- Otherwise, use OverlayFS (new default)
+
+#### OverlayFS (Default for New Sessions)
+
+OverlayFS is a Linux kernel filesystem that provides copy-on-write without FUSE overhead:
+
+```go
+func setupOverlayFS(sessionID string, u *userInfo) error {
+    sessionDir := filepath.Join(overlayFSDir, sessionID)
+    upperDir := filepath.Join(sessionDir, "upper")
+    workDir := filepath.Join(sessionDir, "work")
+
+    // Create directories
+    for _, dir := range []string{overlayFSDir, sessionDir, upperDir, workDir} {
+        os.MkdirAll(dir, 0755)
+    }
+
+    // Set ownership
+    for _, dir := range []string{sessionDir, upperDir, workDir} {
+        os.Chown(dir, u.uid, u.gid)
+    }
+    return nil
+}
+
+func mountOverlayFS(sessionID string) error {
+    sessionDir := filepath.Join(overlayFSDir, sessionID)
+    upperDir := filepath.Join(sessionDir, "upper")
+    workDir := filepath.Join(sessionDir, "work")
+
+    opts := fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", baseHomeDir, upperDir, workDir)
+    return syscall.Mount("overlay", mountHome, "overlay", 0, opts)
+}
+```
+
+OverlayFS advantages:
+- Kernel-native (no FUSE overhead)
+- Changes stored directly in filesystem (`/.data/.overlayfs/{SESSION_ID}/upper/`)
+- Lower memory and CPU overhead
+
+#### AgentFS (For Existing Sessions)
+
+AgentFS provides copy-on-write via FUSE and SQLite:
 
 ```go
 // Initialize database with base layer
@@ -141,10 +210,14 @@ func mountAgentFS(sessionID string, u *userInfo) error {
 }
 ```
 
-The mount runs as the octobot user because:
+The AgentFS mount runs as the octobot user because:
 - FUSE filesystems are owned by the mounting user
 - This allows the agent to read/write files
 - The `--allow-root` flag allows root access (needed for docker exec)
+
+#### Fallback Behavior
+
+If OverlayFS mount fails (e.g., unsupported kernel), the init process automatically falls back to AgentFS
 
 ### Workspace Symlink
 
@@ -237,11 +310,12 @@ SIGTERM received
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| SESSION_ID | Yes | Unique identifier for AgentFS database |
+| SESSION_ID | Yes | Unique identifier for filesystem isolation |
 | WORKSPACE_PATH | No | Git URL to clone |
 | WORKSPACE_COMMIT | No | Specific commit to checkout |
 | AGENT_BINARY | No | Override agent API binary path |
 | AGENT_USER | No | Override user to run as |
+| OCTOBOT_FILESYSTEM | No | Force filesystem type: `overlayfs` or `agentfs` |
 
 ## Directories Created
 
@@ -251,9 +325,11 @@ The init process creates the following directories with `octobot` ownership:
 |-----------|---------|
 | `/.data/octobot` | Base home directory (copied from /home/octobot template) |
 | `/.data/octobot/workspace` | Cloned repository or empty workspace |
-| `/.data/.agentfs` | AgentFS SQLite databases |
+| `/.data/.overlayfs/{SESSION_ID}/upper` | OverlayFS writable layer (new sessions) |
+| `/.data/.overlayfs/{SESSION_ID}/work` | OverlayFS scratch space (new sessions) |
+| `/.data/.agentfs` | AgentFS SQLite databases (existing sessions) |
 
-Note: Session and message persistence files are stored in `/home/octobot/.config/octobot/` which is managed by AgentFS and created by agent-api on demand.
+Note: Session and message persistence files are stored in `/home/octobot/.config/octobot/` which is managed by the overlay filesystem and created by agent-api on demand.
 
 ## Error Handling
 
@@ -332,16 +408,18 @@ sudo unshare -p -f --mount-proc ./obot-agent
 
 ## Container Requirements
 
-The container requires specific capabilities for FUSE:
+The container requires `CAP_SYS_ADMIN` for both OverlayFS and FUSE mounts:
 
 ```yaml
 cap_add:
   - SYS_ADMIN
 devices:
-  - /dev/fuse:/dev/fuse:rwm
+  - /dev/fuse:/dev/fuse:rwm  # Only needed for AgentFS fallback
 ```
 
-And the Dockerfile must include:
+OverlayFS is kernel-native and doesn't require FUSE. The `/dev/fuse` device is only needed for AgentFS fallback support.
+
+The Dockerfile must include (for AgentFS):
 ```dockerfile
 RUN echo 'user_allow_other' >> /etc/fuse.conf
 ```

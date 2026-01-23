@@ -1,7 +1,7 @@
 // Package main is the entry point for the octobot-agent init process.
 // This binary runs as PID 1 in the container and handles:
 // - Home directory initialization and workspace cloning
-// - AgentFS setup and mounting over /home/octobot
+// - Filesystem setup (OverlayFS for new sessions, AgentFS for existing)
 // - Process reaping (zombie collection)
 // - User switching from root to octobot
 // - Child process management with pdeathsig
@@ -39,9 +39,42 @@ const (
 	workspaceDir = "/.data/octobot/workspace" // Workspace inside home
 	stagingDir   = "/.data/octobot/workspace.staging"
 	agentFSDir   = "/.data/.agentfs"
-	mountHome    = "/home/octobot" // Where agentfs mounts
+	overlayFSDir = "/.data/.overlayfs"
+	mountHome    = "/home/octobot" // Where agentfs/overlayfs mounts
 	symlinkPath  = "/workspace"    // Symlink to /home/octobot/workspace
 )
+
+// filesystemType represents the type of filesystem to use for session isolation
+type filesystemType int
+
+const (
+	fsTypeOverlayFS filesystemType = iota
+	fsTypeAgentFS
+)
+
+// detectFilesystemType determines which filesystem to use based on existing data.
+// If an agentfs database exists for the session, use agentfs for backwards compatibility.
+// Otherwise, use overlayfs for new sessions.
+func detectFilesystemType(sessionID string) filesystemType {
+	// Check for environment variable override
+	if fsOverride := os.Getenv("OCTOBOT_FILESYSTEM"); fsOverride != "" {
+		switch strings.ToLower(fsOverride) {
+		case "agentfs":
+			fmt.Printf("octobot-agent: filesystem override: agentfs\n")
+			return fsTypeAgentFS
+		case "overlayfs":
+			fmt.Printf("octobot-agent: filesystem override: overlayfs\n")
+			return fsTypeOverlayFS
+		}
+	}
+
+	// Default: check for existing agentfs database
+	dbPath := filepath.Join(agentFSDir, sessionID+".db")
+	if _, err := os.Stat(dbPath); err == nil {
+		return fsTypeAgentFS
+	}
+	return fsTypeOverlayFS
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -89,30 +122,67 @@ func run() error {
 		return fmt.Errorf("workspace setup failed: %w", err)
 	}
 
-	// Step 3: Ensure agentfs directory exists with correct ownership
-	if err := os.MkdirAll(agentFSDir, 0755); err != nil {
-		return fmt.Errorf("failed to create agentfs directory: %w", err)
-	}
-	if err := os.Chown(agentFSDir, userInfo.uid, userInfo.gid); err != nil {
-		return fmt.Errorf("failed to chown agentfs directory: %w", err)
+	// Step 3: Detect filesystem type (overlayfs for new sessions, agentfs for existing)
+	fsType := detectFilesystemType(sessionID)
+
+	// Step 4: Setup and mount filesystem based on type
+	switch fsType {
+	case fsTypeAgentFS:
+		fmt.Printf("octobot-agent: using AgentFS (existing session data found)\n")
+
+		// Ensure agentfs directory exists with correct ownership
+		if err := os.MkdirAll(agentFSDir, 0755); err != nil {
+			return fmt.Errorf("failed to create agentfs directory: %w", err)
+		}
+		if err := os.Chown(agentFSDir, userInfo.uid, userInfo.gid); err != nil {
+			return fmt.Errorf("failed to chown agentfs directory: %w", err)
+		}
+
+		// Initialize agentfs database if needed (as octobot user)
+		if err := initAgentFS(sessionID, userInfo); err != nil {
+			return fmt.Errorf("agentfs init failed: %w", err)
+		}
+
+		// Mount agentfs over /home/octobot
+		if err := mountAgentFS(sessionID, userInfo); err != nil {
+			return fmt.Errorf("agentfs mount failed: %w", err)
+		}
+
+	case fsTypeOverlayFS:
+		fmt.Printf("octobot-agent: using OverlayFS (new session)\n")
+
+		// Setup overlayfs directory structure
+		if err := setupOverlayFS(sessionID, userInfo); err != nil {
+			return fmt.Errorf("overlayfs setup failed: %w", err)
+		}
+
+		// Mount overlayfs over /home/octobot
+		if err := mountOverlayFS(sessionID); err != nil {
+			// Fallback to agentfs if overlayfs fails
+			fmt.Printf("octobot-agent: overlayfs failed, falling back to agentfs: %v\n", err)
+			os.RemoveAll(filepath.Join(overlayFSDir, sessionID))
+
+			if err := os.MkdirAll(agentFSDir, 0755); err != nil {
+				return fmt.Errorf("failed to create agentfs directory: %w", err)
+			}
+			if err := os.Chown(agentFSDir, userInfo.uid, userInfo.gid); err != nil {
+				return fmt.Errorf("failed to chown agentfs directory: %w", err)
+			}
+			if err := initAgentFS(sessionID, userInfo); err != nil {
+				return fmt.Errorf("agentfs init failed: %w", err)
+			}
+			if err := mountAgentFS(sessionID, userInfo); err != nil {
+				return fmt.Errorf("agentfs mount (fallback) failed: %w", err)
+			}
+		}
 	}
 
-	// Step 4: Initialize agentfs database if needed (as octobot user)
-	if err := initAgentFS(sessionID, userInfo); err != nil {
-		return fmt.Errorf("agentfs init failed: %w", err)
-	}
-
-	// Step 5: Mount agentfs over /home/octobot
-	if err := mountAgentFS(sessionID, userInfo); err != nil {
-		return fmt.Errorf("agentfs mount failed: %w", err)
-	}
-
-	// Step 6: Create /workspace symlink to /home/octobot/workspace
+	// Step 5: Create /workspace symlink to /home/octobot/workspace
 	if err := createWorkspaceSymlink(); err != nil {
 		return fmt.Errorf("symlink creation failed: %w", err)
 	}
 
-	// Step 7: Run the agent API
+	// Step 6: Run the agent API
 	return runAgent(agentBinary, userInfo)
 }
 
@@ -489,6 +559,55 @@ func mountAgentFS(sessionID string, u *userInfo) error {
 
 	// Foreground mount succeeded (unexpected but handle it)
 	fmt.Printf("octobot-agent: agentfs foreground mount succeeded\n")
+	return nil
+}
+
+// setupOverlayFS creates the directory structure for overlayfs
+func setupOverlayFS(sessionID string, u *userInfo) error {
+	sessionDir := filepath.Join(overlayFSDir, sessionID)
+	upperDir := filepath.Join(sessionDir, "upper")
+	workDir := filepath.Join(sessionDir, "work")
+
+	fmt.Printf("octobot-agent: setting up overlayfs directories at %s\n", sessionDir)
+
+	// Create all directories
+	for _, dir := range []string{overlayFSDir, sessionDir, upperDir, workDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+	}
+
+	// Set ownership on session-specific directories
+	for _, dir := range []string{sessionDir, upperDir, workDir} {
+		if err := os.Chown(dir, u.uid, u.gid); err != nil {
+			return fmt.Errorf("failed to chown directory %s: %w", dir, err)
+		}
+	}
+
+	fmt.Printf("octobot-agent: overlayfs directories created successfully\n")
+	return nil
+}
+
+// mountOverlayFS mounts the overlayfs filesystem over /home/octobot
+func mountOverlayFS(sessionID string) error {
+	sessionDir := filepath.Join(overlayFSDir, sessionID)
+	upperDir := filepath.Join(sessionDir, "upper")
+	workDir := filepath.Join(sessionDir, "work")
+
+	// Construct mount options:
+	// lowerdir = read-only base layer
+	// upperdir = writable layer for changes
+	// workdir = scratch space for overlayfs internal use
+	opts := fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", baseHomeDir, upperDir, workDir)
+
+	fmt.Printf("octobot-agent: mounting overlayfs at %s\n", mountHome)
+	fmt.Printf("octobot-agent: overlayfs options: %s\n", opts)
+
+	if err := syscall.Mount("overlay", mountHome, "overlay", 0, opts); err != nil {
+		return fmt.Errorf("overlayfs mount failed: %w", err)
+	}
+
+	fmt.Printf("octobot-agent: overlayfs mounted successfully\n")
 	return nil
 }
 
