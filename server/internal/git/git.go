@@ -88,6 +88,10 @@ type Provider interface {
 	// Returns the final commit SHA after all patches are applied.
 	// If application fails, the working tree is reset to the original state.
 	ApplyPatches(ctx context.Context, workspaceID string, patches []byte) (finalCommit string, err error)
+
+	// GetUserConfig retrieves the global git user name and email configuration.
+	// Returns empty strings if not configured.
+	GetUserConfig(ctx context.Context) (name, email string)
 }
 
 // Status represents the git status of a repository.

@@ -40,8 +40,10 @@ import {
 	writeFile,
 } from "./files.js";
 
-// Header name for credentials passed from server
+// Header names for credentials and git config passed from server
 const CREDENTIALS_HEADER = "X-Octobot-Credentials";
+const GIT_USER_NAME_HEADER = "X-Octobot-Git-User-Name";
+const GIT_USER_EMAIL_HEADER = "X-Octobot-Git-User-Email";
 
 export interface AppOptions {
 	agentCommand: string;
@@ -147,7 +149,15 @@ export function createApp(options: AppOptions) {
 	app.post("/chat", async (c) => {
 		const body = await c.req.json<ChatRequest>();
 		const credentialsHeader = c.req.header(CREDENTIALS_HEADER) || null;
-		const result = tryStartCompletion(acpClient, body, credentialsHeader);
+		const gitUserName = c.req.header(GIT_USER_NAME_HEADER) || null;
+		const gitUserEmail = c.req.header(GIT_USER_EMAIL_HEADER) || null;
+		const result = tryStartCompletion(
+			acpClient,
+			body,
+			credentialsHeader,
+			gitUserName,
+			gitUserEmail,
+		);
 		return c.json(result.response, result.status);
 	});
 

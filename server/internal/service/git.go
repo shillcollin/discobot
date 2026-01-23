@@ -118,3 +118,9 @@ func (s *GitService) ApplyPatches(ctx context.Context, workspaceID string, patch
 func (s *GitService) Provider() git.Provider {
 	return s.provider
 }
+
+// GetUserConfig retrieves the global git user name and email configuration.
+// Returns empty strings if not configured.
+func (s *GitService) GetUserConfig(ctx context.Context) (name, email string) {
+	return s.provider.GetUserConfig(ctx)
+}

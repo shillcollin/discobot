@@ -23,5 +23,6 @@ Commit the changes from this session back to the parent workspace, targeting com
    - Each commit should be atomic and represent a logical unit of work
    - Use imperative mood in messages ("Add feature" not "Added feature")
    - First line 50 chars or less, explain the "why" in the body if needed
+   - Git user configuration (user.name and user.email) is automatically set from the server's git config
 
 6. **Verify:** Confirm all changes are committed and history is rebased to $ARGUMENTS.

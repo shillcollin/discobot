@@ -1146,3 +1146,56 @@ func TestConcurrentEnsureWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestGetUserConfig(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+	provider, _ := NewLocalProvider(baseDir)
+
+	t.Run("returns configured user name and email", func(t *testing.T) {
+		// Set up global git config in a controlled environment
+		// Use HOME override to isolate from system config
+		homeDir := t.TempDir()
+		t.Setenv("HOME", homeDir)
+		t.Setenv("XDG_CONFIG_HOME", homeDir)
+
+		// Configure git user in the test environment
+		cmd := exec.Command("git", "config", "--global", "user.name", "Test User")
+		cmd.Env = append(os.Environ(), "HOME="+homeDir, "XDG_CONFIG_HOME="+homeDir)
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("Failed to set user.name: %v", err)
+		}
+
+		cmd = exec.Command("git", "config", "--global", "user.email", "test@example.com")
+		cmd.Env = append(os.Environ(), "HOME="+homeDir, "XDG_CONFIG_HOME="+homeDir)
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("Failed to set user.email: %v", err)
+		}
+
+		name, email := provider.GetUserConfig(ctx)
+
+		if name != "Test User" {
+			t.Errorf("Expected name 'Test User', got %q", name)
+		}
+		if email != "test@example.com" {
+			t.Errorf("Expected email 'test@example.com', got %q", email)
+		}
+	})
+
+	t.Run("returns empty strings when not configured", func(t *testing.T) {
+		// Use HOME override with an empty directory (no .gitconfig)
+		emptyHome := t.TempDir()
+		t.Setenv("HOME", emptyHome)
+		t.Setenv("XDG_CONFIG_HOME", emptyHome)
+
+		name, email := provider.GetUserConfig(ctx)
+
+		// Both should be empty when not configured
+		if name != "" {
+			t.Errorf("Expected empty name, got %q", name)
+		}
+		if email != "" {
+			t.Errorf("Expected empty email, got %q", email)
+		}
+	})
+}

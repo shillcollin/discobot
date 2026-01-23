@@ -151,6 +151,12 @@ type RequestOptions struct {
 	// SkipCredentials opts out of automatic credential fetching.
 	// By default, credentials are fetched and sent with requests.
 	SkipCredentials bool
+
+	// GitUserName is the git user.name to use for commits (optional).
+	GitUserName string
+
+	// GitUserEmail is the git user.email to use for commits (optional).
+	GitUserEmail string
 }
 
 // applyRequestAuth sets Authorization and credentials headers on a request.
@@ -175,6 +181,16 @@ func (c *SandboxChatClient) applyRequestAuth(ctx context.Context, req *http.Requ
 				return fmt.Errorf("failed to marshal credentials: %w", err)
 			}
 			req.Header.Set("X-Octobot-Credentials", string(credJSON))
+		}
+	}
+
+	// Add git user config headers if provided
+	if opts != nil {
+		if opts.GitUserName != "" {
+			req.Header.Set("X-Octobot-Git-User-Name", opts.GitUserName)
+		}
+		if opts.GitUserEmail != "" {
+			req.Header.Set("X-Octobot-Git-User-Email", opts.GitUserEmail)
 		}
 	}
 

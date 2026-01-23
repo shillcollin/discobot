@@ -1,3 +1,5 @@
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import type {
 	Plan,
 	SessionNotification,
@@ -12,6 +14,8 @@ import {
 	generateMessageId,
 	uiMessageToContentBlocks,
 } from "../acp/translate.js";
+
+const execAsync = promisify(exec);
 import type {
 	ChatConflictResponse,
 	ChatRequest,
@@ -60,6 +64,8 @@ export function tryStartCompletion(
 	acpClient: ACPClient,
 	body: ChatRequest,
 	credentialsHeader: string | null,
+	gitUserName: string | null,
+	gitUserEmail: string | null,
 ): StartCompletionResult {
 	const completionId = crypto.randomUUID().slice(0, 8);
 	const log = (data: Record<string, unknown>) =>
@@ -127,6 +133,8 @@ export function tryStartCompletion(
 		lastUserMessage,
 		credentialsChanged,
 		credentialEnv,
+		gitUserName,
+		gitUserEmail,
 		log,
 	);
 
@@ -135,6 +143,22 @@ export function tryStartCompletion(
 		status: 202,
 		response: { completionId, status: "started" },
 	};
+}
+
+/**
+ * Configure git user settings globally.
+ * Runs git config commands to set user.name and user.email.
+ */
+async function configureGitUser(
+	userName: string | null,
+	userEmail: string | null,
+): Promise<void> {
+	if (userName) {
+		await execAsync(`git config --global user.name "${userName}"`);
+	}
+	if (userEmail) {
+		await execAsync(`git config --global user.email "${userEmail}"`);
+	}
 }
 
 /**
@@ -148,6 +172,8 @@ function runCompletion(
 	lastUserMessage: UIMessage,
 	credentialsChanged: boolean,
 	credentialEnv: Record<string, string>,
+	gitUserName: string | null,
+	gitUserEmail: string | null,
 	log: (data: Record<string, unknown>) => void,
 ): void {
 	// Run asynchronously without blocking the caller
@@ -156,7 +182,12 @@ function runCompletion(
 		clearCompletionEvents();
 
 		try {
-			// If credentials changed, restart with new environment
+			// Configure git user settings if provided
+			if (gitUserName || gitUserEmail) {
+				await configureGitUser(gitUserName, gitUserEmail);
+			}
+
+			// If credentials changed, update environment
 			if (credentialsChanged) {
 				await acpClient.updateEnvironment({ env: credentialEnv });
 			}

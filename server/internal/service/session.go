@@ -768,7 +768,15 @@ func (s *SessionService) sendCommitPrompt(ctx context.Context, projectID string,
 		return nil
 	}
 
-	streamCh, err := s.sandboxClient.SendMessages(ctx, sess.ID, messages, nil)
+	// Get git user config from the server
+	gitUserName, gitUserEmail := s.gitService.GetUserConfig(ctx)
+
+	// Send with git config in request options
+	opts := &RequestOptions{
+		GitUserName:  gitUserName,
+		GitUserEmail: gitUserEmail,
+	}
+	streamCh, err := s.sandboxClient.SendMessages(ctx, sess.ID, messages, opts)
 	if err != nil {
 		s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to send commit message to agent: %v", err))
 		return nil
