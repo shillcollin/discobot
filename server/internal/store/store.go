@@ -842,3 +842,58 @@ func (s *Store) DeleteOldProjectEvents(ctx context.Context, olderThan time.Durat
 		Delete(&model.ProjectEvent{})
 	return result.RowsAffected, result.Error
 }
+
+// --- User Preferences ---
+
+// GetUserPreference returns a single preference by user ID and key.
+func (s *Store) GetUserPreference(ctx context.Context, userID, key string) (*model.UserPreference, error) {
+	var pref model.UserPreference
+	if err := s.db.WithContext(ctx).First(&pref, "user_id = ? AND key = ?", userID, key).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &pref, nil
+}
+
+// ListUserPreferences returns all preferences for a user.
+func (s *Store) ListUserPreferences(ctx context.Context, userID string) ([]*model.UserPreference, error) {
+	var prefs []*model.UserPreference
+	err := s.db.WithContext(ctx).Where("user_id = ?", userID).Order("key ASC").Find(&prefs).Error
+	return prefs, err
+}
+
+// SetUserPreference creates or updates a user preference (upsert).
+func (s *Store) SetUserPreference(ctx context.Context, pref *model.UserPreference) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing model.UserPreference
+		err := tx.First(&existing, "user_id = ? AND key = ?", pref.UserID, pref.Key).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Create new preference
+			return tx.Create(pref).Error
+		}
+
+		// Update existing preference
+		existing.Value = pref.Value
+		pref.ID = existing.ID
+		pref.CreatedAt = existing.CreatedAt
+		return tx.Save(&existing).Error
+	})
+}
+
+// DeleteUserPreference deletes a user preference by key.
+func (s *Store) DeleteUserPreference(ctx context.Context, userID, key string) error {
+	result := s.db.WithContext(ctx).Delete(&model.UserPreference{}, "user_id = ? AND key = ?", userID, key)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

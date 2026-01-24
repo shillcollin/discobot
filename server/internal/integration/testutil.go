@@ -205,6 +205,15 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 	r.Route("/api", func(r chi.Router) {
 		r.Use(middleware.Auth(s, cfg))
 
+		// User Preferences (user-scoped, not project-scoped)
+		r.Route("/preferences", func(r chi.Router) {
+			r.Get("/", h.ListPreferences)
+			r.Put("/", h.SetPreferences)
+			r.Get("/{key}", h.GetPreference)
+			r.Put("/{key}", h.SetPreference)
+			r.Delete("/{key}", h.DeletePreference)
+		})
+
 		r.Get("/projects", h.ListProjects)
 		r.Post("/projects", h.CreateProject)
 
@@ -789,6 +798,7 @@ func cleanTables(db *database.DB) {
 		"project_invitations",
 		"project_members",
 		"projects",
+		"user_preferences",
 		"user_sessions",
 		"users",
 	}

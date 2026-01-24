@@ -33,6 +33,7 @@ type Handler struct {
 	agentService        *service.AgentService
 	workspaceService    *service.WorkspaceService
 	projectService      *service.ProjectService
+	preferenceService   *service.PreferenceService
 	jobQueue            *jobs.Queue
 	eventBroker         *events.Broker
 	codexCallbackServer *CodexCallbackServer
@@ -69,6 +70,7 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 	agentSvc := service.NewAgentService(s)
 	workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
 	projectSvc := service.NewProjectService(s)
+	preferenceSvc := service.NewPreferenceService(s)
 
 	h := &Handler{
 		store:             s,
@@ -84,6 +86,7 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 		agentService:      agentSvc,
 		workspaceService:  workspaceSvc,
 		projectService:    projectSvc,
+		preferenceService: preferenceSvc,
 		jobQueue:          jobQueue,
 		eventBroker:       eventBroker,
 	}

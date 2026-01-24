@@ -319,6 +319,58 @@ func main() {
 		r.Use(middleware.Auth(s, cfg))
 		apiReg := reg.WithPrefix("/api")
 
+		// User Preferences (user-scoped, not project-scoped)
+		r.Route("/preferences", func(r chi.Router) {
+			prefReg := apiReg.WithPrefix("/preferences")
+
+			prefReg.Register(r, routes.Route{
+				Method: "GET", Pattern: "/",
+				Handler: h.ListPreferences,
+				Meta:    routes.Meta{Group: "Preferences", Description: "List all user preferences"},
+			})
+
+			prefReg.Register(r, routes.Route{
+				Method: "PUT", Pattern: "/",
+				Handler: h.SetPreferences,
+				Meta: routes.Meta{
+					Group:       "Preferences",
+					Description: "Set multiple preferences",
+					Body:        map[string]any{"preferences": map[string]string{"theme": "dark", "editor": "vim"}},
+				},
+			})
+
+			prefReg.Register(r, routes.Route{
+				Method: "GET", Pattern: "/{key}",
+				Handler: h.GetPreference,
+				Meta: routes.Meta{
+					Group:       "Preferences",
+					Description: "Get preference by key",
+					Params:      []routes.Param{{Name: "key", Example: "theme"}},
+				},
+			})
+
+			prefReg.Register(r, routes.Route{
+				Method: "PUT", Pattern: "/{key}",
+				Handler: h.SetPreference,
+				Meta: routes.Meta{
+					Group:       "Preferences",
+					Description: "Set preference",
+					Params:      []routes.Param{{Name: "key", Example: "theme"}},
+					Body:        map[string]any{"value": "dark"},
+				},
+			})
+
+			prefReg.Register(r, routes.Route{
+				Method: "DELETE", Pattern: "/{key}",
+				Handler: h.DeletePreference,
+				Meta: routes.Meta{
+					Group:       "Preferences",
+					Description: "Delete preference",
+					Params:      []routes.Param{{Name: "key", Example: "theme"}},
+				},
+			})
+		})
+
 		// Project list
 		apiReg.Register(r, routes.Route{
 			Method: "GET", Pattern: "/projects",

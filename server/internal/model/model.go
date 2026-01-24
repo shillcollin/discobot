@@ -361,6 +361,27 @@ func (e *ProjectEvent) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+// UserPreference represents a user preference (key/value store scoped to user).
+type UserPreference struct {
+	ID        string    `gorm:"primaryKey;type:text" json:"id"`
+	UserID    string    `gorm:"column:user_id;not null;type:text;uniqueIndex:idx_user_key" json:"user_id"`
+	Key       string    `gorm:"not null;type:text;uniqueIndex:idx_user_key" json:"key"`
+	Value     string    `gorm:"not null;type:text" json:"value"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+
+	User *User `gorm:"foreignKey:UserID" json:"-"`
+}
+
+func (UserPreference) TableName() string { return "user_preferences" }
+
+func (p *UserPreference) BeforeCreate(_ *gorm.DB) error {
+	if p.ID == "" {
+		p.ID = uuid.New().String()
+	}
+	return nil
+}
+
 // AllModels returns all model types for migration.
 func AllModels() []interface{} {
 	return []interface{}{
@@ -379,5 +400,6 @@ func AllModels() []interface{} {
 		&ProjectEvent{},
 		&Job{},
 		&DispatcherLeader{},
+		&UserPreference{},
 	}
 }

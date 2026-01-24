@@ -57,6 +57,7 @@ server/
 │   │   ├── agents.go
 │   │   ├── chat.go
 │   │   ├── credentials.go
+│   │   ├── preferences.go      # User preferences API
 │   │   ├── files.go
 │   │   ├── terminal.go
 │   │   ├── git.go
@@ -72,6 +73,7 @@ server/
 │   │   ├── sandbox.go
 │   │   ├── sandbox_client.go
 │   │   ├── credential.go
+│   │   ├── preference.go       # User preferences (key/value store)
 │   │   └── git.go
 │   ├── sandbox/                # Sandbox abstraction
 │   │   ├── runtime.go          # Interface
@@ -237,6 +239,15 @@ type Agent struct {
     Mode      string
     Model     string
     IsDefault bool
+}
+
+type UserPreference struct {
+    ID        string
+    UserID    string    // Scoped to user, not project
+    Key       string    // e.g., "theme", "preferredIDE"
+    Value     string    // Stored as text (can be JSON)
+    CreatedAt time.Time
+    UpdatedAt time.Time
 }
 ```
 

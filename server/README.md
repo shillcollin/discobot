@@ -139,6 +139,41 @@ go build -o octobot-server ./cmd/server
 | DELETE | `/api/projects/{id}/agents/{aid}` | Delete agent |
 | GET | `/api/projects/{id}/agents/types` | List agent types |
 
+### User Preferences
+
+User preferences are scoped to the authenticated user (not project-scoped).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/preferences` | List all preferences |
+| PUT | `/api/preferences` | Set multiple preferences |
+| GET | `/api/preferences/{key}` | Get preference by key |
+| PUT | `/api/preferences/{key}` | Set/update preference |
+| DELETE | `/api/preferences/{key}` | Delete preference |
+
+**Examples:**
+
+```bash
+# Set a preference
+curl -X PUT http://localhost:3001/api/preferences/theme \
+  -H "Content-Type: application/json" \
+  -d '{"value": "dark"}'
+
+# Get a preference
+curl http://localhost:3001/api/preferences/theme
+
+# Set multiple preferences
+curl -X PUT http://localhost:3001/api/preferences \
+  -H "Content-Type: application/json" \
+  -d '{"preferences": {"theme": "dark", "editor": "vim"}}'
+
+# List all preferences
+curl http://localhost:3001/api/preferences
+
+# Delete a preference
+curl -X DELETE http://localhost:3001/api/preferences/theme
+```
+
 ### Events
 
 | Method | Path | Description |
@@ -154,10 +189,15 @@ server/
 ├── internal/
 │   ├── config/              # Configuration loading
 │   ├── database/            # Database connection
-│   ├── model/               # GORM models
+│   ├── model/               # GORM models (User, Project, Session, UserPreference, etc.)
 │   ├── store/               # Data access layer
 │   ├── handler/             # HTTP handlers
+│   │   ├── handler.go       # Base handler setup
+│   │   ├── preferences.go   # User preferences handlers
+│   │   └── ...
 │   ├── service/             # Business logic
+│   │   ├── preference.go    # User preferences service
+│   │   └── ...
 │   ├── sandbox/             # Sandbox runtime
 │   │   ├── docker/          # Docker implementation
 │   │   └── mock/            # Mock for testing

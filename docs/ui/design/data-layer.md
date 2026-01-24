@@ -14,6 +14,7 @@ The data layer provides server state management using SWR hooks and a centralize
 | `lib/hooks/use-agents.ts` | Agent CRUD hook |
 | `lib/hooks/use-agent-types.ts` | Available agent types hook |
 | `lib/hooks/use-credentials.ts` | Credential management hook |
+| `lib/hooks/use-preferences.ts` | User preferences hook |
 | `lib/hooks/use-files.ts` | File operations hook |
 | `lib/hooks/use-messages.ts` | Chat message history hook |
 | `lib/hooks/use-suggestions.ts` | Autocomplete suggestions hook |
@@ -188,6 +189,54 @@ const {
 
 Manages encrypted API keys and OAuth tokens.
 
+### usePreferences
+
+```typescript
+const {
+  preferences,
+  isLoading,
+  error,
+  getPreference,
+  setPreference,
+  setPreferences,
+  deletePreference,
+} = usePreferences()
+```
+
+Manages user preferences (key/value store scoped to the authenticated user).
+
+**Features:**
+- User-scoped (not project-scoped)
+- Values stored as strings (can be JSON for complex values)
+- `getPreference(key)` helper returns value or undefined
+- Automatic cache invalidation on mutations
+
+**Example usage:**
+
+```typescript
+// Get current theme
+const theme = getPreference('theme') // "dark" | "light" | undefined
+
+// Set a preference
+await setPreference('theme', 'dark')
+
+// Set multiple preferences at once
+await setPreferences({
+  theme: 'dark',
+  editor: 'vim',
+  fontSize: '14',
+})
+
+// Delete a preference
+await deletePreference('theme')
+```
+
+**Common preference keys:**
+- `theme` - UI theme (light/dark)
+- `preferredIDE` - Default IDE for sessions
+- `editor` - Editor preferences
+- `user.settings.*` - Namespaced user settings
+
 ### useProjectEvents
 
 ```typescript
@@ -274,6 +323,7 @@ Default SWR options:
 | Agents | `agents` |
 | Agent Types | `agent-types` |
 | Credentials | `credentials` |
+| Preferences | `preferences` |
 | Files | `files-{sessionId}` |
 | Messages | `messages-{sessionId}` |
 
