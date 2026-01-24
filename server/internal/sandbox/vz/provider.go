@@ -1088,6 +1088,11 @@ func (s *vzStream) Read(b []byte) (int, error) {
 	return s.conn.Read(b)
 }
 
+func (s *vzStream) Stderr() io.Reader {
+	// VZ streams don't have separate stderr - it's merged with stdout
+	return nil
+}
+
 func (s *vzStream) Write(b []byte) (int, error) {
 	return s.conn.Write(b)
 }

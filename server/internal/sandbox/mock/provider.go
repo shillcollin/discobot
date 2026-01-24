@@ -456,6 +456,7 @@ func (p *PTY) Wait(_ context.Context) (int, error) {
 type Stream struct {
 	InputBuffer  []byte
 	OutputBuffer []byte
+	StderrBuffer []byte
 	Closed       bool
 	WritesClosed bool
 	mu           sync.Mutex
@@ -475,6 +476,32 @@ func (s *Stream) Read(b []byte) (int, error) {
 
 	n := copy(b, s.OutputBuffer)
 	s.OutputBuffer = s.OutputBuffer[n:]
+	return n, nil
+}
+
+func (s *Stream) Stderr() io.Reader {
+	return &stderrReader{stream: s}
+}
+
+// stderrReader provides a reader for the mock stream's stderr buffer.
+type stderrReader struct {
+	stream *Stream
+}
+
+func (r *stderrReader) Read(b []byte) (int, error) {
+	r.stream.mu.Lock()
+	defer r.stream.mu.Unlock()
+
+	if r.stream.Closed {
+		return 0, io.EOF
+	}
+
+	if len(r.stream.StderrBuffer) == 0 {
+		return 0, io.EOF
+	}
+
+	n := copy(b, r.stream.StderrBuffer)
+	r.stream.StderrBuffer = r.stream.StderrBuffer[n:]
 	return n, nil
 }
 

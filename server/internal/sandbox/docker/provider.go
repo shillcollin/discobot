@@ -825,11 +825,25 @@ func (p *Provider) ExecStream(ctx context.Context, sessionID string, cmd []strin
 		return nil, fmt.Errorf("failed to attach exec: %w", err)
 	}
 
+	// Create pipes for demultiplexed stdout and stderr
+	stdoutReader, stdoutWriter := io.Pipe()
+	stderrReader, stderrWriter := io.Pipe()
+
+	// Start goroutine to demultiplex Docker's multiplexed stream
+	go func() {
+		defer stdoutWriter.Close()
+		defer stderrWriter.Close()
+		// stdcopy.StdCopy reads the multiplexed stream and writes to separate writers
+		_, _ = stdcopy.StdCopy(stdoutWriter, stderrWriter, resp.Reader)
+	}()
+
 	return &dockerStream{
-		client:    p.client,
-		execID:    execCreate.ID,
-		hijacked:  resp,
-		closeOnce: sync.Once{},
+		client:       p.client,
+		execID:       execCreate.ID,
+		hijacked:     resp,
+		stdoutReader: stdoutReader,
+		stderrReader: stderrReader,
+		closeOnce:    sync.Once{},
 	}, nil
 }
 
@@ -1029,14 +1043,20 @@ func (p *dockerPTY) Wait(ctx context.Context) (int, error) {
 
 // dockerStream implements sandbox.Stream for Docker exec sessions without TTY.
 type dockerStream struct {
-	client    *client.Client
-	execID    string
-	hijacked  types.HijackedResponse
-	closeOnce sync.Once
+	client       *client.Client
+	execID       string
+	hijacked     types.HijackedResponse
+	stdoutReader *io.PipeReader
+	stderrReader *io.PipeReader
+	closeOnce    sync.Once
 }
 
 func (s *dockerStream) Read(b []byte) (int, error) {
-	return s.hijacked.Reader.Read(b)
+	return s.stdoutReader.Read(b)
+}
+
+func (s *dockerStream) Stderr() io.Reader {
+	return s.stderrReader
 }
 
 func (s *dockerStream) Write(b []byte) (int, error) {

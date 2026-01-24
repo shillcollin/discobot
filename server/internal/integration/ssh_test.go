@@ -431,17 +431,13 @@ func TestSSHServer_Integration_SessionTerminatesOnExecExit(t *testing.T) {
 		t.Fatalf("failed to start sandbox: %v", err)
 	}
 
-	// Hook ExecFunc to simulate command execution
-	provider.ExecFunc = func(_ context.Context, sid string, cmd []string, opts sandbox.ExecOptions) (*sandbox.ExecResult, error) {
+	// Hook ExecStreamFunc to simulate command execution (runExec uses ExecStream)
+	provider.ExecStreamFunc = func(_ context.Context, sid string, cmd []string, opts sandbox.ExecStreamOptions) (sandbox.Stream, error) {
 		if sid != sessionID {
 			return nil, sandbox.ErrNotFound
 		}
-		// Simulate running "exit 5"
-		return &sandbox.ExecResult{
-			ExitCode: 5,
-			Stdout:   []byte("command output\n"),
-			Stderr:   []byte{},
-		}, nil
+		// Simulate running "exit 5" - return stream with output and exit code
+		return newExecStream([]byte("command output\n"), 5), nil
 	}
 
 	sshServer, err := ssh.New(&ssh.Config{
@@ -493,7 +489,80 @@ func TestSSHServer_Integration_SessionTerminatesOnExecExit(t *testing.T) {
 	}
 }
 
+// execStream is a mock stream for exec commands that returns output then EOF.
+// Unlike testStream, it doesn't block waiting for Close - used for SSH exec tests.
+type execStream struct {
+	outputBuf []byte
+	stderrBuf []byte
+	exitCode  int
+	mu        sync.Mutex
+}
+
+func newExecStream(stdout []byte, exitCode int) *execStream {
+	return &execStream{
+		outputBuf: stdout,
+		exitCode:  exitCode,
+	}
+}
+
+func newExecStreamWithStderr(stdout, stderr []byte, exitCode int) *execStream {
+	return &execStream{
+		outputBuf: stdout,
+		stderrBuf: stderr,
+		exitCode:  exitCode,
+	}
+}
+
+func (s *execStream) Read(b []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.outputBuf) > 0 {
+		n := copy(b, s.outputBuf)
+		s.outputBuf = s.outputBuf[n:]
+		return n, nil
+	}
+	return 0, io.EOF
+}
+
+func (s *execStream) Stderr() io.Reader {
+	return &execStderrReader{stream: s}
+}
+
+type execStderrReader struct {
+	stream *execStream
+}
+
+func (r *execStderrReader) Read(b []byte) (int, error) {
+	r.stream.mu.Lock()
+	defer r.stream.mu.Unlock()
+
+	if len(r.stream.stderrBuf) > 0 {
+		n := copy(b, r.stream.stderrBuf)
+		r.stream.stderrBuf = r.stream.stderrBuf[n:]
+		return n, nil
+	}
+	return 0, io.EOF
+}
+
+func (s *execStream) Write(b []byte) (int, error) {
+	return len(b), nil // Discard input
+}
+
+func (s *execStream) CloseWrite() error {
+	return nil
+}
+
+func (s *execStream) Close() error {
+	return nil
+}
+
+func (s *execStream) Wait(_ context.Context) (int, error) {
+	return s.exitCode, nil
+}
+
 // testStream is a mock stream that simulates socat for port forwarding tests.
+// It blocks until Close is called, simulating a long-lived connection.
 type testStream struct {
 	// Input received from SSH channel (to be forwarded to "remote")
 	inputBuf []byte
@@ -525,6 +594,18 @@ func (s *testStream) Read(b []byte) (int, error) {
 
 	// Block until closed
 	<-s.exitCh
+	return 0, io.EOF
+}
+
+func (s *testStream) Stderr() io.Reader {
+	// Port forwarding doesn't use stderr
+	return emptyReader{}
+}
+
+// emptyReader is an io.Reader that always returns EOF.
+type emptyReader struct{}
+
+func (emptyReader) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
 

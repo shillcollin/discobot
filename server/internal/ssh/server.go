@@ -407,11 +407,10 @@ func (h *sessionHandler) runExec(channel ssh.Channel, command string, envVars ma
 	// Get user for this session (uid:gid format)
 	user := h.getUser(ctx)
 
-	// Execute command in sandbox
-	result, err := h.provider.Exec(ctx, h.sessionID, []string{"sh", "-c", command}, sandbox.ExecOptions{
-		Env:   envVars,
-		Stdin: channel,
-		User:  user,
+	// Execute command in sandbox using streaming to avoid buffering large outputs.
+	stream, err := h.provider.ExecStream(ctx, h.sessionID, []string{"sh", "-c", command}, sandbox.ExecStreamOptions{
+		Env:  envVars,
+		User: user,
 	})
 
 	if err != nil {
@@ -420,11 +419,40 @@ func (h *sessionHandler) runExec(channel ssh.Channel, command string, envVars ma
 		sendExitStatus(channel, 1)
 		return
 	}
+	defer stream.Close()
 
-	// Write output
-	channel.Write(result.Stdout)
-	channel.Stderr().Write(result.Stderr)
-	sendExitStatus(channel, uint32(result.ExitCode))
+	// Done channels to signal when output is fully drained
+	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
+
+	// Channel -> command stdin
+	go func() {
+		io.Copy(stream, channel)
+		stream.CloseWrite()
+	}()
+
+	// Command stdout -> Channel
+	go func() {
+		io.Copy(channel, stream)
+		close(stdoutDone)
+	}()
+
+	// Command stderr -> Channel.Stderr() (if available)
+	go func() {
+		if stderr := stream.Stderr(); stderr != nil {
+			io.Copy(channel.Stderr(), stderr)
+		}
+		close(stderrDone)
+	}()
+
+	// Wait for command to exit
+	exitCode, _ := stream.Wait(ctx)
+
+	// Wait for all output to drain before sending exit status
+	<-stdoutDone
+	<-stderrDone
+
+	sendExitStatus(channel, uint32(exitCode))
 }
 
 func (h *sessionHandler) runSFTP(channel ssh.Channel) {

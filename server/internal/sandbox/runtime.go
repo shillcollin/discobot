@@ -225,11 +225,15 @@ type ExecStreamOptions struct {
 
 // Stream represents a bidirectional stream to a command (no TTY).
 // Unlike PTY, this doesn't allocate a pseudo-terminal, so binary data
-// is not corrupted. This is used for SFTP and port forwarding.
+// is not corrupted. This is used for SFTP, port forwarding, and exec.
 type Stream interface {
-	// Read reads output from the command.
+	// Read reads stdout from the command.
 	// Implements io.Reader.
 	Read(p []byte) (n int, err error)
+
+	// Stderr returns a reader for the command's stderr.
+	// Returns nil if stderr is not available (e.g., merged with stdout).
+	Stderr() io.Reader
 
 	// Write sends input to the command's stdin.
 	// Implements io.Writer.
