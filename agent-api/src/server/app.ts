@@ -15,14 +15,32 @@ import type {
 	GetMessagesResponse,
 	HealthResponse,
 	ListFilesResponse,
+	ListServicesResponse,
 	ReadFileResponse,
 	RootResponse,
+	ServiceAlreadyRunningResponse,
+	ServiceIsPassiveResponse,
+	ServiceNoPortResponse,
+	ServiceNotFoundResponse,
+	ServiceNotRunningResponse,
+	ServiceOutputEvent,
 	SingleFileDiffResponse,
+	StartServiceResponse,
+	StopServiceResponse,
 	UserResponse,
 	WriteFileRequest,
 	WriteFileResponse,
 } from "../api/types.js";
 import { authMiddleware } from "../auth/middleware.js";
+import {
+	getManagedService,
+	getService,
+	getServiceOutput,
+	getServices,
+	startService,
+	stopService,
+} from "../services/manager.js";
+import { proxyHttpRequest } from "../services/proxy.js";
 import {
 	clearSession,
 	getCompletionEvents,
@@ -297,5 +315,234 @@ export function createApp(options: AppOptions) {
 		return c.json<CommitsResponse>(result);
 	});
 
-	return { app, acpClient };
+	// =========================================================================
+	// Service Management Endpoints
+	// =========================================================================
+
+	// GET /services - List all services with status
+	app.get("/services", async (c) => {
+		const services = await getServices(options.agentCwd);
+		return c.json<ListServicesResponse>({ services });
+	});
+
+	// POST /services/:id/start - Start a service
+	app.post("/services/:id/start", async (c) => {
+		const serviceId = c.req.param("id");
+
+		// Check if this is a passive service
+		const service = await getService(options.agentCwd, serviceId);
+		if (service?.passive) {
+			return c.json<ServiceIsPassiveResponse>(
+				{
+					error: "service_is_passive",
+					serviceId,
+					message:
+						"Passive services are externally managed and cannot be started",
+				},
+				400,
+			);
+		}
+
+		const result = await startService(options.agentCwd, serviceId);
+
+		if (!result.ok) {
+			if (result.status === 404) {
+				return c.json<ServiceNotFoundResponse>(
+					result.response as ServiceNotFoundResponse,
+					404,
+				);
+			}
+			return c.json<ServiceAlreadyRunningResponse>(
+				result.response as ServiceAlreadyRunningResponse,
+				409,
+			);
+		}
+
+		return c.json<StartServiceResponse>(result.response, 202);
+	});
+
+	// POST /services/:id/stop - Stop a service
+	app.post("/services/:id/stop", async (c) => {
+		const serviceId = c.req.param("id");
+
+		// Check if this is a passive service
+		const service = await getService(options.agentCwd, serviceId);
+		if (service?.passive) {
+			return c.json<ServiceIsPassiveResponse>(
+				{
+					error: "service_is_passive",
+					serviceId,
+					message:
+						"Passive services are externally managed and cannot be stopped",
+				},
+				400,
+			);
+		}
+
+		const result = await stopService(serviceId);
+
+		if (!result.ok) {
+			if (result.status === 404) {
+				return c.json<ServiceNotFoundResponse>(
+					result.response as ServiceNotFoundResponse,
+					404,
+				);
+			}
+			return c.json<ServiceNotRunningResponse>(
+				result.response as ServiceNotRunningResponse,
+				400,
+			);
+		}
+
+		return c.json<StopServiceResponse>(result.response, 200);
+	});
+
+	// GET /services/:id/output - Stream service output via SSE
+	app.get("/services/:id/output", async (c) => {
+		const serviceId = c.req.param("id");
+
+		// Check if this is a passive service
+		const service = await getService(options.agentCwd, serviceId);
+		if (service?.passive) {
+			return c.json<ServiceIsPassiveResponse>(
+				{
+					error: "service_is_passive",
+					serviceId,
+					message:
+						"Passive services are externally managed and have no output logs",
+				},
+				400,
+			);
+		}
+
+		const managed = getManagedService(serviceId);
+
+		return streamSSE(c, async (stream) => {
+			// Send buffered events from file first (replay)
+			const storedEvents = await getServiceOutput(serviceId);
+			for (const event of storedEvents) {
+				await stream.writeSSE({ data: JSON.stringify(event) });
+			}
+
+			// If no running service, send done and close
+			if (!managed) {
+				await stream.writeSSE({ data: "[DONE]" });
+				return;
+			}
+
+			// If already stopped, send done and close
+			if (managed.service.status === "stopped") {
+				await stream.writeSSE({ data: "[DONE]" });
+				return;
+			}
+
+			// Stream live events
+			const onOutput = async (event: ServiceOutputEvent) => {
+				try {
+					await stream.writeSSE({ data: JSON.stringify(event) });
+				} catch {
+					// Stream may be closed
+				}
+			};
+
+			const onClose = async () => {
+				try {
+					await stream.writeSSE({ data: "[DONE]" });
+				} catch {
+					// Stream may be closed
+				}
+			};
+
+			managed.eventEmitter.on("output", onOutput);
+			managed.eventEmitter.once("close", onClose);
+
+			// Wait for close event or client disconnect
+			await new Promise<void>((resolve) => {
+				const cleanup = () => {
+					managed.eventEmitter.off("output", onOutput);
+					managed.eventEmitter.off("close", onClose);
+					resolve();
+				};
+
+				managed.eventEmitter.once("close", cleanup);
+
+				// Handle client disconnect
+				c.req.raw.signal.addEventListener("abort", cleanup);
+			});
+		});
+	});
+
+	// ALL /services/:id/http/* - HTTP reverse proxy to service port
+	// Supports all HTTP methods and rewrites path based on x-forwarded-path header
+	// Note: WebSocket upgrades are handled at the Bun.serve level in index.ts
+	// Auto-starts non-passive services on demand
+	app.all("/services/:id/http/*", async (c) => {
+		const serviceId = c.req.param("id");
+		const service = await getService(options.agentCwd, serviceId);
+
+		if (!service) {
+			return c.json<ServiceNotFoundResponse>(
+				{ error: "service_not_found", serviceId },
+				404,
+			);
+		}
+
+		const port = service.http || service.https;
+		if (!port) {
+			return c.json<ServiceNoPortResponse>(
+				{ error: "service_no_port", serviceId },
+				400,
+			);
+		}
+
+		// For non-passive services that aren't running, auto-start them
+		if (!service.passive && service.status !== "running") {
+			// Start the service
+			const startResult = await startService(options.agentCwd, serviceId);
+
+			if (!startResult.ok) {
+				// If already running (race condition), continue to proxy
+				if (startResult.status !== 409) {
+					return c.json(startResult.response, startResult.status);
+				}
+			}
+
+			// Return the "waiting for service" HTML page which will auto-refresh
+			// The proxy will return connection_refused until the service is ready
+		}
+
+		// Proxy the request - if service isn't ready yet, proxy.ts will return
+		// the auto-refreshing HTML page for connection_refused errors
+		return proxyHttpRequest(c, port);
+	});
+
+	/**
+	 * Get the HTTP port for a service, auto-starting if needed.
+	 * Used by the WebSocket proxy in index.ts to get target port.
+	 * For passive services, always returns the port (they're externally managed).
+	 * For non-passive services, auto-starts if not running.
+	 */
+	async function getServicePort(serviceId: string): Promise<number | null> {
+		const service = await getService(options.agentCwd, serviceId);
+		if (!service) return null;
+
+		const port = service.http || service.https;
+		if (!port) return null;
+
+		// Passive services don't need to be running
+		if (service.passive) return port;
+
+		// For non-passive services, auto-start if not running
+		if (service.status !== "running") {
+			const startResult = await startService(options.agentCwd, serviceId);
+			// If start failed (and not already running), return null
+			if (!startResult.ok && startResult.status !== 409) {
+				return null;
+			}
+		}
+
+		return port;
+	}
+
+	return { app, acpClient, getServicePort };
 }

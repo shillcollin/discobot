@@ -4,6 +4,8 @@ const isTauriBuild = isTauri && !isDev;
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+	// Disable compression for SSE streaming compatibility
+	compress: false,
 	typescript: {
 		ignoreBuildErrors: true,
 	},

@@ -5,11 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { promisify } from "node:util";
-import {
-	clearCompletionEvents,
-	finishCompletion,
-	startCompletion,
-} from "../store/session.js";
+import { clearCompletionEvents, finishCompletion } from "../store/session.js";
 import { createApp } from "./app.js";
 
 const execAsync = promisify(exec);
@@ -29,7 +25,7 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 }
 
 describe("Git user configuration via headers", () => {
-	const testDir = join(tmpdir(), "agent-api-git-config-test-" + Date.now());
+	const testDir = join(tmpdir(), `agent-api-git-config-test-${Date.now()}`);
 	let app: ReturnType<typeof createApp>["app"];
 	let originalHome: string | undefined;
 

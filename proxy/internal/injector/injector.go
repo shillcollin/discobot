@@ -58,8 +58,17 @@ func (i *Injector) DeleteDomain(domain string) {
 	delete(i.rules, domain)
 }
 
+// MatchResult contains information about a header injection match.
+type MatchResult struct {
+	Matched bool
+	Pattern string
+	Host    string
+	Headers []string // Names of headers that were set/appended
+}
+
 // Apply injects matching headers into the request.
-func (i *Injector) Apply(req *http.Request) {
+// Returns match information for logging purposes.
+func (i *Injector) Apply(req *http.Request) MatchResult {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
@@ -67,17 +76,19 @@ func (i *Injector) Apply(req *http.Request) {
 
 	// Try exact match first
 	if rule, ok := i.rules[host]; ok {
-		applyRule(req, rule)
-		return
+		headers := applyRule(req, rule)
+		return MatchResult{Matched: true, Pattern: host, Host: host, Headers: headers}
 	}
 
 	// Try pattern matches
 	for pattern, rule := range i.rules {
 		if MatchDomain(pattern, host) {
-			applyRule(req, rule)
-			return // First match wins
+			headers := applyRule(req, rule)
+			return MatchResult{Matched: true, Pattern: pattern, Host: host, Headers: headers}
 		}
 	}
+
+	return MatchResult{Matched: false, Host: host}
 }
 
 // GetRules returns a copy of all rules (for testing).
@@ -95,10 +106,13 @@ func (i *Injector) GetRules() map[string]config.HeaderRule {
 	return result
 }
 
-func applyRule(req *http.Request, rule config.HeaderRule) {
+func applyRule(req *http.Request, rule config.HeaderRule) []string {
+	var headers []string
+
 	// Apply "set" headers (replace)
 	for key, value := range rule.Set {
 		req.Header.Set(key, value)
+		headers = append(headers, key)
 	}
 
 	// Apply "append" headers
@@ -109,7 +123,10 @@ func applyRule(req *http.Request, rule config.HeaderRule) {
 		} else {
 			req.Header.Set(key, existing+", "+value)
 		}
+		headers = append(headers, key)
 	}
+
+	return headers
 }
 
 func extractHost(hostPort string) string {

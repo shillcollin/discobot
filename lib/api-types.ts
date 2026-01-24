@@ -1,6 +1,6 @@
 // API Types - shared between client and server
 
-import {
+import type {
 	CommitStatus as CommitStatusConstants,
 	SessionStatus as SessionStatusConstants,
 	WorkspaceStatus as WorkspaceStatusConstants,
@@ -23,11 +23,11 @@ export interface FileNode {
 
 // Session status values representing the lifecycle of a session
 export type SessionStatus =
-	| (typeof SessionStatusConstants)[keyof typeof SessionStatusConstants];
+	(typeof SessionStatusConstants)[keyof typeof SessionStatusConstants];
 
 // Commit status values representing the commit state of a session (orthogonal to session status)
 export type CommitStatus =
-	| (typeof CommitStatusConstants)[keyof typeof CommitStatusConstants];
+	(typeof CommitStatusConstants)[keyof typeof CommitStatusConstants];
 
 export interface Session {
 	id: string;
@@ -52,7 +52,7 @@ export interface Session {
 
 // Workspace status values representing the lifecycle of a workspace
 export type WorkspaceStatus =
-	| (typeof WorkspaceStatusConstants)[keyof typeof WorkspaceStatusConstants];
+	(typeof WorkspaceStatusConstants)[keyof typeof WorkspaceStatusConstants];
 
 export interface Workspace {
 	id: string;
@@ -443,4 +443,68 @@ export interface SessionSingleFileDiffResponse {
 	deletions: number;
 	binary: boolean;
 	patch: string;
+}
+
+// ============================================================================
+// Service Types
+// ============================================================================
+
+/** Service status representing the lifecycle of a service */
+export type ServiceStatus = "running" | "stopped" | "starting" | "stopping";
+
+/** Service represents a user-defined service in the sandbox */
+export interface Service {
+	/** Filename in .octobot/services/ */
+	id: string;
+	/** Display name (from config or id) */
+	name: string;
+	/** Description from config */
+	description?: string;
+	/** HTTP port if http service */
+	http?: number;
+	/** HTTPS port if https service */
+	https?: number;
+	/** Absolute path to service file */
+	path: string;
+	/** Default URL path for web preview (e.g., "/app") */
+	urlPath?: string;
+	/** Current status */
+	status: ServiceStatus;
+	/**
+	 * Whether this is a passive service (external HTTP endpoint).
+	 * Passive services are not started/stopped - they just declare an HTTP port.
+	 */
+	passive?: boolean;
+	/** Process ID if running */
+	pid?: number;
+	/** ISO timestamp when started */
+	startedAt?: string;
+	/** Exit code if stopped after running */
+	exitCode?: number;
+}
+
+/** Response from listing services */
+export interface ListServicesResponse {
+	services: Service[];
+}
+
+/** Response from starting a service */
+export interface StartServiceResponse {
+	status: "starting";
+	serviceId: string;
+}
+
+/** Response from stopping a service */
+export interface StopServiceResponse {
+	status: "stopped";
+	serviceId: string;
+}
+
+/** Service output event from SSE stream */
+export interface ServiceOutputEvent {
+	type: "stdout" | "stderr" | "exit" | "error";
+	data?: string;
+	exitCode?: number;
+	error?: string;
+	timestamp: string;
 }

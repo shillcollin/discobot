@@ -808,42 +808,43 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			</AnimatePresence>
 
 			{/* Session status header - shows when not ready */}
-			{selectedSession && selectedSession.status !== SessionStatusConstants.READY && (
-				<div
-					className={cn(
-						"flex items-center gap-2 py-3 px-4 border-b",
-						selectedSession.status === SessionStatusConstants.ERROR ||
-							selectedSession.status === SessionStatusConstants.REMOVING
-							? "bg-destructive/10 border-destructive/20"
-							: selectedSession.status === SessionStatusConstants.STOPPED
-								? "bg-yellow-500/10 border-yellow-500/20"
-								: selectedSession.status === SessionStatusConstants.REMOVED
-									? "bg-muted/30 border-border"
-									: "bg-muted/50 border-border",
-					)}
-				>
-					{getStatusDisplay(selectedSession.status).icon}
-					<span
+			{selectedSession &&
+				selectedSession.status !== SessionStatusConstants.READY && (
+					<div
 						className={cn(
-							"text-sm font-medium",
+							"flex items-center gap-2 py-3 px-4 border-b",
 							selectedSession.status === SessionStatusConstants.ERROR ||
 								selectedSession.status === SessionStatusConstants.REMOVING
-								? "text-destructive"
+								? "bg-destructive/10 border-destructive/20"
 								: selectedSession.status === SessionStatusConstants.STOPPED
-									? "text-yellow-600 dark:text-yellow-500"
-									: "text-muted-foreground",
+									? "bg-yellow-500/10 border-yellow-500/20"
+									: selectedSession.status === SessionStatusConstants.REMOVED
+										? "bg-muted/30 border-border"
+										: "bg-muted/50 border-border",
 						)}
 					>
-						{getStatusDisplay(selectedSession.status).text}
-					</span>
-					{selectedSession.status === SessionStatusConstants.ERROR &&
-						selectedSession.errorMessage && (
-							<span className="text-sm text-destructive flex-1">
-								- {selectedSession.errorMessage}
-							</span>
-						)}
-				</div>
-			)}
+						{getStatusDisplay(selectedSession.status).icon}
+						<span
+							className={cn(
+								"text-sm font-medium",
+								selectedSession.status === SessionStatusConstants.ERROR ||
+									selectedSession.status === SessionStatusConstants.REMOVING
+									? "text-destructive"
+									: selectedSession.status === SessionStatusConstants.STOPPED
+										? "text-yellow-600 dark:text-yellow-500"
+										: "text-muted-foreground",
+							)}
+						>
+							{getStatusDisplay(selectedSession.status).text}
+						</span>
+						{selectedSession.status === SessionStatusConstants.ERROR &&
+							selectedSession.errorMessage && (
+								<span className="text-sm text-destructive flex-1">
+									- {selectedSession.errorMessage}
+								</span>
+							)}
+					</div>
+				)}
 
 			{/* Messages loading error indicator */}
 			{messagesError && (

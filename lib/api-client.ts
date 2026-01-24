@@ -27,6 +27,7 @@ import type {
 	GitHubCopilotDeviceCodeResponse,
 	GitHubCopilotPollRequest,
 	GitHubCopilotPollResponse,
+	ListServicesResponse,
 	ListSessionFilesResponse,
 	OAuthAuthorizeResponse,
 	OAuthExchangeRequest,
@@ -36,6 +37,8 @@ import type {
 	SessionDiffFilesResponse,
 	SessionDiffResponse,
 	SessionSingleFileDiffResponse,
+	StartServiceResponse,
+	StopServiceResponse,
 	Suggestion,
 	SupportedAgentType,
 	SystemStatusResponse,
@@ -416,6 +419,55 @@ class ApiClient {
 			method: "POST",
 			body: JSON.stringify(data),
 		});
+	}
+
+	// Services
+	/**
+	 * List all services in a session's sandbox.
+	 * @param sessionId Session ID
+	 */
+	async getServices(sessionId: string): Promise<ListServicesResponse> {
+		return this.fetch<ListServicesResponse>(`/sessions/${sessionId}/services`);
+	}
+
+	/**
+	 * Start a service in a session's sandbox.
+	 * @param sessionId Session ID
+	 * @param serviceId Service ID (filename in .octobot/services/)
+	 */
+	async startService(
+		sessionId: string,
+		serviceId: string,
+	): Promise<StartServiceResponse> {
+		return this.fetch<StartServiceResponse>(
+			`/sessions/${sessionId}/services/${serviceId}/start`,
+			{ method: "POST" },
+		);
+	}
+
+	/**
+	 * Stop a service in a session's sandbox.
+	 * @param sessionId Session ID
+	 * @param serviceId Service ID (filename in .octobot/services/)
+	 */
+	async stopService(
+		sessionId: string,
+		serviceId: string,
+	): Promise<StopServiceResponse> {
+		return this.fetch<StopServiceResponse>(
+			`/sessions/${sessionId}/services/${serviceId}/stop`,
+			{ method: "POST" },
+		);
+	}
+
+	/**
+	 * Get the URL for streaming service output via SSE.
+	 * Use with EventSource to receive real-time output.
+	 * @param sessionId Session ID
+	 * @param serviceId Service ID (filename in .octobot/services/)
+	 */
+	getServiceOutputUrl(sessionId: string, serviceId: string): string {
+		return `${this.base}/sessions/${sessionId}/services/${serviceId}/output`;
 	}
 }
 

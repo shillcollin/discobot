@@ -73,7 +73,13 @@ func Load() (*Config, error) {
 
 	// Server
 	cfg.Port = getEnvInt("PORT", 3001)
-	cfg.CORSOrigins = getEnvList("CORS_ORIGINS", []string{"http://localhost:3000"})
+	cfg.CORSOrigins = getEnvList("CORS_ORIGINS", []string{
+		"http://localhost:3000",
+		"http://localhost:3001",
+		"http://*.localhost:3000",
+		"http://*.localhost:3001",
+	})
+
 
 	// Database
 	cfg.DatabaseDSN = getEnv("DATABASE_DSN", "sqlite3://./octobot.db")

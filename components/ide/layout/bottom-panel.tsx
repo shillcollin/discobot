@@ -5,6 +5,7 @@ import {
 	Loader2,
 	PanelRightClose,
 	RefreshCw,
+	Square,
 } from "lucide-react";
 import * as React from "react";
 import { ChatPanel } from "@/components/ide/chat-panel";
@@ -12,6 +13,8 @@ import {
 	PanelControls,
 	type PanelState,
 } from "@/components/ide/panel-controls";
+import { ServiceButton } from "@/components/ide/service-button";
+import { ServiceView } from "@/components/ide/service-view";
 import {
 	type ConnectionStatus,
 	TerminalView,
@@ -21,9 +24,10 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
 import { CommitStatus } from "@/lib/api-constants";
 import { useSessionContext } from "@/lib/contexts/session-context";
+import { useServices } from "@/lib/hooks/use-services";
 import { cn } from "@/lib/utils";
 
-type BottomView = "chat" | "terminal";
+type BottomView = "chat" | "terminal" | `service:${string}`;
 
 interface BottomPanelProps {
 	panelState: PanelState;
@@ -62,12 +66,32 @@ export function BottomPanel({
 	// Track commit state
 	const [isCommitting, setIsCommitting] = React.useState(false);
 
+	// Services hook
+	const { services, startService, stopService } =
+		useServices(selectedSessionId);
+
+	// Extract active service from view
+	const activeServiceId = view.startsWith("service:") ? view.slice(8) : null;
+	const activeService = services.find((s) => s.id === activeServiceId);
+
+	// Track which services have been viewed (for lazy loading)
+	const [mountedServices, setMountedServices] = React.useState<Set<string>>(
+		new Set(),
+	);
+
 	// Mount terminal when first viewed
 	React.useEffect(() => {
 		if (view === "terminal" && !terminalMounted) {
 			setTerminalMounted(true);
 		}
 	}, [view, terminalMounted]);
+
+	// Mount service output when first viewed
+	React.useEffect(() => {
+		if (activeServiceId && !mountedServices.has(activeServiceId)) {
+			setMountedServices((prev) => new Set(prev).add(activeServiceId));
+		}
+	}, [activeServiceId, mountedServices]);
 
 	// Handle commit button click
 	const handleCommit = React.useCallback(async () => {
@@ -110,6 +134,17 @@ export function BottomPanel({
 					>
 						Terminal
 					</Button>
+					{selectedSessionId &&
+						services.map((service) => (
+							<ServiceButton
+								key={service.id}
+								service={service}
+								sessionId={selectedSessionId}
+								isActive={activeServiceId === service.id}
+								onSelect={() => onViewChange(`service:${service.id}`)}
+								onStart={() => startService(service.id)}
+							/>
+						))}
 				</div>
 				<div className="flex items-center gap-2">
 					{showPanelControls && (
@@ -119,6 +154,18 @@ export function BottomPanel({
 							showMinimize={false}
 							showMaximize={false}
 						/>
+					)}
+					{activeService && activeService.status === "running" && (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-6 text-xs gap-1"
+							onClick={() => stopService(activeService.id)}
+							title="Stop service"
+						>
+							<Square className="h-3 w-3 fill-current" />
+							Stop
+						</Button>
 					)}
 					{view === "terminal" && (
 						<>
@@ -217,6 +264,28 @@ export function BottomPanel({
 							/>
 						</div>
 					)}
+					{/* Service views - lazy mounted, stay mounted once viewed */}
+					{selectedSessionId &&
+						Array.from(mountedServices).map((serviceId) => {
+							const service = services.find((s) => s.id === serviceId);
+							if (!service) return null;
+							return (
+								<div
+									key={serviceId}
+									className={cn(
+										"absolute inset-0",
+										activeServiceId !== serviceId &&
+											"invisible pointer-events-none",
+									)}
+								>
+									<ServiceView
+										sessionId={selectedSessionId}
+										service={service}
+										className="h-full"
+									/>
+								</div>
+							);
+						})}
 				</div>
 			)}
 		</div>

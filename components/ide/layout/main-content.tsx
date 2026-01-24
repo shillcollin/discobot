@@ -15,7 +15,7 @@ import { useSessionFiles } from "@/lib/hooks/use-session-files";
 import { BottomPanel } from "./bottom-panel";
 import { DiffPanel } from "./diff-panel";
 
-type BottomView = "chat" | "terminal";
+type BottomView = "chat" | "terminal" | `service:${string}`;
 
 interface MainContentProps {
 	rightSidebarOpen?: boolean;

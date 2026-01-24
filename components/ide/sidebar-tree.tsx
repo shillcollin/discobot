@@ -30,12 +30,12 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { Session, Workspace, WorkspaceStatus } from "@/lib/api-types";
 import {
 	CommitStatus,
 	SessionStatus,
 	WorkspaceStatus as WorkspaceStatusConstants,
 } from "@/lib/api-constants";
+import type { Session, Workspace, WorkspaceStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import {
@@ -387,7 +387,8 @@ function SessionNode({
 	};
 
 	const showTooltip =
-		session.commitStatus === CommitStatus.FAILED || session.status === SessionStatus.ERROR;
+		session.commitStatus === CommitStatus.FAILED ||
+		session.status === SessionStatus.ERROR;
 	const tooltipText = getSessionHoverText(session);
 
 	const sessionButton = (

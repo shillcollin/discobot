@@ -122,39 +122,30 @@ export function SessionProvider({ children }: SessionProviderProps) {
 	}, [selectedSession, workspaces]);
 
 	// Actions
-	const selectSession = React.useCallback(
-		(sessionId: string | null) => {
-			setSelectedSessionId(sessionId);
-		},
-		[setSelectedSessionId],
-	);
+	const selectSession = React.useCallback((sessionId: string | null) => {
+		setSelectedSessionId(sessionId);
+	}, []);
 
 	const selectAgent = React.useCallback((agentId: string | null) => {
 		setSelectedAgentId(agentId);
 	}, []);
 
-	const handleSessionSelect = React.useCallback(
-		(session: { id: string }) => {
-			setSelectedSessionId(session.id);
-			setPreselectedWorkspaceId(null);
-		},
-		[setSelectedSessionId],
-	);
+	const handleSessionSelect = React.useCallback((session: { id: string }) => {
+		setSelectedSessionId(session.id);
+		setPreselectedWorkspaceId(null);
+	}, []);
 
 	const handleNewSession = React.useCallback(() => {
 		setSelectedSessionId(null);
 		setPreselectedWorkspaceId(null);
 		setChatResetTrigger((prev) => prev + 1);
-	}, [setSelectedSessionId]);
+	}, []);
 
-	const handleAddSession = React.useCallback(
-		(workspaceId: string) => {
-			setSelectedSessionId(null);
-			setPreselectedWorkspaceId(workspaceId);
-			setWorkspaceSelectTrigger((prev) => prev + 1);
-		},
-		[setSelectedSessionId],
-	);
+	const handleAddSession = React.useCallback((workspaceId: string) => {
+		setSelectedSessionId(null);
+		setPreselectedWorkspaceId(workspaceId);
+		setWorkspaceSelectTrigger((prev) => prev + 1);
+	}, []);
 
 	const handleSessionCreated = React.useCallback(
 		async (sessionId: string) => {
@@ -165,7 +156,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
 			setSelectedSessionId(sessionId);
 			setPreselectedWorkspaceId(null);
 		},
-		[mutateWorkspaces, setSelectedSessionId],
+		[mutateWorkspaces],
 	);
 
 	// Set agent ID when selected session changes

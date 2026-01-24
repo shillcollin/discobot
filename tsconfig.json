@@ -33,5 +33,5 @@
 		".next-tauri/types/**/*.ts",
 		".next-tauri/dev/types/**/*.ts"
 	],
-	"exclude": ["node_modules", "server/workspaces"]
+	"exclude": ["node_modules", "server/workspaces", "agent-api/scripts"]
 }

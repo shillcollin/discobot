@@ -711,3 +711,229 @@ func (c *SandboxChatClient) GetCommits(ctx context.Context, sessionID string, pa
 
 	return &result, nil
 }
+
+// ============================================================================
+// Service Methods
+// ============================================================================
+
+// ListServices retrieves all services from the sandbox.
+// Retries with exponential backoff on connection errors and 5xx responses.
+func (c *SandboxChatClient) ListServices(ctx context.Context, sessionID string) (*sandboxapi.ListServicesResponse, error) {
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		client, err := c.getHTTPClient(ctx, sessionID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", "http://sandbox/services", nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+			return nil, 0, err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list services: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result sandboxapi.ListServicesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// StartService starts a service in the sandbox.
+// Returns immediately with status "starting" (202 Accepted).
+// Retries with exponential backoff on connection errors and 5xx responses.
+func (c *SandboxChatClient) StartService(ctx context.Context, sessionID string, serviceID string) (*sandboxapi.StartServiceResponse, error) {
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		client, err := c.getHTTPClient(ctx, sessionID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		url := "http://sandbox/services/" + serviceID + "/start"
+		req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+			return nil, 0, err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to start service: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// 202 Accepted is success, also handle 200 OK
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result sandboxapi.StartServiceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// StopService stops a service in the sandbox.
+// Retries with exponential backoff on connection errors and 5xx responses.
+func (c *SandboxChatClient) StopService(ctx context.Context, sessionID string, serviceID string) (*sandboxapi.StopServiceResponse, error) {
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		client, err := c.getHTTPClient(ctx, sessionID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		url := "http://sandbox/services/" + serviceID + "/stop"
+		req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+			return nil, 0, err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to stop service: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result sandboxapi.StopServiceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// GetServiceOutput connects to the sandbox's SSE stream for service output.
+// Returns a channel of raw SSE lines. The channel is closed when the service
+// stops or the context is cancelled.
+// Retries with exponential backoff on connection errors and 5xx responses.
+func (c *SandboxChatClient) GetServiceOutput(ctx context.Context, sessionID string, serviceID string) (<-chan SSELine, error) {
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		client, err := c.getHTTPClient(ctx, sessionID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		url := "http://sandbox/services/" + serviceID + "/output"
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Accept", "text/event-stream")
+
+		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+			return nil, 0, err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service output: %w", err)
+	}
+
+	// 404 means service not found
+	if resp.StatusCode == http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("service not found: %s", string(body))
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Create channel for raw SSE lines
+	lineCh := make(chan SSELine, 100)
+
+	// Start goroutine to read SSE lines and pass through
+	go func() {
+		defer close(lineCh)
+		defer func() { _ = resp.Body.Close() }()
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			// Skip empty lines and comments
+			if line == "" || strings.HasPrefix(line, ":") {
+				continue
+			}
+
+			// Pass through SSE data lines
+			if strings.HasPrefix(line, "data: ") {
+				data := line[6:]
+
+				// Check for [DONE] signal
+				if data == "[DONE]" {
+					select {
+					case lineCh <- SSELine{Done: true}:
+					case <-ctx.Done():
+					}
+					return
+				}
+
+				// Pass through raw data without parsing
+				select {
+				case lineCh <- SSELine{Data: data}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	return lineCh, nil
+}

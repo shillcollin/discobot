@@ -59,6 +59,10 @@ func (m *mockSandboxProvider) Attach(_ context.Context, _ string, _ sandbox.Atta
 	return nil, nil
 }
 
+func (m *mockSandboxProvider) ExecStream(_ context.Context, _ string, _ []string, _ sandbox.ExecStreamOptions) (sandbox.Stream, error) {
+	return nil, nil
+}
+
 func (m *mockSandboxProvider) List(_ context.Context) ([]*sandbox.Sandbox, error) {
 	return nil, nil
 }
@@ -474,6 +478,9 @@ func (m *mockSandboxProviderWithTransport) Exec(_ context.Context, _ string, _ [
 	return &sandbox.ExecResult{ExitCode: 0}, nil
 }
 func (m *mockSandboxProviderWithTransport) Attach(_ context.Context, _ string, _ sandbox.AttachOptions) (sandbox.PTY, error) {
+	return nil, nil
+}
+func (m *mockSandboxProviderWithTransport) ExecStream(_ context.Context, _ string, _ []string, _ sandbox.ExecStreamOptions) (sandbox.Stream, error) {
 	return nil, nil
 }
 func (m *mockSandboxProviderWithTransport) List(_ context.Context) ([]*sandbox.Sandbox, error) {

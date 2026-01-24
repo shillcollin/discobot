@@ -104,7 +104,10 @@ func (h *HTTPProxy) setupHandlers() {
 		}
 
 		// Inject headers
-		h.injector.Apply(req)
+		match := h.injector.Apply(req)
+		if match.Matched {
+			h.logger.LogHeaderInjection(match.Host, match.Pattern, match.Headers)
+		}
 
 		// Log request
 		h.logger.LogRequest(req)

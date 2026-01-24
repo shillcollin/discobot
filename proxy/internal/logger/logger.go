@@ -132,6 +132,15 @@ func (l *Logger) LogBlocked(host string, reason string) {
 	)
 }
 
+// LogHeaderInjection logs when headers are injected into a request.
+func (l *Logger) LogHeaderInjection(host, pattern string, headers []string) {
+	l.sugar.Infow("header_injection",
+		"host", host,
+		"pattern", pattern,
+		"headers", headers,
+	)
+}
+
 // Close flushes any buffered log entries.
 func (l *Logger) Close() error {
 	return l.zap.Sync()

@@ -180,3 +180,49 @@ type CommitsErrorResponse struct {
 	Error   string `json:"error"`   // "parent_mismatch", "no_commits", "invalid_parent", "not_git_repo"
 	Message string `json:"message"` // Human-readable error message
 }
+
+// ============================================================================
+// Service Types
+// ============================================================================
+
+// Service represents a user-defined service in the sandbox.
+type Service struct {
+	ID          string `json:"id"`                    // Filename in .octobot/services/
+	Name        string `json:"name"`                  // Display name (from config or id)
+	Description string `json:"description,omitempty"` // Description from config
+	HTTP        int    `json:"http,omitempty"`        // HTTP port if http service
+	HTTPS       int    `json:"https,omitempty"`       // HTTPS port if https service
+	Path        string `json:"path"`                  // Absolute path to service file
+	URLPath     string `json:"urlPath,omitempty"`     // Default URL path for web preview (e.g., "/app")
+	Status      string `json:"status"`                // "running", "stopped", "starting", "stopping"
+	Passive     bool   `json:"passive,omitempty"`     // True if passive service (external HTTP endpoint, not started/stopped)
+	PID         int    `json:"pid,omitempty"`         // Process ID if running
+	StartedAt   string `json:"startedAt,omitempty"`   // ISO timestamp when started
+	ExitCode    *int   `json:"exitCode,omitempty"`    // Exit code if stopped after running
+}
+
+// ListServicesResponse is the GET /services response.
+type ListServicesResponse struct {
+	Services []Service `json:"services"`
+}
+
+// StartServiceResponse is the POST /services/:id/start response.
+type StartServiceResponse struct {
+	Status    string `json:"status"`    // "starting"
+	ServiceID string `json:"serviceId"` // The service ID
+}
+
+// StopServiceResponse is the POST /services/:id/stop response.
+type StopServiceResponse struct {
+	Status    string `json:"status"`    // "stopped"
+	ServiceID string `json:"serviceId"` // The service ID
+}
+
+// ServiceOutputEvent represents a single output event from a service.
+type ServiceOutputEvent struct {
+	Type      string `json:"type"`               // "stdout", "stderr", "exit", "error"
+	Data      string `json:"data,omitempty"`     // Output data for stdout/stderr
+	ExitCode  *int   `json:"exitCode,omitempty"` // Exit code for exit event
+	Error     string `json:"error,omitempty"`    // Error message for error event
+	Timestamp string `json:"timestamp"`          // ISO timestamp
+}

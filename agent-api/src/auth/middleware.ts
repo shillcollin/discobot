@@ -2,6 +2,12 @@ import type { Context, Next } from "hono";
 import { verifySecret } from "./verify.js";
 
 /**
+ * Paths that are exempt from authentication.
+ * Service HTTP proxy is public - the service itself handles its own auth.
+ */
+const PUBLIC_PATHS = [/^\/services\/[^/]+\/http\//];
+
+/**
  * Creates an authentication middleware that validates Bearer tokens against a salted hash.
  *
  * When OCTOBOT_SECRET env var is set (as a salted hash), this middleware requires
@@ -15,6 +21,12 @@ export function authMiddleware(hashedSecret: string | undefined) {
 	return async (c: Context, next: Next) => {
 		// If no secret configured, skip auth
 		if (!hashedSecret) {
+			return next();
+		}
+
+		// Skip auth for public paths (e.g., service HTTP proxy)
+		const path = c.req.path;
+		if (PUBLIC_PATHS.some((pattern) => pattern.test(path))) {
 			return next();
 		}
 

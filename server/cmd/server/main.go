@@ -29,6 +29,7 @@ import (
 	"github.com/obot-platform/octobot/server/internal/sandbox/docker"
 	"github.com/obot-platform/octobot/server/internal/sandbox/vz"
 	"github.com/obot-platform/octobot/server/internal/service"
+	"github.com/obot-platform/octobot/server/internal/ssh"
 	"github.com/obot-platform/octobot/server/internal/store"
 	"github.com/obot-platform/octobot/server/static"
 )
@@ -194,7 +195,15 @@ func main() {
 	r.Use(chimiddleware.Recoverer)
 	// Note: No global timeout - SSE endpoints need long-lived connections
 
-	// CORS configuration
+	// Service subdomain proxy - intercepts {session-id}-svc-{service-id}.* domains
+	// and proxies to agent-api's HTTP proxy endpoint without credentials.
+	// IMPORTANT: This must run BEFORE CORS middleware so that OPTIONS requests
+	// are forwarded to the service (which handles its own CORS).
+	if sandboxProvider != nil {
+		r.Use(middleware.ServiceProxy(sandboxProvider))
+	}
+
+	// CORS configuration (only applies to non-service-proxy requests)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -737,6 +746,47 @@ func main() {
 						Group:       "Terminal",
 						Description: "Terminal status",
 						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				// Services
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/services",
+					Handler: h.ListServices,
+					Meta: routes.Meta{
+						Group:       "Services",
+						Description: "List services",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{sessionId}/services/{serviceId}/start",
+					Handler: h.StartService,
+					Meta: routes.Meta{
+						Group:       "Services",
+						Description: "Start service",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "serviceId", Example: "my-server"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{sessionId}/services/{serviceId}/stop",
+					Handler: h.StopService,
+					Meta: routes.Meta{
+						Group:       "Services",
+						Description: "Stop service",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "serviceId", Example: "my-server"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/services/{serviceId}/output",
+					Handler: h.GetServiceOutput,
+					Meta: routes.Meta{
+						Group:       "Services",
+						Description: "Stream service output (SSE)",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "serviceId", Example: "my-server"}},
 					},
 				})
 			})
