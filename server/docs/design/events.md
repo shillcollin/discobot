@@ -174,81 +174,135 @@ func (b *Broker) Broadcast(projectID string, events []Event) {
 ### Structure
 
 ```go
-type Poller struct {
-    store    *store.Store
-    broker   *Broker
-    interval time.Duration
-    sequences map[string]uint // Last seen sequence per project
-    mu        sync.Mutex
+type PollerConfig struct {
+    PollInterval time.Duration  // How often to poll when subscribers are active
+    BatchSize    int            // Max events to fetch per poll
 }
 
-func NewPoller(store *store.Store, broker *Broker) *Poller {
+type Poller struct {
+    store  *store.Store
+    config PollerConfig
+
+    lastSeq   int64        // Last seen sequence number (global)
+    lastSeqMu sync.Mutex
+
+    subscribers   map[string]*Subscriber  // Active subscribers
+    subscribersMu sync.RWMutex
+
+    notifyCh chan struct{}  // Notification channel for immediate polling
+
+    ctx    context.Context
+    cancel context.CancelFunc
+    wg     sync.WaitGroup
+}
+
+func NewPoller(s *store.Store, config PollerConfig) *Poller {
     return &Poller{
-        store:     store,
-        broker:    broker,
-        interval:  time.Second,
-        sequences: make(map[string]uint),
+        store:       s,
+        config:      config,
+        subscribers: make(map[string]*Subscriber),
+        notifyCh:    make(chan struct{}, 100),
+    }
+}
+
+func DefaultPollerConfig() PollerConfig {
+    return PollerConfig{
+        PollInterval: 2 * time.Second,
+        BatchSize:    100,
     }
 }
 ```
+
+### Polling Strategy
+
+The poller implements a "dirty flag" pattern:
+
+1. **Periodic polling**: Polls every 2 seconds (configurable) when subscribers are active
+2. **Immediate notification**: When events are published, `NotifyNewEvent()` triggers immediate poll
+3. **Coalescing**: Multiple rapid notifications are coalesced into a single poll via `drainNotifications()`
+4. **Subscriber-aware**: Only polls when there are active subscribers
 
 ### Start
 
 ```go
-func (p *Poller) Start(ctx context.Context) {
-    ticker := time.NewTicker(p.interval)
+func (p *Poller) Start(parentCtx context.Context) error {
+    p.ctx, p.cancel = context.WithCancel(parentCtx)
+
+    // Initialize last seen sequence from database
+    maxSeq, err := p.store.GetMaxEventSeq(p.ctx)
+    if err != nil {
+        return err
+    }
+    p.lastSeq = maxSeq
+
+    log.Printf("Event poller starting (last seq: %d)", p.lastSeq)
+
+    p.wg.Add(1)
+    go p.pollLoop()
+
+    return nil
+}
+```
+
+### Poll Loop
+
+```go
+func (p *Poller) pollLoop() {
+    defer p.wg.Done()
+
+    ticker := time.NewTicker(p.config.PollInterval)
     defer ticker.Stop()
 
     for {
         select {
-        case <-ctx.Done():
+        case <-p.ctx.Done():
             return
         case <-ticker.C:
-            p.poll(ctx)
+            // Only poll if there are subscribers
+            p.subscribersMu.RLock()
+            hasSubscribers := len(p.subscribers) > 0
+            p.subscribersMu.RUnlock()
+
+            if hasSubscribers {
+                p.pollAndBroadcast()
+            }
+        case <-p.notifyCh:
+            // Drain any additional notifications (coalesce rapid writes)
+            p.drainNotifications()
+
+            // Only poll if there are subscribers
+            p.subscribersMu.RLock()
+            hasSubscribers := len(p.subscribers) > 0
+            p.subscribersMu.RUnlock()
+
+            if hasSubscribers {
+                p.pollAndBroadcast()
+            }
+        }
+    }
+}
+
+func (p *Poller) drainNotifications() {
+    for {
+        select {
+        case <-p.notifyCh:
+            // Keep draining
+        default:
+            // Channel is empty
+            return
         }
     }
 }
 ```
 
-### Poll
+### Notification
 
 ```go
-func (p *Poller) poll(ctx context.Context) {
-    p.mu.Lock()
-    defer p.mu.Unlock()
-
-    // Get all active project IDs from subscribers
-    projectIDs := p.broker.GetActiveProjects()
-
-    for _, projectID := range projectIDs {
-        lastSeq := p.sequences[projectID]
-
-        // Get new events
-        events, err := p.store.GetEventsSince(ctx, projectID, lastSeq)
-        if err != nil {
-            continue
-        }
-
-        if len(events) == 0 {
-            continue
-        }
-
-        // Update sequence
-        p.sequences[projectID] = events[len(events)-1].ID
-
-        // Convert and broadcast
-        converted := make([]Event, len(events))
-        for i, e := range events {
-            converted[i] = Event{
-                ID:        e.ID,
-                Type:      e.Type,
-                ProjectID: e.ProjectID,
-                Payload:   e.Payload,
-                CreatedAt: e.CreatedAt,
-            }
-        }
-
-        p.broker.Broadcast(projectID, converted)
+func (p *Poller) NotifyNewEvent() {
+    select {
+    case p.notifyCh <- struct{}{}:
+    default:
+        // Channel full, next poll will pick it up
     }
 }
 ```

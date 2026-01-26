@@ -20,7 +20,7 @@ type PollerConfig struct {
 // DefaultPollerConfig returns the default poller configuration.
 func DefaultPollerConfig() PollerConfig {
 	return PollerConfig{
-		PollInterval: 100 * time.Millisecond,
+		PollInterval: 2 * time.Second,
 		BatchSize:    100,
 	}
 }
@@ -158,9 +158,40 @@ func (p *Poller) pollLoop() {
 		case <-p.ctx.Done():
 			return
 		case <-ticker.C:
-			p.pollAndBroadcast()
+			// Only poll if there are subscribers
+			p.subscribersMu.RLock()
+			hasSubscribers := len(p.subscribers) > 0
+			p.subscribersMu.RUnlock()
+
+			if hasSubscribers {
+				p.pollAndBroadcast()
+			}
 		case <-p.notifyCh:
-			p.pollAndBroadcast()
+			// Drain any additional notifications (coalesce rapid writes)
+			p.drainNotifications()
+
+			// Only poll if there are subscribers
+			p.subscribersMu.RLock()
+			hasSubscribers := len(p.subscribers) > 0
+			p.subscribersMu.RUnlock()
+
+			if hasSubscribers {
+				p.pollAndBroadcast()
+			}
+		}
+	}
+}
+
+// drainNotifications drains any pending notifications from the channel
+// to coalesce rapid writes into a single poll.
+func (p *Poller) drainNotifications() {
+	for {
+		select {
+		case <-p.notifyCh:
+			// Keep draining
+		default:
+			// Channel is empty
+			return
 		}
 	}
 }
