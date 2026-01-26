@@ -97,9 +97,12 @@ func detectFilesystemType(sessionID string) filesystemType {
 func migrateAgentFSToOverlayFS(sessionID string, userInfo *userInfo) error {
 	fmt.Printf("octobot-agent: starting migration from agentfs to overlayfs for session %s\n", sessionID)
 
-	// Ensure migration directory exists
+	// Ensure migration directory exists with correct ownership
 	if err := os.MkdirAll(tempMigrationFS, 0755); err != nil {
 		return fmt.Errorf("failed to create migration directory: %w", err)
+	}
+	if err := os.Chown(tempMigrationFS, userInfo.uid, userInfo.gid); err != nil {
+		return fmt.Errorf("failed to chown migration directory: %w", err)
 	}
 
 	// Step 1: Mount agentfs at temporary location
