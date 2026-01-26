@@ -189,7 +189,7 @@ func migrateAgentFSToOverlayFS(sessionID string, userInfo *userInfo) error {
 
 // mountAgentFSAtPath mounts agentfs at a specific path (used for migration)
 func mountAgentFSAtPath(sessionID, mountPath string, u *userInfo) error {
-	const maxRetries = 3
+	const maxRetries = 10
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -658,9 +658,9 @@ func initAgentFS(sessionID string, u *userInfo) error {
 }
 
 // mountAgentFS mounts the agentfs database over /home/octobot
-// It retries up to 3 times, then attempts foreground mode for debug output
+// It retries up to 10 times, then attempts foreground mode for debug output
 func mountAgentFS(sessionID string, u *userInfo) error {
-	const maxRetries = 3
+	const maxRetries = 10
 
 	// Try mounting in daemon mode (with -a flag) up to maxRetries times
 	var lastErr error
