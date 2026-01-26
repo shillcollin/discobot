@@ -9,10 +9,11 @@ The `obot-agent` binary serves as the container's PID 1 process, providing:
 1. Home directory initialization (copy from template)
 2. Workspace initialization (git clone)
 3. AgentFS setup (copy-on-write filesystem)
-4. Process reaping for zombie collection
-5. Privilege separation (root → octobot user)
-6. Signal handling and forwarding
-7. Graceful shutdown coordination
+4. Docker daemon startup (if available)
+5. Process reaping for zombie collection
+6. Privilege separation (root → octobot user)
+7. Signal handling and forwarding
+8. Graceful shutdown coordination
 
 ## Design Goals
 
@@ -103,7 +104,19 @@ The `obot-agent` binary serves as the container's PID 1 process, providing:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Step 7: Run Agent API                                      │
+│  Step 7: Start Docker Daemon (Optional)                     │
+│  ──────────────────────────────────────                     │
+│  • Check if dockerd is on PATH                              │
+│  • If found, start Docker daemon in background              │
+│  • Configure data root at /.data/docker                     │
+│  • Wait for /var/run/docker.sock to become available        │
+│  • Set socket permissions to 0666 (world-readable/writable) │
+│  • Requires container to run in privileged mode             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Step 8: Run Agent API                                      │
 │  ─────────────────────                                      │
 │  • Fork child process                                       │
 │  • Switch to octobot user (setuid/setgid)                   │
@@ -127,9 +140,13 @@ The `obot-agent` binary serves as the container's PID 1 process, providing:
 │  └──────────────┘  └──────────────┘  └──────────────────┘   │
 │                                                             │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
-│  │   Signal     │  │   Process    │  │      Child       │   │
-│  │   Handler    │  │   Reaper     │  │      Manager     │   │
+│  │   Docker     │  │   Signal     │  │     Process      │   │
+│  │   Manager    │  │   Handler    │  │      Reaper      │   │
 │  └──────────────┘  └──────────────┘  └──────────────────┘   │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │                    Child Manager                      │   │
+│  └──────────────────────────────────────────────────────┘   │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -161,6 +178,19 @@ Integrates with the AgentFS copy-on-write filesystem:
 - Uses `-a` flag for auto-unmount on exit
 - Uses `--allow-root` for root access (docker exec)
 - Provides efficient storage for session changes
+
+### Docker Manager
+
+Optionally starts the Docker daemon inside the container:
+
+- Checks if `dockerd` is available on PATH
+- Starts Docker daemon with persistent storage at `/.data/docker`
+- Waits for `/var/run/docker.sock` to become available
+- Sets socket permissions to 0666 for all users
+- Tracks dockerd process for cleanup on shutdown
+- Requires container to run in privileged mode
+
+This allows agents to run Docker commands (build, run, etc.) inside the sandbox without requiring a separate DinD sidecar container.
 
 ### Signal Handler
 

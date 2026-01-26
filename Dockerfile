@@ -122,8 +122,9 @@ FROM ubuntu:24.04 AS runtime
 # fuse3 is needed for agentfs FUSE filesystem
 # nodejs is needed for claude-code-acp
 # pnpm is needed for package management
-# docker.io is needed for running docker commands (connects to DinD daemon)
+# docker.io provides dockerd daemon and docker CLI (runs inside container with privileged mode)
 # docker-buildx is needed for multi-arch builds and advanced build features
+# iptables is needed by dockerd for network management
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -131,6 +132,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     docker.io \
     fuse3 \
     git \
+    iptables \
     socat \
     vim \
     && curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \

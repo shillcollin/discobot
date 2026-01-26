@@ -56,10 +56,6 @@ type Provider struct {
 	client *client.Client
 	cfg    *config.Config
 
-	// dindManager manages per-project Docker-in-Docker daemons
-	dindManager     *DinDManager
-	dindWatchCancel context.CancelFunc
-
 	// containerIDs maps sessionID -> Docker container ID
 	containerIDs   map[string]string
 	containerIDsMu sync.RWMutex
@@ -90,31 +86,10 @@ func NewProvider(cfg *config.Config) (*Provider, error) {
 		return nil, fmt.Errorf("failed to connect to docker daemon: %w", err)
 	}
 
-	// Initialize DinD manager if enabled
-	var dindManager *DinDManager
-	var dindWatchCancel context.CancelFunc
-	if cfg.DinDEnabled {
-		dindManager = NewDinDManager(cli, cfg)
-		// Recover any existing DinD daemons from previous runs
-		if err := dindManager.RecoverDaemons(context.Background()); err != nil {
-			log.Printf("Warning: failed to recover DinD daemons: %v", err)
-		}
-		// Start watching for DinD container events
-		var watchCtx context.Context
-		watchCtx, dindWatchCancel = context.WithCancel(context.Background())
-		go func() {
-			if err := dindManager.Watch(watchCtx); err != nil && err != context.Canceled {
-				log.Printf("DinD watcher stopped with error: %v", err)
-			}
-		}()
-	}
-
 	return &Provider{
-		client:          cli,
-		cfg:             cfg,
-		dindManager:     dindManager,
-		dindWatchCancel: dindWatchCancel,
-		containerIDs:    make(map[string]string),
+		client:       cli,
+		cfg:          cfg,
+		containerIDs: make(map[string]string),
 	}, nil
 }
 
@@ -287,27 +262,9 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		hostConfig.NetworkMode = containerTypes.NetworkMode(p.cfg.DockerNetwork)
 	}
 
-	// If DinD is enabled, ensure daemon is running and mount the Docker socket
-	if p.dindManager != nil {
-		projectID := opts.Labels["octobot.project.id"]
-		if projectID != "" {
-			socketVolume, err := p.dindManager.EnsureDaemon(ctx, projectID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to ensure DinD daemon: %w", err)
-			}
-
-			// Mount the DinD socket volume at /var/run
-			hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
-				Type:     mount.TypeVolume,
-				Source:   socketVolume,
-				Target:   "/var/run",
-				ReadOnly: false,
-			})
-
-			// Add DOCKER_HOST env var to point to the socket
-			containerConfig.Env = append(containerConfig.Env, "DOCKER_HOST=unix:///var/run/docker.sock")
-		}
-	}
+	// Enable privileged mode for running Docker daemon inside container
+	// The container runs its own Docker daemon (started by obot-agent if dockerd is available)
+	hostConfig.Privileged = true
 
 	// Always expose port 3002 with a random host port
 	port := nat.Port(fmt.Sprintf("%d/tcp", containerPort))
@@ -973,20 +930,8 @@ func (p *Provider) clearContainerID(sessionID string) {
 	p.containerIDsMu.Unlock()
 }
 
-// Close closes the Docker client connection and stops all DinD daemons.
+// Close closes the Docker client connection.
 func (p *Provider) Close() error {
-	// Stop DinD watcher first
-	if p.dindWatchCancel != nil {
-		p.dindWatchCancel()
-	}
-	// Stop all DinD daemons on shutdown
-	if p.dindManager != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := p.dindManager.StopAll(ctx); err != nil {
-			log.Printf("Warning: failed to stop DinD daemons: %v", err)
-		}
-	}
 	return p.client.Close()
 }
 

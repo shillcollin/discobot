@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -32,6 +33,12 @@ const (
 
 	// Shutdown timeout before forcing child termination
 	shutdownTimeout = 10 * time.Second
+
+	// Docker daemon startup timeout
+	dockerStartupTimeout = 30 * time.Second
+
+	// Docker socket path
+	dockerSocketPath = "/var/run/docker.sock"
 
 	// Paths
 	dataDir      = "/.data"
@@ -182,8 +189,15 @@ func run() error {
 		return fmt.Errorf("symlink creation failed: %w", err)
 	}
 
-	// Step 6: Run the agent API
-	return runAgent(agentBinary, userInfo)
+	// Step 6: Start Docker daemon if available
+	dockerCmd, err := startDockerDaemon()
+	if err != nil {
+		// Log but don't fail - Docker is optional
+		fmt.Printf("octobot-agent: Docker daemon not started: %v\n", err)
+	}
+
+	// Step 7: Run the agent API
+	return runAgent(agentBinary, userInfo, dockerCmd)
 }
 
 // setupGitSafeDirectories configures git safe.directory for all workspace paths.
@@ -630,8 +644,85 @@ func createWorkspaceSymlink() error {
 	return nil
 }
 
+// startDockerDaemon starts the Docker daemon if dockerd is available on PATH.
+// Returns the running command (for cleanup) or nil if Docker is not available.
+func startDockerDaemon() (*exec.Cmd, error) {
+	// Check if dockerd is on PATH
+	dockerdPath, err := exec.LookPath("dockerd")
+	if err != nil {
+		return nil, fmt.Errorf("dockerd not found on PATH: %w", err)
+	}
+
+	fmt.Printf("octobot-agent: found dockerd at %s, starting Docker daemon...\n", dockerdPath)
+
+	// Ensure /var/run exists for the socket
+	if err := os.MkdirAll("/var/run", 0755); err != nil {
+		return nil, fmt.Errorf("failed to create /var/run: %w", err)
+	}
+
+	// Start dockerd in the background
+	// Use --storage-driver=overlay2 which works well in containers
+	// Use /.data/docker for persistent storage
+	dockerDataDir := filepath.Join(dataDir, "docker")
+	if err := os.MkdirAll(dockerDataDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create docker data dir: %w", err)
+	}
+
+	cmd := exec.Command(dockerdPath,
+		"--data-root", dockerDataDir,
+		"--storage-driver", "overlay2",
+		"--host", "unix://"+dockerSocketPath,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start dockerd: %w", err)
+	}
+
+	fmt.Printf("octobot-agent: dockerd started (pid=%d), waiting for socket...\n", cmd.Process.Pid)
+
+	// Wait for the Docker socket to become available
+	if err := waitForDockerSocket(); err != nil {
+		// Kill dockerd if socket never appeared
+		_ = cmd.Process.Kill()
+		return nil, fmt.Errorf("docker socket did not become available: %w", err)
+	}
+
+	// Make the socket world-readable and writable
+	if err := os.Chmod(dockerSocketPath, 0666); err != nil {
+		fmt.Printf("octobot-agent: warning: failed to chmod docker socket: %v\n", err)
+	} else {
+		fmt.Printf("octobot-agent: docker socket permissions set to 0666\n")
+	}
+
+	fmt.Printf("octobot-agent: Docker daemon ready\n")
+	return cmd, nil
+}
+
+// waitForDockerSocket waits for the Docker socket to become available.
+func waitForDockerSocket() error {
+	deadline := time.Now().Add(dockerStartupTimeout)
+
+	for time.Now().Before(deadline) {
+		// Check if socket exists
+		info, err := os.Stat(dockerSocketPath)
+		if err == nil && info.Mode()&os.ModeSocket != 0 {
+			// Socket exists, try to connect to verify it's ready
+			conn, err := net.DialTimeout("unix", dockerSocketPath, 2*time.Second)
+			if err == nil {
+				_ = conn.Close()
+				return nil
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return fmt.Errorf("timeout waiting for docker socket at %s", dockerSocketPath)
+}
+
 // runAgent starts the agent API process and manages its lifecycle
-func runAgent(agentBinary string, u *userInfo) error {
+func runAgent(agentBinary string, u *userInfo, dockerCmd *exec.Cmd) error {
 	// Check if we're running as PID 1
 	isPID1 := os.Getpid() == 1
 
@@ -684,11 +775,11 @@ func runAgent(agentBinary string, u *userInfo) error {
 	}()
 
 	// Main event loop
-	return eventLoop(cmd, signals, childDone, isPID1)
+	return eventLoop(cmd, dockerCmd, signals, childDone, isPID1)
 }
 
 // eventLoop handles signals and waits for child process exit
-func eventLoop(cmd *exec.Cmd, signals chan os.Signal, childDone chan error, isPID1 bool) error {
+func eventLoop(cmd *exec.Cmd, dockerCmd *exec.Cmd, signals chan os.Signal, childDone chan error, isPID1 bool) error {
 	shuttingDown := false
 
 	for {
@@ -719,6 +810,10 @@ func eventLoop(cmd *exec.Cmd, signals chan os.Signal, childDone chan error, isPI
 						if cmd.Process != nil {
 							_ = cmd.Process.Kill()
 						}
+						// Also kill dockerd on timeout
+						if dockerCmd != nil && dockerCmd.Process != nil {
+							_ = dockerCmd.Process.Kill()
+						}
 					}()
 				}
 
@@ -743,6 +838,25 @@ func eventLoop(cmd *exec.Cmd, signals chan os.Signal, childDone chan error, isPI
 				}
 			} else {
 				fmt.Printf("octobot-agent: child exited successfully\n")
+			}
+
+			// Stop Docker daemon if running
+			if dockerCmd != nil && dockerCmd.Process != nil {
+				fmt.Printf("octobot-agent: stopping Docker daemon...\n")
+				_ = dockerCmd.Process.Signal(syscall.SIGTERM)
+				// Give it a moment to shut down gracefully
+				done := make(chan struct{})
+				go func() {
+					_ = dockerCmd.Wait()
+					close(done)
+				}()
+				select {
+				case <-done:
+					fmt.Printf("octobot-agent: Docker daemon stopped\n")
+				case <-time.After(5 * time.Second):
+					fmt.Printf("octobot-agent: Docker daemon did not stop, killing...\n")
+					_ = dockerCmd.Process.Kill()
+				}
 			}
 
 			// Final reap of any remaining zombies
