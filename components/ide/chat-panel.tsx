@@ -985,7 +985,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 								description="Type a message below to begin chatting with the AI assistant."
 							/>
 						) : (
-							<div className="max-w-3xl mx-auto w-full space-y-4">
+							<div className="max-w-2xl mx-auto w-full space-y-4">
 								{messages.map((message, index) => {
 									// Render last few messages immediately (they're likely visible)
 									// Lazy-render older messages to improve initial load performance
