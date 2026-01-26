@@ -102,9 +102,11 @@ import { useAgentContext } from "@/lib/contexts/agent-context";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useMessages } from "@/lib/hooks/use-messages";
+import { usePromptHistory } from "@/lib/hooks/use-prompt-history";
 import { useSession } from "@/lib/hooks/use-sessions";
 import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import { cn } from "@/lib/utils";
+import { PromptHistoryDropdown } from "./prompt-history-dropdown";
 
 type ChatMode = "welcome" | "conversation";
 
@@ -377,6 +379,8 @@ interface ChatInputAreaProps {
 	isLocked?: boolean;
 	/** Message to show when locked */
 	lockedMessage?: string;
+	/** Session ID for draft persistence */
+	selectedSessionId: string | null;
 }
 
 const ChatInputArea = React.memo(function ChatInputArea({
@@ -387,7 +391,37 @@ const ChatInputArea = React.memo(function ChatInputArea({
 	handleSubmit,
 	isLocked = false,
 	lockedMessage,
+	selectedSessionId,
 }: ChatInputAreaProps) {
+	const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+	const {
+		history,
+		historyIndex,
+		isHistoryOpen,
+		setHistoryIndex,
+		onSelectHistory,
+		addToHistory,
+		closeHistory,
+		handleKeyDown: historyKeyDown,
+	} = usePromptHistory({
+		textareaRef,
+		sessionId: selectedSessionId,
+	});
+
+	// Wrap handleSubmit to also add to history
+	const wrappedHandleSubmit = React.useCallback(
+		(message: PromptInputMessage, e: React.FormEvent) => {
+			const text = message.text;
+			handleSubmit(message, e);
+			// Add to history after submit
+			if (text) {
+				addToHistory(text);
+			}
+		},
+		[handleSubmit, addToHistory],
+	);
+
 	return (
 		<div
 			className={cn(
@@ -397,48 +431,61 @@ const ChatInputArea = React.memo(function ChatInputArea({
 					: "px-4 py-4 border-t border-border max-w-3xl mx-auto w-full",
 			)}
 		>
-			<PromptInput
-				onSubmit={handleSubmit}
-				className="max-w-full"
-				accept="image/*"
-			>
-				<AttachmentsPreview />
-				<PromptInputTextarea
-					placeholder={
-						isLocked
-							? lockedMessage || "Input disabled"
-							: mode === "welcome"
-								? "What would you like to work on?"
-								: "Type a message..."
-					}
-					disabled={isLocked}
-					className={cn(
-						"transition-all duration-300",
-						mode === "welcome" ? "min-h-[80px] text-base" : "min-h-[60px]",
-						isLocked && "opacity-50 cursor-not-allowed",
-					)}
+			<div className="relative">
+				<PromptHistoryDropdown
+					history={history}
+					historyIndex={historyIndex}
+					isHistoryOpen={isHistoryOpen}
+					setHistoryIndex={setHistoryIndex}
+					onSelectHistory={onSelectHistory}
+					textareaRef={textareaRef}
+					closeHistory={closeHistory}
 				/>
-				<PromptInputFooter>
-					<PromptInputTools>
-						<PromptInputActionMenu>
-							<PromptInputActionMenuTrigger>
-								<Paperclip className="size-4" />
-							</PromptInputActionMenuTrigger>
-							<PromptInputActionMenuContent>
-								<PromptInputActionAddAttachments />
-							</PromptInputActionMenuContent>
-						</PromptInputActionMenu>
-					</PromptInputTools>
-					<PromptInputSubmit
-						status={status}
-						disabled={
-							isLocked ||
-							(mode === "welcome" &&
-								(!localSelectedWorkspaceId || !localSelectedAgentId))
+				<PromptInput
+					onSubmit={wrappedHandleSubmit}
+					className="max-w-full"
+					accept="image/*"
+				>
+					<AttachmentsPreview />
+					<PromptInputTextarea
+						ref={textareaRef}
+						placeholder={
+							isLocked
+								? lockedMessage || "Input disabled"
+								: mode === "welcome"
+									? "What would you like to work on?"
+									: "Type a message..."
 						}
+						disabled={isLocked}
+						onKeyDown={historyKeyDown}
+						className={cn(
+							"transition-all duration-300",
+							mode === "welcome" ? "min-h-[80px] text-base" : "min-h-[60px]",
+							isLocked && "opacity-50 cursor-not-allowed",
+						)}
 					/>
-				</PromptInputFooter>
-			</PromptInput>
+					<PromptInputFooter>
+						<PromptInputTools>
+							<PromptInputActionMenu>
+								<PromptInputActionMenuTrigger>
+									<Paperclip className="size-4" />
+								</PromptInputActionMenuTrigger>
+								<PromptInputActionMenuContent>
+									<PromptInputActionAddAttachments />
+								</PromptInputActionMenuContent>
+							</PromptInputActionMenu>
+						</PromptInputTools>
+						<PromptInputSubmit
+							status={status}
+							disabled={
+								isLocked ||
+								(mode === "welcome" &&
+									(!localSelectedWorkspaceId || !localSelectedAgentId))
+							}
+						/>
+					</PromptInputFooter>
+				</PromptInput>
+			</div>
 		</div>
 	);
 });
@@ -978,6 +1025,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 						selectedSession?.commitStatus === CommitStatus.COMMITTING
 					}
 					lockedMessage="Chat disabled during commit..."
+					selectedSessionId={selectedSessionId}
 				/>
 			)}
 
