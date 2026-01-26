@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
+	gossh "golang.org/x/crypto/ssh"
+
 	"github.com/obot-platform/octobot/server/internal/sandbox"
 	"github.com/obot-platform/octobot/server/internal/sandbox/mock"
 	"github.com/obot-platform/octobot/server/internal/ssh"
-	gossh "golang.org/x/crypto/ssh"
 )
 
 func TestSSHServer_Integration_ConnectToSession(t *testing.T) {
@@ -224,7 +225,7 @@ func TestSSHServer_Integration_HostKeyPersistence(t *testing.T) {
 	var firstFingerprint string
 	config1 := &gossh.ClientConfig{
 		User: "test",
-		HostKeyCallback: func(hostname string, remote net.Addr, key gossh.PublicKey) error {
+		HostKeyCallback: func(_ string, _ net.Addr, key gossh.PublicKey) error {
 			firstFingerprint = gossh.FingerprintSHA256(key)
 			return nil
 		},
@@ -250,7 +251,7 @@ func TestSSHServer_Integration_HostKeyPersistence(t *testing.T) {
 	var secondFingerprint string
 	config2 := &gossh.ClientConfig{
 		User: "test",
-		HostKeyCallback: func(hostname string, remote net.Addr, key gossh.PublicKey) error {
+		HostKeyCallback: func(_ string, _ net.Addr, key gossh.PublicKey) error {
 			secondFingerprint = gossh.FingerprintSHA256(key)
 			return nil
 		},
@@ -305,7 +306,7 @@ func (p *testPTY) Write(b []byte) (int, error) {
 	}
 }
 
-func (p *testPTY) Resize(_ context.Context, rows, cols int) error {
+func (p *testPTY) Resize(_ context.Context, _, _ int) error {
 	return nil
 }
 
@@ -439,7 +440,7 @@ func TestSSHServer_Integration_SessionTerminatesOnExecExit(t *testing.T) {
 	}
 
 	// Hook ExecStreamFunc to simulate command execution (runExec uses ExecStream)
-	provider.ExecStreamFunc = func(_ context.Context, sid string, cmd []string, opts sandbox.ExecStreamOptions) (sandbox.Stream, error) {
+	provider.ExecStreamFunc = func(_ context.Context, sid string, _ []string, _ sandbox.ExecStreamOptions) (sandbox.Stream, error) {
 		if sid != sessionID {
 			return nil, sandbox.ErrNotFound
 		}
@@ -508,14 +509,6 @@ type execStream struct {
 func newExecStream(stdout []byte, exitCode int) *execStream {
 	return &execStream{
 		outputBuf: stdout,
-		exitCode:  exitCode,
-	}
-}
-
-func newExecStreamWithStderr(stdout, stderr []byte, exitCode int) *execStream {
-	return &execStream{
-		outputBuf: stdout,
-		stderrBuf: stderr,
 		exitCode:  exitCode,
 	}
 }

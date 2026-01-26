@@ -89,7 +89,6 @@ func Load() (*Config, error) {
 		"http://*.localhost:3001",
 	})
 
-
 	// Database
 	cfg.DatabaseDSN = getEnv("DATABASE_DSN", "sqlite3://./octobot.db")
 	cfg.DatabaseDriver = detectDriver(cfg.DatabaseDSN)

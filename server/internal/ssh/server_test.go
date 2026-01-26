@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/obot-platform/octobot/server/internal/sandbox"
 	"github.com/obot-platform/octobot/server/internal/sandbox/mock"
-	"golang.org/x/crypto/ssh"
 )
 
 func TestNew_RequiresSandboxProvider(t *testing.T) {
@@ -242,6 +243,7 @@ func TestParsePTYRequest(t *testing.T) {
 	req := parsePTYRequest(payload)
 	if req == nil {
 		t.Fatal("failed to parse PTY request")
+		return // unreachable but helps staticcheck understand control flow
 	}
 
 	if req.Term != term {

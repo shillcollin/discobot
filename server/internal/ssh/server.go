@@ -19,8 +19,9 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/obot-platform/octobot/server/internal/sandbox"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/obot-platform/octobot/server/internal/sandbox"
 )
 
 // UserInfoFetcher fetches user info from a sandbox.
@@ -280,7 +281,7 @@ func (h *sessionHandler) handleChannel(newChannel ssh.NewChannel) {
 	default:
 		log.Printf("SSH session %s: rejecting unknown channel type: %s",
 			h.sessionID, newChannel.ChannelType())
-		newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
+		_ = newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
 	}
 }
 
@@ -301,7 +302,7 @@ func (h *sessionHandler) handleSessionChannel(newChannel ssh.NewChannel) {
 		case "pty-req":
 			ptyReq = parsePTYRequest(req.Payload)
 			if req.WantReply {
-				req.Reply(true, nil)
+				_ = req.Reply(true, nil)
 			}
 
 		case "env":
@@ -309,12 +310,12 @@ func (h *sessionHandler) handleSessionChannel(newChannel ssh.NewChannel) {
 			name, value := parseEnvRequest(req.Payload)
 			envVars[name] = value
 			if req.WantReply {
-				req.Reply(true, nil)
+				_ = req.Reply(true, nil)
 			}
 
 		case "shell":
 			if req.WantReply {
-				req.Reply(true, nil)
+				_ = req.Reply(true, nil)
 			}
 			h.runShell(channel, ptyReq, envVars)
 			return
@@ -322,7 +323,7 @@ func (h *sessionHandler) handleSessionChannel(newChannel ssh.NewChannel) {
 		case "exec":
 			command := parseExecRequest(req.Payload)
 			if req.WantReply {
-				req.Reply(true, nil)
+				_ = req.Reply(true, nil)
 			}
 			h.runExec(channel, command, envVars)
 			return
@@ -331,25 +332,25 @@ func (h *sessionHandler) handleSessionChannel(newChannel ssh.NewChannel) {
 			subsystem := parseSubsystemRequest(req.Payload)
 			if subsystem == "sftp" {
 				if req.WantReply {
-					req.Reply(true, nil)
+					_ = req.Reply(true, nil)
 				}
 				h.runSFTP(channel)
 				return
 			}
 			if req.WantReply {
-				req.Reply(false, nil)
+				_ = req.Reply(false, nil)
 			}
 
 		case "window-change":
 			// Window resize - we'd need to track the PTY to resize it
 			if req.WantReply {
-				req.Reply(true, nil)
+				_ = req.Reply(true, nil)
 			}
 
 		default:
 			log.Printf("SSH session %s: unknown request type: %s", h.sessionID, req.Type)
 			if req.WantReply {
-				req.Reply(false, nil)
+				_ = req.Reply(false, nil)
 			}
 		}
 	}
@@ -383,12 +384,12 @@ func (h *sessionHandler) runShell(channel ssh.Channel, ptyReq *ptyRequest, envVa
 
 	// Channel -> PTY (stdin) - will be terminated when channel closes
 	go func() {
-		io.Copy(pty, channel)
+		_, _ = io.Copy(pty, channel)
 	}()
 
 	// PTY -> Channel (stdout) - completes when PTY returns EOF after process exits
 	go func() {
-		io.Copy(channel, pty)
+		_, _ = io.Copy(channel, pty)
 		close(outputDone)
 	}()
 
@@ -427,20 +428,20 @@ func (h *sessionHandler) runExec(channel ssh.Channel, command string, envVars ma
 
 	// Channel -> command stdin
 	go func() {
-		io.Copy(stream, channel)
-		stream.CloseWrite()
+		_, _ = io.Copy(stream, channel)
+		_ = stream.CloseWrite()
 	}()
 
 	// Command stdout -> Channel
 	go func() {
-		io.Copy(channel, stream)
+		_, _ = io.Copy(channel, stream)
 		close(stdoutDone)
 	}()
 
 	// Command stderr -> Channel.Stderr() (if available)
 	go func() {
 		if stderr := stream.Stderr(); stderr != nil {
-			io.Copy(channel.Stderr(), stderr)
+			_, _ = io.Copy(channel.Stderr(), stderr)
 		}
 		close(stderrDone)
 	}()
@@ -477,18 +478,18 @@ func (h *sessionHandler) runSFTP(channel ssh.Channel) {
 
 	// Channel -> SFTP server stdin - will be terminated when channel closes
 	go func() {
-		io.Copy(stream, channel)
-		stream.CloseWrite()
+		_, _ = io.Copy(stream, channel)
+		_ = stream.CloseWrite()
 	}()
 
 	// SFTP server stdout -> Channel - completes when server exits
 	go func() {
-		io.Copy(channel, stream)
+		_, _ = io.Copy(channel, stream)
 		close(outputDone)
 	}()
 
 	// Wait for sftp-server process to exit
-	stream.Wait(ctx)
+	_, _ = stream.Wait(ctx)
 
 	// Wait for output to drain
 	<-outputDone
@@ -532,18 +533,18 @@ func (h *sessionHandler) handleDirectTCPIP(newChannel ssh.NewChannel) {
 
 	// Channel -> socat stdin (to remote TCP)
 	go func() {
-		io.Copy(stream, channel)
-		stream.CloseWrite()
+		_, _ = io.Copy(stream, channel)
+		_ = stream.CloseWrite()
 	}()
 
 	// socat stdout (from remote TCP) -> Channel
 	go func() {
-		io.Copy(channel, stream)
+		_, _ = io.Copy(channel, stream)
 		close(outputDone)
 	}()
 
 	// Wait for socat to exit (connection closed from either end)
-	stream.Wait(ctx)
+	_, _ = stream.Wait(ctx)
 
 	// Wait for output to drain
 	<-outputDone
@@ -556,7 +557,7 @@ func sendExitStatus(channel ssh.Channel, code uint32) {
 	payload[1] = byte(code >> 16)
 	payload[2] = byte(code >> 8)
 	payload[3] = byte(code)
-	channel.SendRequest("exit-status", false, payload)
+	_, _ = channel.SendRequest("exit-status", false, payload)
 }
 
 // PTY request parsing

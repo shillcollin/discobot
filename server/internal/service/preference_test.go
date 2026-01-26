@@ -19,7 +19,7 @@ func newMockPreferenceStore() *mockPreferenceStore {
 	}
 }
 
-func (m *mockPreferenceStore) ListUserPreferences(ctx context.Context, userID string) ([]*model.UserPreference, error) {
+func (m *mockPreferenceStore) ListUserPreferences(_ context.Context, userID string) ([]*model.UserPreference, error) {
 	userPrefs, ok := m.preferences[userID]
 	if !ok {
 		return []*model.UserPreference{}, nil
@@ -32,7 +32,7 @@ func (m *mockPreferenceStore) ListUserPreferences(ctx context.Context, userID st
 	return result, nil
 }
 
-func (m *mockPreferenceStore) GetUserPreference(ctx context.Context, userID, key string) (*model.UserPreference, error) {
+func (m *mockPreferenceStore) GetUserPreference(_ context.Context, userID, key string) (*model.UserPreference, error) {
 	userPrefs, ok := m.preferences[userID]
 	if !ok {
 		return nil, errNotFound
@@ -44,7 +44,7 @@ func (m *mockPreferenceStore) GetUserPreference(ctx context.Context, userID, key
 	return pref, nil
 }
 
-func (m *mockPreferenceStore) SetUserPreference(ctx context.Context, pref *model.UserPreference) error {
+func (m *mockPreferenceStore) SetUserPreference(_ context.Context, pref *model.UserPreference) error {
 	if m.preferences[pref.UserID] == nil {
 		m.preferences[pref.UserID] = make(map[string]*model.UserPreference)
 	}
@@ -62,7 +62,7 @@ func (m *mockPreferenceStore) SetUserPreference(ctx context.Context, pref *model
 	return nil
 }
 
-func (m *mockPreferenceStore) DeleteUserPreference(ctx context.Context, userID, key string) error {
+func (m *mockPreferenceStore) DeleteUserPreference(_ context.Context, userID, key string) error {
 	userPrefs, ok := m.preferences[userID]
 	if !ok {
 		return errNotFound
@@ -80,14 +80,6 @@ var errNotFound = &notFoundError{}
 type notFoundError struct{}
 
 func (e *notFoundError) Error() string { return "record not found" }
-
-// preferenceStoreInterface is the subset of store.Store needed for preferences
-type preferenceStoreInterface interface {
-	ListUserPreferences(ctx context.Context, userID string) ([]*model.UserPreference, error)
-	GetUserPreference(ctx context.Context, userID, key string) (*model.UserPreference, error)
-	SetUserPreference(ctx context.Context, pref *model.UserPreference) error
-	DeleteUserPreference(ctx context.Context, userID, key string) error
-}
 
 func TestPreferenceService_ListPreferences_Empty(t *testing.T) {
 	store := newMockPreferenceStore()

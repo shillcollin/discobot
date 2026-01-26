@@ -305,7 +305,7 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 			})
 
 			// Add DOCKER_HOST env var to point to the socket
-			env = append(env, "DOCKER_HOST=unix:///var/run/docker.sock")
+			containerConfig.Env = append(containerConfig.Env, "DOCKER_HOST=unix:///var/run/docker.sock")
 		}
 	}
 

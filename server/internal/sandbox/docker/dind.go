@@ -15,6 +15,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
+
 	"github.com/obot-platform/octobot/server/internal/config"
 )
 
@@ -301,7 +302,6 @@ func (m *DinDManager) waitForReady(ctx context.Context, containerID string) erro
 	return fmt.Errorf("DinD daemon did not become ready within timeout")
 }
 
-
 // RecoverDaemons ensures DinD daemons are running for any projects that have
 // active session containers. This reconciles the DinD state on server restart.
 func (m *DinDManager) RecoverDaemons(ctx context.Context) error {
@@ -393,12 +393,27 @@ func (m *DinDManager) StopAll(ctx context.Context) error {
 	return nil
 }
 
+// DaemonState holds the exported state of a DinD daemon.
+type DaemonState struct {
+	ContainerID string
+	VolumeName  string
+	Ready       bool
+}
+
 // GetDaemonState returns the state of a project's DinD daemon.
 // Returns nil if no daemon exists for the project.
-func (m *DinDManager) GetDaemonState(projectID string) *dindState {
+func (m *DinDManager) GetDaemonState(projectID string) *DaemonState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.daemons[projectID]
+	state := m.daemons[projectID]
+	if state == nil {
+		return nil
+	}
+	return &DaemonState{
+		ContainerID: state.containerID,
+		VolumeName:  state.volumeName,
+		Ready:       state.ready,
+	}
 }
 
 // Watch monitors Docker events for DinD container changes.
