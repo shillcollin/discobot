@@ -47,22 +47,36 @@ function saveHistoryToStorage(history: string[]): void {
 }
 
 function getDraft(sessionId: string | null | undefined): string {
-	if (typeof window === "undefined" || !sessionId) return "";
+	if (typeof window === "undefined") return "";
+	// Use "new" as the key for drafts without a session
+	const key = sessionId || "new";
 	try {
-		return localStorage.getItem(`${DRAFT_PREFIX}${sessionId}`) || "";
+		return localStorage.getItem(`${DRAFT_PREFIX}${key}`) || "";
 	} catch {
 		return "";
 	}
 }
 
 function saveDraft(sessionId: string | null | undefined, value: string): void {
-	if (typeof window === "undefined" || !sessionId) return;
+	if (typeof window === "undefined") return;
+	// Use "new" as the key for drafts without a session
+	const key = sessionId || "new";
 	try {
 		if (value) {
-			localStorage.setItem(`${DRAFT_PREFIX}${sessionId}`, value);
+			localStorage.setItem(`${DRAFT_PREFIX}${key}`, value);
 		} else {
-			localStorage.removeItem(`${DRAFT_PREFIX}${sessionId}`);
+			localStorage.removeItem(`${DRAFT_PREFIX}${key}`);
 		}
+	} catch {
+		// Ignore storage errors
+	}
+}
+
+function clearDraft(sessionId: string | null | undefined): void {
+	if (typeof window === "undefined") return;
+	const key = sessionId || "new";
+	try {
+		localStorage.removeItem(`${DRAFT_PREFIX}${key}`);
 	} catch {
 		// Ignore storage errors
 	}
@@ -161,6 +175,10 @@ export function usePromptHistory({
 	// Load draft when sessionId changes
 	useEffect(() => {
 		if (prevSessionRef.current !== sessionId) {
+			// When transitioning from null to a real session, clear the "new" draft
+			if (prevSessionRef.current === null && sessionId !== null) {
+				clearDraft(null);
+			}
 			prevSessionRef.current = sessionId;
 			const draft = getDraft(sessionId);
 			if (textareaRef.current) {
@@ -172,7 +190,7 @@ export function usePromptHistory({
 	// Save draft on input (debounced) - attach to textarea
 	useEffect(() => {
 		const textarea = textareaRef.current;
-		if (!textarea || !sessionId) return;
+		if (!textarea) return;
 
 		const handleInput = () => {
 			if (draftTimerRef.current) {
@@ -194,7 +212,7 @@ export function usePromptHistory({
 
 	// Load initial draft on mount
 	useEffect(() => {
-		if (textareaRef.current && sessionId) {
+		if (textareaRef.current) {
 			const draft = getDraft(sessionId);
 			if (draft) {
 				textareaRef.current.value = draft;
@@ -247,9 +265,7 @@ export function usePromptHistory({
 				return updated;
 			});
 			// Also clear draft after successful submit
-			if (sessionId) {
-				saveDraft(sessionId, "");
-			}
+			saveDraft(sessionId, "");
 		},
 		[sessionId],
 	);
