@@ -62,29 +62,6 @@ function IDEContent() {
 		[setRightSidebarWidth],
 	);
 
-	// Track left sidebar state before maximize to restore it
-	const leftSidebarBeforeMaximize = React.useRef<boolean | null>(null);
-	// Use ref to read leftSidebarOpen without subscribing to changes
-	const leftSidebarOpenRef = React.useRef(leftSidebarOpen);
-	leftSidebarOpenRef.current = leftSidebarOpen;
-
-	const handleDiffMaximizeChange = React.useCallback(
-		(isMaximized: boolean) => {
-			if (isMaximized) {
-				// Save left sidebar state and close it (right sidebar stays untouched)
-				leftSidebarBeforeMaximize.current = leftSidebarOpenRef.current;
-				setLeftSidebarOpen(false);
-			} else {
-				// Restore left sidebar state
-				if (leftSidebarBeforeMaximize.current !== null) {
-					setLeftSidebarOpen(leftSidebarBeforeMaximize.current);
-					leftSidebarBeforeMaximize.current = null;
-				}
-			}
-		},
-		[setLeftSidebarOpen],
-	);
-
 	// Components render progressively - each handles its own loading state
 	return (
 		<div className="h-screen flex flex-col bg-background">
@@ -104,7 +81,6 @@ function IDEContent() {
 					rightSidebarWidth={rightSidebarWidth}
 					onToggleRightSidebar={() => setRightSidebarOpen(!rightSidebarOpen)}
 					onRightSidebarResize={handleRightSidebarResize}
-					onDiffMaximizeChange={handleDiffMaximizeChange}
 				/>
 			</div>
 

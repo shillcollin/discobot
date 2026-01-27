@@ -1,6 +1,14 @@
 "use client";
 
-import { Bot, Check, Clock, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
+import {
+	Bot,
+	Check,
+	Clock,
+	Loader2,
+	MoreHorizontal,
+	Plus,
+	X,
+} from "lucide-react";
 import * as React from "react";
 import { IconRenderer } from "@/components/ide/icon-renderer";
 import { getSessionDisplayName } from "@/components/ide/session-name";
@@ -22,13 +30,13 @@ import {
 } from "@/lib/api-constants";
 import type { Session } from "@/lib/api-types";
 import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
+import { useAgentTypes } from "@/lib/hooks/use-agent-types";
+import { useAgents } from "@/lib/hooks/use-agents";
 import {
 	useDeleteSession,
 	useSession,
 	useSessions,
 } from "@/lib/hooks/use-sessions";
-import { useAgents } from "@/lib/hooks/use-agents";
-import { useAgentTypes } from "@/lib/hooks/use-agent-types";
 import {
 	getSessionStatusColor,
 	getSessionStatusIndicator,
@@ -288,9 +296,7 @@ function SessionRow({
 					</div>
 				) : (
 					<>
-						<h3 className="font-medium break-words">
-							{displayName}
-						</h3>
+						<h3 className="font-medium break-words">{displayName}</h3>
 						{session.description && (
 							<p className="text-sm text-muted-foreground truncate mt-0.5">
 								{session.description}

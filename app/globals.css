@@ -20,6 +20,16 @@
 	animation: spin 1s linear infinite;
 }
 
+/* Hide scrollbars while allowing scrolling */
+.scrollbar-none {
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+	display: none;
+}
+
 /* IDE-inspired dark theme with neutral grays */
 :root {
 	--background: oklch(0.98 0 0);
