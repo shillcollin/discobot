@@ -8,13 +8,14 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { usePreferences } from "./use-preferences";
 
 // ============================================================================
 // localStorage Helpers
 // ============================================================================
 
 const HISTORY_KEY = "octobot:prompt-history";
-const PINNED_KEY = "octobot:prompt-history-pinned";
+const PINNED_PREFERENCE_KEY = "prompts.pinned";
 const DRAFT_PREFIX = "octobot-prompt-draft-";
 const MAX_HISTORY_SIZE = 100;
 export const MAX_VISIBLE_HISTORY = 20;
@@ -35,36 +36,11 @@ function loadHistory(): string[] {
 	return [];
 }
 
-function loadPinnedPrompts(): string[] {
-	if (typeof window === "undefined") return [];
-	try {
-		const stored = localStorage.getItem(PINNED_KEY);
-		if (stored) {
-			const parsed = JSON.parse(stored);
-			if (Array.isArray(parsed)) {
-				return parsed.filter((item) => typeof item === "string");
-			}
-		}
-	} catch {
-		// Ignore parse errors
-	}
-	return [];
-}
-
 function saveHistoryToStorage(history: string[]): void {
 	if (typeof window === "undefined") return;
 	try {
 		const trimmed = history.slice(0, MAX_HISTORY_SIZE);
 		localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
-	} catch {
-		// Ignore storage errors
-	}
-}
-
-function savePinnedPrompts(pinned: string[]): void {
-	if (typeof window === "undefined") return;
-	try {
-		localStorage.setItem(PINNED_KEY, JSON.stringify(pinned));
 	} catch {
 		// Ignore storage errors
 	}
@@ -138,14 +114,45 @@ export function usePromptHistory({
 	textareaRef,
 	sessionId,
 }: UsePromptHistoryOptions): UsePromptHistoryReturn {
+	// Load preferences to get pinned prompts
+	const {
+		getPreference,
+		setPreference,
+		isLoading: prefsLoading,
+	} = usePreferences();
+
+	// Parse pinned prompts from preferences
+	const loadPinnedFromPreferences = useCallback((): string[] => {
+		if (prefsLoading) return [];
+		const stored = getPreference(PINNED_PREFERENCE_KEY);
+		if (!stored) return [];
+		try {
+			const parsed = JSON.parse(stored);
+			if (Array.isArray(parsed)) {
+				return parsed.filter((item) => typeof item === "string");
+			}
+		} catch {
+			// Ignore parse errors
+		}
+		return [];
+	}, [getPreference, prefsLoading]);
+
 	// History state
 	const [history, setHistory] = useState<string[]>(() => loadHistory());
 	const [pinnedPrompts, setPinnedPrompts] = useState<string[]>(() =>
-		loadPinnedPrompts(),
+		loadPinnedFromPreferences(),
 	);
 	const [historyIndex, setHistoryIndex] = useState(-1);
 	const [isPinnedSelection, setIsPinnedSelection] = useState(false);
 	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+	// Sync pinned prompts from preferences when they change
+	useEffect(() => {
+		if (!prefsLoading) {
+			const loaded = loadPinnedFromPreferences();
+			setPinnedPrompts(loaded);
+		}
+	}, [prefsLoading, loadPinnedFromPreferences]);
 
 	// Draft persistence refs (avoid re-renders on typing)
 	const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -248,25 +255,41 @@ export function usePromptHistory({
 	);
 
 	// Pin a prompt
-	const pinPrompt = useCallback((prompt: string) => {
-		if (!prompt.trim()) return;
-		setPinnedPrompts((prev) => {
-			// Don't add duplicates
-			if (prev.includes(prompt)) return prev;
-			const updated = [...prev, prompt];
-			savePinnedPrompts(updated);
-			return updated;
-		});
-	}, []);
+	const pinPrompt = useCallback(
+		(prompt: string) => {
+			if (!prompt.trim()) return;
+			setPinnedPrompts((prev) => {
+				// Don't add duplicates
+				if (prev.includes(prompt)) return prev;
+				const updated = [...prev, prompt];
+				// Save to preferences API
+				setPreference(PINNED_PREFERENCE_KEY, JSON.stringify(updated)).catch(
+					(err) => {
+						console.error("Failed to save pinned prompts:", err);
+					},
+				);
+				return updated;
+			});
+		},
+		[setPreference],
+	);
 
 	// Unpin a prompt
-	const unpinPrompt = useCallback((prompt: string) => {
-		setPinnedPrompts((prev) => {
-			const updated = prev.filter((p) => p !== prompt);
-			savePinnedPrompts(updated);
-			return updated;
-		});
-	}, []);
+	const unpinPrompt = useCallback(
+		(prompt: string) => {
+			setPinnedPrompts((prev) => {
+				const updated = prev.filter((p) => p !== prompt);
+				// Save to preferences API
+				setPreference(PINNED_PREFERENCE_KEY, JSON.stringify(updated)).catch(
+					(err) => {
+						console.error("Failed to save pinned prompts:", err);
+					},
+				);
+				return updated;
+			});
+		},
+		[setPreference],
+	);
 
 	// Check if a prompt is pinned
 	const isPinned = useCallback(

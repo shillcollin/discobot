@@ -23,7 +23,6 @@ class LocalStorageMock {
 }
 
 const HISTORY_KEY = "octobot:prompt-history";
-const PINNED_KEY = "octobot:prompt-history-pinned";
 const DRAFT_PREFIX = "octobot-prompt-draft-";
 const MAX_HISTORY_SIZE = 100;
 
@@ -70,25 +69,6 @@ describe("usePromptHistory localStorage helpers", () => {
 		});
 	});
 
-	describe("loadPinnedPrompts", () => {
-		it("should load pinned prompts from localStorage", () => {
-			const mockPinned = ["pinned 1", "pinned 2"];
-			localStorageMock.setItem(PINNED_KEY, JSON.stringify(mockPinned));
-
-			const stored = localStorageMock.getItem(PINNED_KEY);
-			const parsed = stored ? JSON.parse(stored) : [];
-
-			assert.deepStrictEqual(parsed, mockPinned);
-		});
-
-		it("should return empty array if no pinned prompts exist", () => {
-			const stored = localStorageMock.getItem(PINNED_KEY);
-			const parsed = stored ? JSON.parse(stored) : [];
-
-			assert.deepStrictEqual(parsed, []);
-		});
-	});
-
 	describe("saveHistoryToStorage", () => {
 		it("should save history to localStorage", () => {
 			const mockHistory = ["prompt 1", "prompt 2", "prompt 3"];
@@ -107,26 +87,6 @@ describe("usePromptHistory localStorage helpers", () => {
 			const parsed = stored ? JSON.parse(stored) : [];
 
 			assert.strictEqual(parsed.length, MAX_HISTORY_SIZE);
-		});
-	});
-
-	describe("savePinnedPrompts", () => {
-		it("should save pinned prompts to localStorage", () => {
-			const mockPinned = ["pinned 1", "pinned 2"];
-			localStorageMock.setItem(PINNED_KEY, JSON.stringify(mockPinned));
-
-			const stored = localStorageMock.getItem(PINNED_KEY);
-			assert.strictEqual(stored, JSON.stringify(mockPinned));
-		});
-
-		it("should allow unlimited pinned prompts", () => {
-			const largePinned = Array.from({ length: 150 }, (_, i) => `pinned ${i}`);
-			localStorageMock.setItem(PINNED_KEY, JSON.stringify(largePinned));
-
-			const stored = localStorageMock.getItem(PINNED_KEY);
-			const parsed = stored ? JSON.parse(stored) : [];
-
-			assert.strictEqual(parsed.length, 150);
 		});
 	});
 
@@ -191,7 +151,7 @@ describe("usePromptHistory hook logic", () => {
 		});
 
 		it("should not add empty prompts", () => {
-			const history: string[] = [];
+			const _history: string[] = [];
 			const prompt = "   ";
 
 			if (!prompt.trim()) {
@@ -214,6 +174,7 @@ describe("usePromptHistory hook logic", () => {
 	});
 
 	describe("pinPrompt", () => {
+		// Note: Pinned prompts are now stored in user preferences API, not localStorage
 		it("should add prompt to pinned list", () => {
 			const pinnedPrompts: string[] = [];
 			const prompt = "pin this";
@@ -292,7 +253,7 @@ describe("usePromptHistory hook logic", () => {
 	describe("keyboard navigation", () => {
 		it("should start with first pinned item when opening history", () => {
 			const pinnedPrompts = ["pin 1", "pin 2"];
-			const history = ["recent 1", "recent 2"];
+			const _history = ["recent 1", "recent 2"];
 			const pinnedLength = pinnedPrompts.length;
 
 			// Simulate opening history

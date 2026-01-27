@@ -294,7 +294,7 @@ describe("PromptHistoryDropdown", () => {
 		);
 
 		const hint = container.textContent;
-		assert.ok(hint && hint.includes("to navigate"));
+		assert.ok(hint?.includes("to navigate"));
 	});
 
 	it("should apply correct border classes to sections", () => {

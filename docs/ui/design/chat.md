@@ -167,8 +167,9 @@ Users can pin frequently-used prompts to keep them easily accessible:
 
 - **Pin/Unpin**: Hover over any prompt to reveal a pin icon
 - **Pinned Section**: Pinned prompts appear in a separate section at the bottom of the dropdown (closest to input)
-- **Persistent**: Pinned prompts are saved separately and never removed
+- **Persistent**: Pinned prompts are saved to user preferences API and synced across devices
 - **Visual Indicator**: Pinned icons are filled, unpinned icons are outlined
+- **No Limit**: Unlike history (100 items), pinned prompts have no size limit
 
 #### Keyboard Navigation
 
@@ -243,11 +244,25 @@ addToHistory(message.text)
 />
 ```
 
-### LocalStorage Keys
+### Implementation Details
 
+The `usePromptHistory` hook integrates with `usePreferences` to persist pinned prompts:
+
+- **On Mount**: Loads pinned prompts from the `prompts.pinned` preference
+- **On Pin**: Saves updated array to preferences API via `setPreference()`
+- **On Unpin**: Removes prompt and saves to preferences API
+- **Sync**: Automatically syncs when preferences change (e.g., from another tab/device)
+
+Pinned prompts are stored as a JSON-stringified array of strings in the user preferences database.
+
+### Storage
+
+#### LocalStorage
 - `octobot:prompt-history` - Recent prompt history (max 100 items)
-- `octobot:prompt-history-pinned` - Pinned prompts (unlimited)
 - `octobot-prompt-draft-{sessionId}` - Per-session draft persistence
+
+#### User Preferences API
+- `prompts.pinned` - Pinned prompts (stored as JSON array, unlimited size, synced across devices)
 
 ## Session Creation
 

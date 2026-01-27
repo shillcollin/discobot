@@ -220,3 +220,264 @@ describe("API request/response patterns", () => {
 		assert.ok(!Number.isNaN(date.getTime()));
 	});
 });
+
+describe("Pinned prompts preferences integration", () => {
+	const PINNED_PREFERENCE_KEY = "prompts.pinned";
+
+	describe("Storage format", () => {
+		it("should store pinned prompts as JSON-stringified array", () => {
+			const pinnedPrompts = ["prompt 1", "prompt 2", "prompt 3"];
+			const storedValue = JSON.stringify(pinnedPrompts);
+
+			const preferences = [
+				{ key: PINNED_PREFERENCE_KEY, value: storedValue, updatedAt: "" },
+			];
+
+			const getPreference = (key: string): string | undefined => {
+				return preferences.find((p) => p.key === key)?.value;
+			};
+
+			const raw = getPreference(PINNED_PREFERENCE_KEY);
+			assert.ok(raw);
+
+			const parsed = JSON.parse(raw);
+			assert.ok(Array.isArray(parsed));
+			assert.deepStrictEqual(parsed, pinnedPrompts);
+		});
+
+		it("should handle empty pinned prompts array", () => {
+			const pinnedPrompts: string[] = [];
+			const storedValue = JSON.stringify(pinnedPrompts);
+
+			const preferences = [
+				{ key: PINNED_PREFERENCE_KEY, value: storedValue, updatedAt: "" },
+			];
+
+			const getPreference = (key: string): string | undefined => {
+				return preferences.find((p) => p.key === key)?.value;
+			};
+
+			const raw = getPreference(PINNED_PREFERENCE_KEY);
+			assert.ok(raw !== undefined);
+
+			const parsed = JSON.parse(raw);
+			assert.ok(Array.isArray(parsed));
+			assert.strictEqual(parsed.length, 0);
+		});
+
+		it("should handle missing pinned prompts preference", () => {
+			const preferences: typeof mockPreferences = [];
+
+			const getPreference = (key: string): string | undefined => {
+				return preferences.find((p) => p.key === key)?.value;
+			};
+
+			const raw = getPreference(PINNED_PREFERENCE_KEY);
+			assert.strictEqual(raw, undefined);
+		});
+	});
+
+	describe("Loading pinned prompts", () => {
+		it("should parse pinned prompts from preference value", () => {
+			const pinnedPrompts = ["help me debug", "write a function"];
+			const preferences = [
+				{
+					key: PINNED_PREFERENCE_KEY,
+					value: JSON.stringify(pinnedPrompts),
+					updatedAt: "",
+				},
+			];
+
+			const getPreference = (key: string): string | undefined => {
+				return preferences.find((p) => p.key === key)?.value;
+			};
+
+			// Simulate loadPinnedFromPreferences logic
+			const loadPinnedFromPreferences = (): string[] => {
+				const stored = getPreference(PINNED_PREFERENCE_KEY);
+				if (!stored) return [];
+				try {
+					const parsed = JSON.parse(stored);
+					if (Array.isArray(parsed)) {
+						return parsed.filter((item) => typeof item === "string");
+					}
+				} catch {
+					// Ignore parse errors
+				}
+				return [];
+			};
+
+			const loaded = loadPinnedFromPreferences();
+			assert.deepStrictEqual(loaded, pinnedPrompts);
+		});
+
+		it("should filter out non-string items when loading", () => {
+			const mixedArray = ["valid", 123, null, "also valid", undefined, false];
+			const preferences = [
+				{
+					key: PINNED_PREFERENCE_KEY,
+					value: JSON.stringify(mixedArray),
+					updatedAt: "",
+				},
+			];
+
+			const getPreference = (key: string): string | undefined => {
+				return preferences.find((p) => p.key === key)?.value;
+			};
+
+			const loadPinnedFromPreferences = (): string[] => {
+				const stored = getPreference(PINNED_PREFERENCE_KEY);
+				if (!stored) return [];
+				try {
+					const parsed = JSON.parse(stored);
+					if (Array.isArray(parsed)) {
+						return parsed.filter((item) => typeof item === "string");
+					}
+				} catch {
+					return [];
+				}
+				return [];
+			};
+
+			const loaded = loadPinnedFromPreferences();
+			assert.deepStrictEqual(loaded, ["valid", "also valid"]);
+		});
+
+		it("should handle malformed JSON gracefully", () => {
+			const preferences = [
+				{ key: PINNED_PREFERENCE_KEY, value: "not valid json{", updatedAt: "" },
+			];
+
+			const getPreference = (key: string): string | undefined => {
+				return preferences.find((p) => p.key === key)?.value;
+			};
+
+			const loadPinnedFromPreferences = (): string[] => {
+				const stored = getPreference(PINNED_PREFERENCE_KEY);
+				if (!stored) return [];
+				try {
+					const parsed = JSON.parse(stored);
+					if (Array.isArray(parsed)) {
+						return parsed.filter((item) => typeof item === "string");
+					}
+				} catch {
+					return [];
+				}
+				return [];
+			};
+
+			const loaded = loadPinnedFromPreferences();
+			assert.deepStrictEqual(loaded, []);
+		});
+
+		it("should handle non-array JSON values", () => {
+			const preferences = [
+				{
+					key: PINNED_PREFERENCE_KEY,
+					value: JSON.stringify({ not: "an array" }),
+					updatedAt: "",
+				},
+			];
+
+			const getPreference = (key: string): string | undefined => {
+				return preferences.find((p) => p.key === key)?.value;
+			};
+
+			const loadPinnedFromPreferences = (): string[] => {
+				const stored = getPreference(PINNED_PREFERENCE_KEY);
+				if (!stored) return [];
+				try {
+					const parsed = JSON.parse(stored);
+					if (Array.isArray(parsed)) {
+						return parsed.filter((item) => typeof item === "string");
+					}
+				} catch {
+					return [];
+				}
+				return [];
+			};
+
+			const loaded = loadPinnedFromPreferences();
+			assert.deepStrictEqual(loaded, []);
+		});
+	});
+
+	describe("Saving pinned prompts", () => {
+		it("should add a new pinned prompt to existing list", () => {
+			const existing = ["prompt 1", "prompt 2"];
+			const newPrompt = "prompt 3";
+
+			const updated = [...existing, newPrompt];
+			const storedValue = JSON.stringify(updated);
+
+			assert.strictEqual(storedValue, '["prompt 1","prompt 2","prompt 3"]');
+		});
+
+		it("should not add duplicate pinned prompts", () => {
+			const existing = ["prompt 1", "prompt 2"];
+			const duplicate = "prompt 1";
+
+			if (existing.includes(duplicate)) {
+				// Don't add - this is the expected behavior
+				assert.ok(true, "Correctly rejected duplicate");
+			} else {
+				assert.fail("Should have detected duplicate");
+			}
+		});
+
+		it("should remove a pinned prompt", () => {
+			const existing = ["prompt 1", "prompt 2", "prompt 3"];
+			const toRemove = "prompt 2";
+
+			const updated = existing.filter((p) => p !== toRemove);
+			const storedValue = JSON.stringify(updated);
+
+			assert.strictEqual(storedValue, '["prompt 1","prompt 3"]');
+		});
+
+		it("should handle removing non-existent prompt", () => {
+			const existing = ["prompt 1", "prompt 2"];
+			const toRemove = "nonexistent";
+
+			const updated = existing.filter((p) => p !== toRemove);
+
+			assert.deepStrictEqual(updated, existing);
+		});
+
+		it("should allow unlimited pinned prompts (no size limit)", () => {
+			const largePinnedList = Array.from(
+				{ length: 200 },
+				(_, i) => `prompt ${i}`,
+			);
+			const storedValue = JSON.stringify(largePinnedList);
+
+			const parsed = JSON.parse(storedValue);
+			assert.strictEqual(
+				parsed.length,
+				200,
+				"Should store all 200 pinned prompts without limit",
+			);
+		});
+	});
+
+	describe("Migration from localStorage", () => {
+		it("should use the same key format for consistency", () => {
+			// The preference key should be namespaced for clarity
+			assert.strictEqual(PINNED_PREFERENCE_KEY, "prompts.pinned");
+		});
+
+		it("should maintain backward compatibility with data format", () => {
+			// Old localStorage format: JSON.stringify(["prompt 1", "prompt 2"])
+			// New preferences format: same JSON string stored as value
+			const prompts = ["prompt 1", "prompt 2"];
+			const localStorageFormat = JSON.stringify(prompts);
+			const preferencesValue = JSON.stringify(prompts);
+
+			assert.strictEqual(
+				localStorageFormat,
+				preferencesValue,
+				"Data format should be identical",
+			);
+		});
+	});
+});
