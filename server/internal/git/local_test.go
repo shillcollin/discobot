@@ -656,7 +656,11 @@ func TestCommit(t *testing.T) {
 		provider, _ := NewLocalProvider(baseDir)
 		sourceRepo := createTestRepo(t)
 
-		provider.EnsureWorkspace(ctx, "project1", "ws1", sourceRepo, "")
+		workDir, _, _ := provider.EnsureWorkspace(ctx, "project1", "ws1", sourceRepo, "")
+		// Configure git user for the workspace to avoid "Committer identity unknown" error
+		runGit(t, workDir, "config", "user.email", "committer@example.com")
+		runGit(t, workDir, "config", "user.name", "Test Committer")
+
 		provider.WriteFile(ctx, "ws1", "new.txt", []byte("hello"))
 		provider.Stage(ctx, "ws1", []string{"new.txt"})
 
@@ -837,6 +841,9 @@ func TestApplyPatches(t *testing.T) {
 		sourceRepo := createTestRepo(t)
 
 		workDir, _, _ := provider.EnsureWorkspace(ctx, "project1", "ws1", sourceRepo, "")
+		// Configure git user for the workspace to avoid "Committer identity unknown" error
+		runGit(t, workDir, "config", "user.email", "committer@example.com")
+		runGit(t, workDir, "config", "user.name", "Test Committer")
 
 		// Get initial commit SHA
 		initialCommit := strings.TrimSpace(runGit(t, workDir, "rev-parse", "HEAD"))
@@ -901,6 +908,10 @@ func TestApplyPatches(t *testing.T) {
 		sourceRepo := createTestRepo(t)
 
 		workDir, _, _ := provider.EnsureWorkspace(ctx, "project1", "ws1", sourceRepo, "")
+		// Configure git user for the workspace to avoid "Committer identity unknown" error
+		runGit(t, workDir, "config", "user.email", "committer@example.com")
+		runGit(t, workDir, "config", "user.name", "Test Committer")
+
 		initialCommit := strings.TrimSpace(runGit(t, workDir, "rev-parse", "HEAD"))
 
 		// Create patches with multiple commits
@@ -1051,6 +1062,10 @@ func TestApplyPatches(t *testing.T) {
 		sourceRepo := createTestRepo(t)
 
 		workDir, _, _ := provider.EnsureWorkspace(ctx, "project1", "ws1", sourceRepo, "")
+		// Configure git user for the workspace to avoid "Committer identity unknown" error
+		runGit(t, workDir, "config", "user.email", "committer@example.com")
+		runGit(t, workDir, "config", "user.name", "Test Committer")
+
 		initialCommit := strings.TrimSpace(runGit(t, workDir, "rev-parse", "HEAD"))
 
 		// Create a patch with specific author info
