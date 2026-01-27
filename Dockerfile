@@ -134,6 +134,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fuse3 \
     git \
     iptables \
+    psmisc \
     rsync \
     socat \
     sqlite3 \
