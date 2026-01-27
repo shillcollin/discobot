@@ -905,3 +905,98 @@ func (h *trackingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}
 }
+
+// TestPerformCommit_SandboxNotRunning tests that the commit job reconciles (starts)
+// the sandbox when it's not running instead of failing immediately.
+func TestPerformCommit_SandboxNotRunning(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.cleanup()
+
+	project := env.createTestProject(t)
+	agent := env.createTestAgent(t, project.ID)
+	workspace, initialCommit := env.createTestWorkspace(t, project.ID)
+	session := env.createTestSession(t, project.ID, workspace.ID, agent.ID, initialCommit)
+
+	// Set up mock handler to return patches
+	handler := newMockHandler()
+	handler.commitsResponse = &sandboxapi.CommitsResponse{
+		Patches: `From abc123 Mon Sep 17 00:00:00 2001
+From: Test <test@example.com>
+Date: Mon, 1 Jan 2024 00:00:00 +0000
+Subject: Test commit
+
+---
+ test.txt | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/test.txt b/test.txt
+new file mode 100644
+index 0000000..abc123
+--- /dev/null
++++ b/test.txt
+@@ -0,0 +1 @@
++test content
+--
+`,
+		CommitCount: 1,
+	}
+	env.mockSandbox.HTTPHandler = handler
+
+	// Create sandbox but DON'T start it - simulating the scenario from the bug report
+	_, err := env.mockSandbox.Create(context.Background(), session.ID, sandbox.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create sandbox: %v", err)
+	}
+
+	// Verify sandbox is not running
+	sb, err := env.mockSandbox.Get(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("Failed to get sandbox info: %v", err)
+	}
+	if sb.Status == sandbox.StatusRunning {
+		t.Fatal("Sandbox should not be running at start of test")
+	}
+
+	// Create session service
+	sessionSvc := NewSessionService(env.store, env.gitService, nil, env.mockSandbox, env.eventBroker)
+
+	// Run PerformCommit - should reconcile (start) the sandbox and complete successfully
+	err = sessionSvc.PerformCommit(context.Background(), project.ID, session.ID)
+	if err != nil {
+		t.Fatalf("PerformCommit failed: %v", err)
+	}
+
+	// Verify the sandbox was started during reconciliation
+	sb, err = env.mockSandbox.Get(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("Failed to get sandbox info after commit: %v", err)
+	}
+	if sb.Status != sandbox.StatusRunning {
+		t.Errorf("Expected sandbox to be running after reconciliation, got status: %s", sb.Status)
+	}
+
+	// Verify session completed successfully
+	updatedSession, err := env.store.GetSessionByID(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("Failed to get session: %v", err)
+	}
+
+	if updatedSession.CommitStatus != model.CommitStatusCompleted {
+		if updatedSession.CommitError != nil {
+			t.Errorf("Expected commit status %s, got %s with error: %s",
+				model.CommitStatusCompleted, updatedSession.CommitStatus, *updatedSession.CommitError)
+		} else {
+			t.Errorf("Expected commit status %s, got %s",
+				model.CommitStatusCompleted, updatedSession.CommitStatus)
+		}
+	}
+
+	if updatedSession.AppliedCommit == nil || *updatedSession.AppliedCommit == "" {
+		t.Error("Expected appliedCommit to be set")
+	}
+
+	// Verify patches were applied
+	if handler.getCommitsRequestCount() == 0 {
+		t.Error("Expected at least one commits request")
+	}
+}

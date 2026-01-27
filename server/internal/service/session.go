@@ -15,6 +15,7 @@ import (
 	"github.com/obot-platform/octobot/server/internal/git"
 	"github.com/obot-platform/octobot/server/internal/model"
 	"github.com/obot-platform/octobot/server/internal/sandbox"
+	"github.com/obot-platform/octobot/server/internal/sandbox/sandboxapi"
 	"github.com/obot-platform/octobot/server/internal/store"
 )
 
@@ -737,7 +738,12 @@ func (s *SessionService) tryApplyExistingPatches(ctx context.Context, projectID 
 	}
 
 	log.Printf("Session %s: checking if agent has existing patches for commit %s", sess.ID, *sess.BaseCommit)
-	commitsResp, err := s.sandboxClient.GetCommits(ctx, sess.ID, *sess.BaseCommit)
+
+	// Wrap the GetCommits call with sandbox reconciliation
+	commitsResp, err := withSessionSandboxReconciliation(ctx, s, projectID, sess.ID, func() (*sandboxapi.CommitsResponse, error) {
+		return s.sandboxClient.GetCommits(ctx, sess.ID, *sess.BaseCommit)
+	})
+
 	if err != nil {
 		log.Printf("Session %s: no existing patches available (error: %v), continuing with prompt", sess.ID, err)
 		return nil
@@ -771,12 +777,16 @@ func (s *SessionService) sendCommitPrompt(ctx context.Context, projectID string,
 	// Get git user config from the server
 	gitUserName, gitUserEmail := s.gitService.GetUserConfig(ctx)
 
-	// Send with git config in request options
+	// Send with git config in request options - wrapped with sandbox reconciliation
 	opts := &RequestOptions{
 		GitUserName:  gitUserName,
 		GitUserEmail: gitUserEmail,
 	}
-	streamCh, err := s.sandboxClient.SendMessages(ctx, sess.ID, messages, opts)
+
+	streamCh, err := withSessionSandboxReconciliation(ctx, s, projectID, sess.ID, func() (<-chan SSELine, error) {
+		return s.sandboxClient.SendMessages(ctx, sess.ID, messages, opts)
+	})
+
 	if err != nil {
 		s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to send commit message to agent: %v", err))
 		return nil
@@ -807,7 +817,12 @@ func (s *SessionService) fetchAndApplyPatches(ctx context.Context, projectID str
 	}
 
 	log.Printf("Session %s: fetching commits from agent-api (parent=%s)", sess.ID, *sess.BaseCommit)
-	commitsResp, err := s.sandboxClient.GetCommits(ctx, sess.ID, *sess.BaseCommit)
+
+	// Wrap the GetCommits call with sandbox reconciliation
+	commitsResp, err := withSessionSandboxReconciliation(ctx, s, projectID, sess.ID, func() (*sandboxapi.CommitsResponse, error) {
+		return s.sandboxClient.GetCommits(ctx, sess.ID, *sess.BaseCommit)
+	})
+
 	if err != nil {
 		s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to get commits from agent: %v", err))
 		return nil
@@ -858,6 +873,61 @@ func (s *SessionService) setCommitFailed(ctx context.Context, projectID string, 
 		return
 	}
 	s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusFailed)
+}
+
+// reconcileSandbox attempts to start the sandbox for a session.
+func (s *SessionService) reconcileSandbox(ctx context.Context, projectID, sessionID string) error {
+	log.Printf("Reconciling sandbox for session %s during commit", sessionID)
+
+	// Update status to reinitializing
+	if _, err := s.UpdateStatus(ctx, sessionID, model.SessionStatusReinitializing, nil); err != nil {
+		log.Printf("Warning: failed to update session status for %s: %v", sessionID, err)
+	}
+
+	// Emit SSE event for status change
+	if s.eventBroker != nil {
+		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusReinitializing, ""); err != nil {
+			log.Printf("Warning: failed to publish session update event: %v", err)
+		}
+	}
+
+	// Reinitialize the sandbox
+	if err := s.Initialize(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to reinitialize sandbox: %w", err)
+	}
+
+	return nil
+}
+
+// withSessionSandboxReconciliation wraps a sandbox operation with error handling
+// that triggers reconciliation on sandbox unavailable errors, then retries.
+// This is the SessionService equivalent of withSandboxReconciliation in chat.go.
+func withSessionSandboxReconciliation[T any](
+	ctx context.Context,
+	s *SessionService,
+	projectID, sessionID string,
+	operation func() (T, error),
+) (T, error) {
+	result, err := operation()
+	if err == nil {
+		return result, nil
+	}
+
+	// Check if sandbox is unavailable - reconcile and retry
+	if errors.Is(err, sandbox.ErrNotFound) || errors.Is(err, sandbox.ErrNotRunning) || isSandboxUnavailableError(err) {
+		log.Printf("Sandbox unavailable for session %s during commit, reconciling: %v", sessionID, err)
+
+		if reconcileErr := s.reconcileSandbox(ctx, projectID, sessionID); reconcileErr != nil {
+			var zero T
+			return zero, fmt.Errorf("sandbox unavailable and failed to reconcile: %w", reconcileErr)
+		}
+
+		// Retry operation after successful reconciliation
+		return operation()
+	}
+
+	var zero T
+	return zero, err
 }
 
 // buildCommitMessage creates a UIMessage array for the /octobot-commit command.

@@ -264,11 +264,27 @@ The job is designed to handle server restarts safely:
 
 | Error | Result | User Action |
 |-------|--------|-------------|
+| Sandbox not running | Auto-reconcile (start sandbox), retry operation | None - handled automatically |
 | Workspace changed since commit started | `failed` + error message | Click Commit to retry with new baseCommit |
 | Agent-api returns no commits | `failed` + error message | Click Commit to retry |
 | Agent-api parent mismatch | `failed` + error message | Click Commit to retry |
 | Patch application fails | `failed` + error message | Click Commit to retry |
 | Verification fails | `failed` + error message | Click Commit to retry |
+
+### Sandbox Reconciliation
+
+If the sandbox is not running when a commit operation is attempted, the system automatically:
+1. Detects sandbox unavailability errors (`ErrNotRunning`, `ErrNotFound`, or "sandbox not running" messages)
+2. Updates session status to `reinitializing`
+3. Starts the sandbox via `Initialize()`
+4. Retries the original operation
+
+This reconciliation happens transparently at three points in the commit flow:
+- **Optimistic patch check** (`tryApplyExistingPatches`)
+- **Sending commit prompt** (`sendCommitPrompt`)
+- **Fetching patches** (`fetchAndApplyPatches`)
+
+Only if the sandbox fails to start (enters `error` state) will the commit job fail. This ensures commits succeed even if the sandbox was stopped or deleted between sessions.
 
 User can always click Commit again to retry - it starts fresh with a new `baseCommit`.
 

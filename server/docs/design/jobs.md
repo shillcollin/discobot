@@ -10,6 +10,7 @@ This module provides background job processing for async operations like workspa
 | `internal/jobs/queue.go` | Job queue operations |
 | `internal/jobs/workspace_init.go` | Workspace init executor |
 | `internal/jobs/session_init.go` | Session init executor |
+| `internal/jobs/session_commit.go` | Session commit executor |
 | `internal/dispatcher/dispatcher.go` | Job dispatcher |
 | `internal/dispatcher/executor.go` | Executor interface |
 | `internal/dispatcher/limits.go` | Concurrency limits |
@@ -30,6 +31,7 @@ This module provides background job processing for async operations like workspa
 │                                     │    Executors     │        │
 │                                     │  - WorkspaceInit │        │
 │                                     │  - SessionInit   │        │
+│                                     │  - SessionCommit │        │
 │                                     └──────────────────┘        │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -40,6 +42,7 @@ This module provides background job processing for async operations like workspa
 const (
     JobTypeWorkspaceInit = "workspace_init"
     JobTypeSessionInit   = "session_init"
+    JobTypeSessionCommit = "session_commit"
 )
 
 type WorkspaceInitPayload struct {
@@ -48,6 +51,11 @@ type WorkspaceInitPayload struct {
 
 type SessionInitPayload struct {
     SessionID string `json:"sessionId"`
+}
+
+type SessionCommitPayload struct {
+    SessionID string `json:"sessionId"`
+    ProjectID string `json:"projectId"`
 }
 ```
 
@@ -341,6 +349,31 @@ func (e *SessionInitExecutor) Execute(ctx context.Context, job *model.Job) error
     return e.sessionService.Initialize(ctx, payload.SessionID)
 }
 ```
+
+### SessionCommitExecutor
+
+```go
+type SessionCommitExecutor struct {
+    sessionService *service.SessionService
+}
+
+func (e *SessionCommitExecutor) Execute(ctx context.Context, job *model.Job) error {
+    var payload SessionCommitPayload
+    if err := json.Unmarshal(job.Payload, &payload); err != nil {
+        return err
+    }
+
+    return e.sessionService.PerformCommit(ctx, payload.ProjectID, payload.SessionID)
+}
+```
+
+**Sandbox Reconciliation**: The commit executor automatically handles sandbox unavailability. If the sandbox is not running when commit operations are attempted (checking for patches, sending commit prompt, fetching patches), the system will:
+1. Detect the unavailability error
+2. Update session status to `reinitializing`
+3. Start the sandbox via `Initialize()`
+4. Retry the operation
+
+This ensures commits succeed even if the sandbox was stopped or deleted between sessions. Only if the sandbox fails to start will the commit job fail.
 
 ## Job Lifecycle
 
