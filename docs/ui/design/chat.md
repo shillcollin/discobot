@@ -139,6 +139,115 @@ Features:
 - Submit on enter
 - File attachment button
 - Disabled state when loading
+- Prompt history with pin functionality
+
+## Prompt History
+
+The chat interface includes a prompt history dropdown that allows users to access and reuse previous prompts.
+
+### Files
+
+| File | Description |
+|------|-------------|
+| `lib/hooks/use-prompt-history.ts` | Hook managing prompt history state and keyboard navigation |
+| `components/ide/prompt-history-dropdown.tsx` | Dropdown UI component |
+
+### Features
+
+#### History Management
+
+- **Auto-save**: Prompts are automatically saved to localStorage after submission
+- **Deduplication**: Duplicate prompts are not added to history
+- **Size Limit**: History is limited to 100 most recent prompts
+- **Visibility**: Only the 20 most recent prompts are shown in the dropdown
+
+#### Pin Functionality
+
+Users can pin frequently-used prompts to keep them easily accessible:
+
+- **Pin/Unpin**: Hover over any prompt to reveal a pin icon
+- **Pinned Section**: Pinned prompts appear in a separate section at the bottom of the dropdown (closest to input)
+- **Persistent**: Pinned prompts are saved separately and never removed
+- **Visual Indicator**: Pinned icons are filled, unpinned icons are outlined
+
+#### Keyboard Navigation
+
+- **Open**: Press ↑ arrow when cursor is at start of textarea
+- **Navigate**: Use ↑/↓ arrows to move through prompts
+- **Selection Flow**: Pinned prompts → Recent prompts
+- **Select**: Press Enter to use the highlighted prompt
+- **Close**: Press ↓ at first pinned prompt or Escape
+
+#### Layout
+
+```
+┌─────────────────────────────────┐
+│ Prompt history     ↑/↓ navigate │  ← Header
+├─────────────────────────────────┤
+│ Recent                          │  ← Recent label (if pinned exist)
+│ ┌─────────────────────────────┐ │
+│ │ Recent prompt 3             │ │  ← Scrollable section
+│ │ Recent prompt 2             │ │
+│ │ Recent prompt 1        [📌] │ │
+│ └─────────────────────────────┘ │
+├─────────────────────────────────┤
+│ Pinned                          │  ← Pinned label
+│   Pinned prompt 1          [📌] │  ← Fixed section (no scroll)
+│   Pinned prompt 2          [📌] │     Reversed order (newest bottom)
+└─────────────────────────────────┘
+```
+
+### Usage
+
+```typescript
+const {
+  history,
+  pinnedPrompts,
+  historyIndex,
+  isPinnedSelection,
+  isHistoryOpen,
+  setHistoryIndex,
+  onSelectHistory,
+  addToHistory,
+  pinPrompt,
+  unpinPrompt,
+  isPinned,
+  closeHistory,
+  handleKeyDown,
+} = usePromptHistory({
+  textareaRef,
+  sessionId: selectedSessionId,
+})
+
+// Add prompt after submission
+handleSubmit(message)
+addToHistory(message.text)
+
+// Attach keyboard handler to textarea
+<textarea onKeyDown={handleKeyDown} ref={textareaRef} />
+
+// Render dropdown
+<PromptHistoryDropdown
+  history={history}
+  pinnedPrompts={pinnedPrompts}
+  historyIndex={historyIndex}
+  isPinnedSelection={isPinnedSelection}
+  isHistoryOpen={isHistoryOpen}
+  setHistoryIndex={setHistoryIndex}
+  onSelectHistory={onSelectHistory}
+  pinPrompt={pinPrompt}
+  unpinPrompt={unpinPrompt}
+  isPinned={isPinned}
+  textareaRef={textareaRef}
+  closeHistory={closeHistory}
+/>
+```
+
+### LocalStorage Keys
+
+- `octobot:prompt-history` - Recent prompt history (max 100 items)
+- `octobot:prompt-history-pinned` - Pinned prompts (unlimited)
+- `octobot-prompt-draft-{sessionId}` - Per-session draft persistence
 
 ## Session Creation
 

@@ -440,11 +440,16 @@ const ChatInputArea = React.memo(function ChatInputArea({
 
 	const {
 		history,
+		pinnedPrompts,
 		historyIndex,
+		isPinnedSelection,
 		isHistoryOpen,
 		setHistoryIndex,
 		onSelectHistory,
 		addToHistory,
+		pinPrompt,
+		unpinPrompt,
+		isPinned,
 		closeHistory,
 		handleKeyDown: historyKeyDown,
 	} = usePromptHistory({
@@ -477,10 +482,15 @@ const ChatInputArea = React.memo(function ChatInputArea({
 			<div className="relative">
 				<PromptHistoryDropdown
 					history={history}
+					pinnedPrompts={pinnedPrompts}
 					historyIndex={historyIndex}
+					isPinnedSelection={isPinnedSelection}
 					isHistoryOpen={isHistoryOpen}
 					setHistoryIndex={setHistoryIndex}
 					onSelectHistory={onSelectHistory}
+					pinPrompt={pinPrompt}
+					unpinPrompt={unpinPrompt}
+					isPinned={isPinned}
 					textareaRef={textareaRef}
 					closeHistory={closeHistory}
 				/>

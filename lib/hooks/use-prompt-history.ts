@@ -14,6 +14,7 @@ import {
 // ============================================================================
 
 const HISTORY_KEY = "octobot:prompt-history";
+const PINNED_KEY = "octobot:prompt-history-pinned";
 const DRAFT_PREFIX = "octobot-prompt-draft-";
 const MAX_HISTORY_SIZE = 100;
 export const MAX_VISIBLE_HISTORY = 20;
@@ -34,11 +35,36 @@ function loadHistory(): string[] {
 	return [];
 }
 
+function loadPinnedPrompts(): string[] {
+	if (typeof window === "undefined") return [];
+	try {
+		const stored = localStorage.getItem(PINNED_KEY);
+		if (stored) {
+			const parsed = JSON.parse(stored);
+			if (Array.isArray(parsed)) {
+				return parsed.filter((item) => typeof item === "string");
+			}
+		}
+	} catch {
+		// Ignore parse errors
+	}
+	return [];
+}
+
 function saveHistoryToStorage(history: string[]): void {
 	if (typeof window === "undefined") return;
 	try {
 		const trimmed = history.slice(0, MAX_HISTORY_SIZE);
 		localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+	} catch {
+		// Ignore storage errors
+	}
+}
+
+function savePinnedPrompts(pinned: string[]): void {
+	if (typeof window === "undefined") return;
+	try {
+		localStorage.setItem(PINNED_KEY, JSON.stringify(pinned));
 	} catch {
 		// Ignore storage errors
 	}
@@ -80,16 +106,26 @@ export interface UsePromptHistoryOptions {
 export interface UsePromptHistoryReturn {
 	/** Array of history prompts (most recent first) */
 	history: string[];
-	/** Currently selected history index (-1 = none) */
+	/** Array of pinned prompts */
+	pinnedPrompts: string[];
+	/** Currently selected history index (-1 = none, negative = pinned index, positive = history index) */
 	historyIndex: number;
+	/** Whether the selected item is in the pinned section */
+	isPinnedSelection: boolean;
 	/** Whether history dropdown is open */
 	isHistoryOpen: boolean;
 	/** Set the history index */
-	setHistoryIndex: (index: number) => void;
+	setHistoryIndex: (index: number, isPinned: boolean) => void;
 	/** Select a history item (sets textarea value and closes dropdown) */
 	onSelectHistory: (prompt: string) => void;
 	/** Add a prompt to history (call after successful submit) */
 	addToHistory: (prompt: string) => void;
+	/** Pin a prompt */
+	pinPrompt: (prompt: string) => void;
+	/** Unpin a prompt */
+	unpinPrompt: (prompt: string) => void;
+	/** Check if a prompt is pinned */
+	isPinned: (prompt: string) => boolean;
 	/** Close the history dropdown */
 	closeHistory: () => void;
 	/** Keyboard handler to attach to textarea's onKeyDown */
@@ -104,7 +140,11 @@ export function usePromptHistory({
 }: UsePromptHistoryOptions): UsePromptHistoryReturn {
 	// History state
 	const [history, setHistory] = useState<string[]>(() => loadHistory());
+	const [pinnedPrompts, setPinnedPrompts] = useState<string[]>(() =>
+		loadPinnedPrompts(),
+	);
 	const [historyIndex, setHistoryIndex] = useState(-1);
+	const [isPinnedSelection, setIsPinnedSelection] = useState(false);
 	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
 	// Draft persistence refs (avoid re-renders on typing)
@@ -164,7 +204,17 @@ export function usePromptHistory({
 	const closeHistory = useCallback(() => {
 		setIsHistoryOpen(false);
 		setHistoryIndex(-1);
+		setIsPinnedSelection(false);
 	}, []);
+
+	// Set history index with pinned flag
+	const setHistoryIndexWithPinned = useCallback(
+		(index: number, isPinned: boolean) => {
+			setHistoryIndex(index);
+			setIsPinnedSelection(isPinned);
+		},
+		[],
+	);
 
 	// Select history item
 	const onSelectHistory = useCallback(
@@ -197,6 +247,35 @@ export function usePromptHistory({
 		[sessionId],
 	);
 
+	// Pin a prompt
+	const pinPrompt = useCallback((prompt: string) => {
+		if (!prompt.trim()) return;
+		setPinnedPrompts((prev) => {
+			// Don't add duplicates
+			if (prev.includes(prompt)) return prev;
+			const updated = [...prev, prompt];
+			savePinnedPrompts(updated);
+			return updated;
+		});
+	}, []);
+
+	// Unpin a prompt
+	const unpinPrompt = useCallback((prompt: string) => {
+		setPinnedPrompts((prev) => {
+			const updated = prev.filter((p) => p !== prompt);
+			savePinnedPrompts(updated);
+			return updated;
+		});
+	}, []);
+
+	// Check if a prompt is pinned
+	const isPinned = useCallback(
+		(prompt: string) => {
+			return pinnedPrompts.includes(prompt);
+		},
+		[pinnedPrompts],
+	);
+
 	// Keyboard handler for history navigation
 	const handleKeyDown = useCallback(
 		(e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -204,6 +283,8 @@ export function usePromptHistory({
 				history.length,
 				MAX_VISIBLE_HISTORY,
 			);
+			const pinnedLength = pinnedPrompts.length;
+			const hasItems = pinnedLength > 0 || visibleHistoryLength > 0;
 
 			// Handle Enter to select from history
 			if (
@@ -213,7 +294,9 @@ export function usePromptHistory({
 				historyIndex >= 0
 			) {
 				e.preventDefault();
-				const selectedPrompt = history[historyIndex];
+				const selectedPrompt = isPinnedSelection
+					? pinnedPrompts[historyIndex]
+					: history[historyIndex];
 				if (selectedPrompt) {
 					onSelectHistory(selectedPrompt);
 				}
@@ -228,7 +311,7 @@ export function usePromptHistory({
 			}
 
 			// Handle Up arrow for history navigation
-			if (e.key === "ArrowUp" && visibleHistoryLength > 0) {
+			if (e.key === "ArrowUp" && hasItems) {
 				const cursorPosition = textareaRef.current?.selectionStart ?? 0;
 
 				// Only trigger history if cursor is at the start (position 0)
@@ -236,13 +319,35 @@ export function usePromptHistory({
 					e.preventDefault();
 
 					if (!isHistoryOpen) {
-						// Open history dropdown and select most recent item
+						// Open history dropdown and select first item
 						setIsHistoryOpen(true);
-						setHistoryIndex(0);
+						if (pinnedLength > 0) {
+							// Start with first pinned item
+							setHistoryIndex(0);
+							setIsPinnedSelection(true);
+						} else {
+							// Start with first recent item
+							setHistoryIndex(0);
+							setIsPinnedSelection(false);
+						}
 					} else {
-						// Navigate toward older items (higher index)
-						if (historyIndex < visibleHistoryLength - 1) {
-							setHistoryIndex(historyIndex + 1);
+						// Navigate toward older items
+						if (isPinnedSelection) {
+							// Currently in pinned section
+							if (historyIndex < pinnedLength - 1) {
+								// Move to next pinned item
+								setHistoryIndex(historyIndex + 1);
+							} else if (visibleHistoryLength > 0) {
+								// Move to first recent item
+								setHistoryIndex(0);
+								setIsPinnedSelection(false);
+							}
+						} else {
+							// Currently in recent section
+							if (historyIndex < visibleHistoryLength - 1) {
+								// Move to next recent item
+								setHistoryIndex(historyIndex + 1);
+							}
 						}
 					}
 					return;
@@ -250,20 +355,43 @@ export function usePromptHistory({
 			}
 
 			// Handle Down arrow for history navigation
-			if (e.key === "ArrowDown" && isHistoryOpen && visibleHistoryLength > 0) {
+			if (e.key === "ArrowDown" && isHistoryOpen && hasItems) {
 				e.preventDefault();
-				// Navigate toward newer items (lower index)
-				if (historyIndex <= 0) {
-					closeHistory();
+
+				if (isPinnedSelection) {
+					// Currently in pinned section
+					if (historyIndex <= 0) {
+						// At first pinned item, close dropdown
+						closeHistory();
+					} else {
+						// Move to previous pinned item
+						setHistoryIndex(historyIndex - 1);
+					}
 				} else {
-					setHistoryIndex(historyIndex - 1);
+					// Currently in recent section
+					if (historyIndex <= 0) {
+						// At first recent item
+						if (pinnedLength > 0) {
+							// Move to last pinned item
+							setHistoryIndex(pinnedLength - 1);
+							setIsPinnedSelection(true);
+						} else {
+							// No pinned items, close dropdown
+							closeHistory();
+						}
+					} else {
+						// Move to previous recent item
+						setHistoryIndex(historyIndex - 1);
+					}
 				}
 				return;
 			}
 		},
 		[
 			history,
+			pinnedPrompts,
 			historyIndex,
+			isPinnedSelection,
 			isHistoryOpen,
 			onSelectHistory,
 			closeHistory,
@@ -273,11 +401,16 @@ export function usePromptHistory({
 
 	return {
 		history,
+		pinnedPrompts,
 		historyIndex,
+		isPinnedSelection,
 		isHistoryOpen,
-		setHistoryIndex,
+		setHistoryIndex: setHistoryIndexWithPinned,
 		onSelectHistory,
 		addToHistory,
+		pinPrompt,
+		unpinPrompt,
+		isPinned,
 		closeHistory,
 		handleKeyDown,
 		getValue,
