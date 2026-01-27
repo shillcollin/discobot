@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import useSWR from "swr";
 import { api } from "../api-client";
 import type { UserPreference } from "../api-types";
@@ -13,9 +14,12 @@ export function usePreferences() {
 	 * Get a preference value by key from the local cache.
 	 * Returns undefined if not found.
 	 */
-	const getPreference = (key: string): string | undefined => {
-		return data?.preferences.find((p) => p.key === key)?.value;
-	};
+	const getPreference = useCallback(
+		(key: string): string | undefined => {
+			return data?.preferences.find((p) => p.key === key)?.value;
+		},
+		[data?.preferences],
+	);
 
 	/**
 	 * Set a single preference.
