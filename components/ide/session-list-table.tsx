@@ -249,11 +249,15 @@ function SessionRow({
 					<span className={cn("text-xs font-medium", statusColor)}>
 						{statusText}
 					</span>
-					{session.commitStatus === CommitStatus.COMMITTED && session.appliedCommit && (
-						<span className="text-xs text-muted-foreground truncate" title={`Committed: ${session.appliedCommit}`}>
-							{session.appliedCommit.slice(0, 7)}
-						</span>
-					)}
+					{session.commitStatus === CommitStatus.COMPLETED &&
+						session.appliedCommit && (
+							<span
+								className="text-xs text-muted-foreground truncate"
+								title={`Committed: ${session.appliedCommit}`}
+							>
+								{session.appliedCommit.slice(0, 7)}
+							</span>
+						)}
 				</div>
 			</div>
 

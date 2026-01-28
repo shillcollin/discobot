@@ -105,7 +105,7 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 
 	return (
 		<div className={cn("flex flex-col overflow-hidden", className)}>
-			<div className="px-3 py-2 border-b border-sidebar-border flex items-center justify-between">
+			<div className="h-10 px-3 border-b border-sidebar-border flex items-center justify-between">
 				<span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
 					Workspaces
 				</span>
