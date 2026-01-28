@@ -9,6 +9,7 @@ import {
 import * as React from "react";
 import { CredentialsDialog } from "@/components/ide/dialogs/credentials-dialog";
 import { OctobotLogo } from "@/components/ide/octobot-logo";
+import { getSessionDisplayName } from "@/components/ide/session-name";
 import { SessionDropdownItem } from "@/components/ide/session-dropdown-item";
 import { ThemeToggle } from "@/components/ide/theme-toggle";
 import { WindowControls } from "@/components/ide/window-controls";
@@ -259,7 +260,7 @@ export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 										<>
 											{getSessionStatusIndicator(selectedSession)}
 											<span className="truncate max-w-[200px] font-medium">
-												{selectedSession.name}
+												{getSessionDisplayName(selectedSession)}
 											</span>
 										</>
 									) : (
