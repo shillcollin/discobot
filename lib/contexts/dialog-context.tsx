@@ -10,6 +10,7 @@ import type {
 	Workspace,
 } from "@/lib/api-types";
 import { useAgents } from "@/lib/hooks/use-agents";
+import { useAgentTypes } from "@/lib/hooks/use-agent-types";
 import { useAuthProviders } from "@/lib/hooks/use-auth-providers";
 import { useCredentials } from "@/lib/hooks/use-credentials";
 import {
