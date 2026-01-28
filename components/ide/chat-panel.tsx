@@ -102,7 +102,6 @@ import type { Agent, SessionStatus } from "@/lib/api-types";
 import { useAgentContext } from "@/lib/contexts/agent-context";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
-import { useSessionContext } from "@/lib/contexts/session-context";
 import { useLazyRender } from "@/lib/hooks/use-lazy-render";
 import { useMessages } from "@/lib/hooks/use-messages";
 import { usePromptHistory } from "@/lib/hooks/use-prompt-history";
@@ -566,17 +565,21 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	// Get data from contexts
 	const { workspaces } = useWorkspaces();
 	const { agents, agentTypes, selectedAgentId } = useAgentContext();
-	const { view } = useMainPanelContext();
 	const {
-		selectedSessionId,
+		view,
 		selectedSession,
-		preselectedWorkspaceId,
-		preselectedAgentId,
-		workspaceSelectTrigger,
-		handleSessionCreated,
-		handleNewSession,
-	} = useSessionContext();
+		getSelectedSessionId,
+		showSession,
+		showNewSession,
+	} = useMainPanelContext();
 	const { agentDialog, workspaceDialog } = useDialogContext();
+
+	// Derive values from view
+	const selectedSessionId = getSelectedSessionId();
+	const preselectedWorkspaceId =
+		view.type === "new-session" ? (view.workspaceId ?? null) : null;
+	const preselectedAgentId =
+		view.type === "new-session" ? (view.agentId ?? null) : null;
 
 	// Derive sessionAgent and sessionWorkspace from selectedSession
 	const sessionAgent = selectedSession
@@ -615,6 +618,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		string | null
 	>(selectedAgentId || (agents.length > 0 ? agents[0].id : null));
 	const [isShimmering, setIsShimmering] = React.useState(false);
+
+	// Track workspace selection trigger for shimmer effect
+	const [_workspaceSelectTrigger, setWorkspaceSelectTrigger] =
+		React.useState(0);
 
 	// Ref for textarea to enable focusing
 	const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -847,18 +854,16 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		}
 	}, [agents, localSelectedAgentId]);
 
-	// When workspaceSelectTrigger fires, update local workspace selection and show shimmer
+	// Watch for view changes to trigger workspace selection shimmer
 	React.useEffect(() => {
-		if (workspaceSelectTrigger && workspaceSelectTrigger > 0) {
-			// Update local workspace to the preselected one
-			if (preselectedWorkspaceId) {
-				setLocalSelectedWorkspaceId(preselectedWorkspaceId);
-			}
+		if (view.type === "new-session" && view.workspaceId) {
+			setWorkspaceSelectTrigger((prev) => prev + 1);
+			setLocalSelectedWorkspaceId(view.workspaceId);
 			setIsShimmering(true);
 			const timeout = setTimeout(() => setIsShimmering(false), 600);
 			return () => clearTimeout(timeout);
 		}
-	}, [workspaceSelectTrigger, preselectedWorkspaceId]);
+	}, [view]);
 
 	const selectedWorkspace = workspaces.find(
 		(ws) => ws.id === localSelectedWorkspaceId,
@@ -894,7 +899,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				onSessionCreatedRef.current = (sessionId: string) => {
 					// Only transition if user hasn't switched sessions during the request
 					if (selectionRef.current.sessionId === null) {
-						handleSessionCreated(sessionId);
+						showSession(sessionId);
 					}
 					// Clear the callback after use
 					onSessionCreatedRef.current = null;
@@ -919,7 +924,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			localSelectedAgentId,
 			pendingSessionId,
 			sendMessage,
-			handleSessionCreated,
+			showSession,
 		],
 	);
 
@@ -957,7 +962,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 						<p className="text-muted-foreground text-sm">
 							The session you're looking for doesn't exist or has been deleted.
 						</p>
-						<Button variant="outline" onClick={handleNewSession}>
+						<Button variant="outline" onClick={() => showNewSession()}>
 							Start a new session
 						</Button>
 					</div>

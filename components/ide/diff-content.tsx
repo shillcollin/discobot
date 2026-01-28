@@ -45,7 +45,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import type { FileNode } from "@/lib/api-types";
-import { useSessionContext } from "@/lib/contexts/session-context";
+import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
 import { useFileEdit } from "@/lib/hooks/use-file-edit";
 import {
 	STORAGE_KEYS,
@@ -189,7 +189,7 @@ export function DiffContent({ file }: DiffContentProps) {
 		[setViewModes, file.id],
 	);
 
-	const { selectedSession } = useSessionContext();
+	const { selectedSession } = useMainPanelContext();
 	const { resolvedTheme } = useTheme();
 
 	const {
@@ -393,7 +393,7 @@ function FileContentView({
 	/** Callback to return to diff view (undefined if no diff available) */
 	onBackToDiff?: () => void;
 }) {
-	const { selectedSession } = useSessionContext();
+	const { selectedSession } = useMainPanelContext();
 	const { resolvedTheme } = useTheme();
 	const { mutate } = useSWRConfig();
 	const language = getLanguageFromPath(filePath);

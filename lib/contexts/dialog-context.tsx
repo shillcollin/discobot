@@ -19,7 +19,6 @@ import {
 import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import { useAgentContext } from "./agent-context";
 import { useMainPanelContext } from "./main-panel-context";
-import { useSessionContext } from "./session-context";
 
 // Dialog data types
 interface AgentDialogData {
@@ -83,7 +82,6 @@ interface DialogProviderProps {
 }
 
 export function DialogProvider({ children }: DialogProviderProps) {
-	const session = useSessionContext();
 	const mainPanel = useMainPanelContext();
 	const workspace = useWorkspaces();
 	const agent = useAgentContext();
@@ -163,18 +161,21 @@ export function DialogProvider({ children }: DialogProviderProps) {
 
 			await workspace.deleteWorkspace(ws.id, deleteFiles);
 
-			// Clear selection if the deleted workspace was preselected
-			if (session.preselectedWorkspaceId === ws.id) {
-				session.handleNewSession();
+			// Check if current view is related to the deleted workspace
+			const { view, selectedSession, showNewSession } = mainPanel;
+
+			// Clear selection if viewing a session from the deleted workspace
+			if (selectedSession?.workspaceId === ws.id) {
+				showNewSession();
 			}
-			// Clear session if it belonged to the deleted workspace
-			if (session.selectedSession?.workspaceId === ws.id) {
-				session.selectSession(null);
+			// Clear selection if new-session view has the deleted workspace preselected
+			else if (view.type === "new-session" && view.workspaceId === ws.id) {
+				showNewSession();
 			}
 
 			deleteWorkspaceDialog.close();
 		},
-		[deleteWorkspaceDialog, workspace, session],
+		[deleteWorkspaceDialog, workspace, mainPanel],
 	);
 
 	const handleWelcomeComplete = React.useCallback(

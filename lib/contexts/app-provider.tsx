@@ -4,7 +4,6 @@ import type * as React from "react";
 import { AgentProvider } from "./agent-context";
 import { MainPanelProvider } from "./main-panel-context";
 import { ProjectEventsProvider } from "./project-events-context";
-import { SessionProvider } from "./session-context";
 
 interface AppProviderProps {
 	children: React.ReactNode;
@@ -14,16 +13,13 @@ interface AppProviderProps {
  * Combined provider that wraps all domain contexts.
  * - ProjectEventsProvider: SSE connection for real-time updates
  * - AgentProvider: Agent and SupportedAgentType objects
- * - MainPanelProvider: Main panel view state (what's displayed in the center)
- * - SessionProvider: Session objects (now derives state from MainPanelProvider)
+ * - MainPanelProvider: Main panel view state and session data
  */
 export function AppProvider({ children }: AppProviderProps) {
 	return (
 		<ProjectEventsProvider>
 			<AgentProvider>
-				<MainPanelProvider>
-					<SessionProvider>{children}</SessionProvider>
-				</MainPanelProvider>
+				<MainPanelProvider>{children}</MainPanelProvider>
 			</AgentProvider>
 		</ProjectEventsProvider>
 	);

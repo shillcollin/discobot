@@ -198,7 +198,7 @@
 
 /* Blur effect at top of chat input area */
 .chat-input-blur::before {
-	content: '';
+	content: "";
 	position: absolute;
 	top: -40px;
 	left: 0;

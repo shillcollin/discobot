@@ -4,8 +4,10 @@ import * as React from "react";
 import { DiffContent } from "@/components/ide/diff-content";
 import { FilePanel } from "@/components/ide/file-panel";
 import { ResizeHandle } from "@/components/ide/resize-handle";
+import { SessionListTable } from "@/components/ide/session-list-table";
+import { getWorkspaceDisplayPath } from "@/components/ide/workspace-path";
 import type { BottomView, FileNode, FileStatus } from "@/lib/api-types";
-import { useSessionContext } from "@/lib/contexts/session-context";
+import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
 import { usePanelLayout } from "@/lib/hooks/use-panel-layout";
 import {
 	STORAGE_KEYS,
@@ -13,6 +15,7 @@ import {
 } from "@/lib/hooks/use-persisted-state";
 import { usePrevious } from "@/lib/hooks/use-previous";
 import { useSessionFiles } from "@/lib/hooks/use-session-files";
+import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import { BottomPanel } from "./bottom-panel";
 
 interface MainContentProps {
@@ -43,7 +46,9 @@ export function MainContent({
 	onToggleRightSidebar,
 	onRightSidebarResize,
 }: MainContentProps) {
-	const { selectedSession } = useSessionContext();
+	const { view, selectedSession, showSession, showNewSession } =
+		useMainPanelContext();
+	const { workspaces } = useWorkspaces();
 
 	const [bottomView, setBottomView] = usePersistedState<BottomView>(
 		STORAGE_KEYS.BOTTOM_VIEW,
@@ -189,26 +194,53 @@ export function MainContent({
 	// Computed
 	const showFilePanel = selectedSession !== null;
 
+	// Find selected workspace for workspace-sessions view
+	const selectedWorkspace =
+		view.type === "workspace-sessions"
+			? workspaces.find((w) => w.id === view.workspaceId)
+			: null;
+
+	const [showClosedSessions] = usePersistedState(
+		STORAGE_KEYS.SHOW_CLOSED_SESSIONS,
+		false,
+	);
+
 	return (
 		<>
 			<main
 				ref={panelLayout.mainRef}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				<BottomPanel
-					panelState={panelLayout.bottomPanelState}
-					style={panelLayout.getBottomPanelStyle()}
-					showPanelControls={false}
-					view={bottomView}
-					onViewChange={setBottomView}
-					onMinimize={panelLayout.handleBottomMinimize}
-					rightSidebarOpen={rightSidebarOpen}
-					onToggleRightSidebar={onToggleRightSidebar}
-					changedFilesCount={changedCount}
-					openFiles={openFiles}
-					onTabClose={handleTabClose}
-					diffContent={diffContent}
-				/>
+				{view.type === "workspace-sessions" && selectedWorkspace ? (
+					<SessionListTable
+						workspaceId={selectedWorkspace.id}
+						workspaceName={
+							selectedWorkspace.displayName ||
+							getWorkspaceDisplayPath(
+								selectedWorkspace.path,
+								selectedWorkspace.sourceType,
+							)
+						}
+						onSessionSelect={(session) => showSession(session.id)}
+						onClose={() => showNewSession()}
+						showClosedSessions={showClosedSessions}
+					/>
+				) : (
+					<BottomPanel
+						panelState={panelLayout.bottomPanelState}
+						style={panelLayout.getBottomPanelStyle()}
+						showPanelControls={false}
+						view={bottomView}
+						onViewChange={setBottomView}
+						onMinimize={panelLayout.handleBottomMinimize}
+						rightSidebarOpen={rightSidebarOpen}
+						onToggleRightSidebar={onToggleRightSidebar}
+						changedFilesCount={changedCount}
+						openFiles={openFiles}
+						onTabClose={handleTabClose}
+						diffContent={diffContent}
+					/>
+				)}
 			</main>
 
 			{/* Right - File panel (only show when session is selected) */}

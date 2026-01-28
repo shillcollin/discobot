@@ -485,16 +485,16 @@ The app uses a minimal set of React contexts for state that requires coordinatio
 // lib/contexts/app-provider.tsx
 <ProjectEventsProvider>    {/* SSE connection + cache mutations */}
   <AgentProvider>          {/* Agent selection state */}
-    <SessionProvider>      {/* Session selection state */}
+    <MainPanelProvider>    {/* Main panel view state and session data */}
       {children}
-    </SessionProvider>
+    </MainPanelProvider>
   </AgentProvider>
 </ProjectEventsProvider>
 ```
 
 **Design principle**: Contexts are only used when they add value beyond what SWR provides:
-- `SessionProvider`: Manages `selectedSessionId` and UI triggers (not just data)
+- `MainPanelProvider`: Manages main panel view state (which session/workspace to show) and fetches current session data
 - `AgentProvider`: Manages `selectedAgentId` selection state
 - `ProjectEventsProvider`: Coordinates SSE connection with cache invalidation
 
-**No WorkspaceContext**: Components use `useWorkspaces()` directly since SWR already provides shared cache and request deduplication.
+**No WorkspaceContext or SessionContext**: Components use `useWorkspaces()` and `useSession()` directly since SWR already provides shared cache and request deduplication. Session selection is managed by `MainPanelProvider` which maintains the current view state.
