@@ -75,20 +75,21 @@ func getDirectorySuggestions(query string) []Suggestion {
 
 	// Get the directory to search and the prefix to match
 	var searchDir, prefix string
-	if strings.HasSuffix(searchPath, "/") || searchPath == "" {
-		// User is browsing a complete directory
+
+	// Check if the path matches an existing directory
+	if info, err := os.Stat(searchPath); err == nil && info.IsDir() {
+		// Path is a directory - list its subdirectories
 		searchDir = searchPath
 		prefix = ""
 	} else {
-		// User is typing a partial path
+		// Path doesn't match a directory - get dirname and use basename as prefix
 		searchDir = filepath.Dir(searchPath)
 		prefix = filepath.Base(searchPath)
-	}
 
-	// Check if search directory exists
-	info, err := os.Stat(searchDir)
-	if err != nil || !info.IsDir() {
-		return []Suggestion{}
+		// Verify the search directory exists
+		if info, err := os.Stat(searchDir); err != nil || !info.IsDir() {
+			return []Suggestion{}
+		}
 	}
 
 	// Read directory entries
