@@ -1,4 +1,3 @@
-import { Analytics } from "@vercel/analytics/react";
 import { Route, Routes } from "react-router";
 import { AppShell } from "@/components/app-shell";
 import { ResizeObserverFix } from "@/components/resize-observer-fix";
@@ -20,7 +19,6 @@ export function App() {
 					<Route path="/" element={<HomePage />} />
 				</Routes>
 			</AppShell>
-			<Analytics />
 		</ThemeProvider>
 	);
 }

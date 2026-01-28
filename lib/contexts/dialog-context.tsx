@@ -10,7 +10,6 @@ import type {
 	SupportedAgentType,
 	Workspace,
 } from "@/lib/api-types";
-import { useAgentTypes } from "@/lib/hooks/use-agent-types";
 import { useAgents } from "@/lib/hooks/use-agents";
 import { useAuthProviders } from "@/lib/hooks/use-auth-providers";
 import { useCredentials } from "@/lib/hooks/use-credentials";
@@ -86,7 +85,6 @@ export function DialogProvider({ children }: DialogProviderProps) {
 	const mainPanel = useMainPanelContext();
 	const workspace = useWorkspaces();
 	const { createAgent, updateAgent, mutate: mutateAgents } = useAgents();
-	const { agentTypes } = useAgentTypes();
 	const { authProviders } = useAuthProviders();
 	const { credentials } = useCredentials();
 

@@ -15,7 +15,6 @@ import { ThemeToggle } from "@/components/ide/theme-toggle";
 import { WindowControls } from "@/components/ide/window-controls";
 import { WorkspaceDisplay } from "@/components/ide/workspace-display";
 import { WorkspaceDropdownItem } from "@/components/ide/workspace-dropdown-item";
-import { getWorkspaceDisplayPath } from "@/components/ide/workspace-path";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -197,15 +196,13 @@ export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 								className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
 							>
 								{sessionWorkspace ? (
-									<>
-										<WorkspaceDisplay
-											workspace={sessionWorkspace}
-											iconSize={16}
-											iconClassName="h-4 w-4"
-											textClassName="truncate max-w-[150px]"
-											showTooltip={true}
-										/>
-									</>
+									<WorkspaceDisplay
+										workspace={sessionWorkspace}
+										iconSize={16}
+										iconClassName="h-4 w-4"
+										textClassName="truncate max-w-[150px]"
+										showTooltip={true}
+									/>
 								) : (
 									<span className="text-muted-foreground">
 										Select Workspace
