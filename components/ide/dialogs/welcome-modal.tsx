@@ -18,7 +18,8 @@ import type {
 import { STORAGE_KEYS } from "@/lib/hooks/use-persisted-state";
 import { cn } from "@/lib/utils";
 import { IconRenderer } from "../icon-renderer";
-import { OctobotLogo } from "../octobot-logo";
+import { DiscobotLogo } from "../discobot-logo";
+import { DiscobotBrand } from "../discobot-brand";
 import { WorkspaceForm, type WorkspaceFormRef } from "../workspace-form";
 
 interface WelcomeModalProps {
@@ -306,12 +307,13 @@ export function WelcomeModal({
 
 					{/* Logo */}
 					<div className="flex justify-center mb-4">
-						<OctobotLogo size={64} className="text-primary" />
+						<DiscobotLogo size={64} className="text-purple-500" />
 					</div>
 
 					<DialogHeader className="space-y-3">
-						<DialogTitle className="text-3xl font-bold tracking-tight">
-							Welcome to Octobot
+						<DialogTitle className="text-3xl tracking-tight flex items-center justify-center">
+							<span className="font-semibold">Welcome to</span>
+							<DiscobotBrand logoSize={0} textSize="text-3xl" />
 						</DialogTitle>
 						<DialogDescription className="text-base text-muted-foreground max-w-md mx-auto">
 							{getStepDescription()}

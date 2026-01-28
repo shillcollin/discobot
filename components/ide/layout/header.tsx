@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import { CredentialsDialog } from "@/components/ide/dialogs/credentials-dialog";
-import { OctobotLogo } from "@/components/ide/octobot-logo";
+import { DiscobotBrand } from "@/components/ide/discobot-brand";
 import { getSessionDisplayName } from "@/components/ide/session-name";
 import { SessionDropdownItem } from "@/components/ide/session-dropdown-item";
 import { ThemeToggle } from "@/components/ide/theme-toggle";
@@ -166,10 +166,7 @@ export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 						<PanelLeft className="h-4 w-4" />
 					)}
 				</Button>
-				<div className="flex items-center gap-1.5 shrink-0">
-					<OctobotLogo size={22} className="text-primary" />
-					<span className="font-semibold">Octobot</span>
-				</div>
+				<DiscobotBrand logoSize={22} />
 
 				<span className="text-muted-foreground shrink-0">/</span>
 
