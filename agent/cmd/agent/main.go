@@ -1001,6 +1001,7 @@ func startDockerDaemon(proxyEnabled bool) (*exec.Cmd, error) {
 		"--data-root", dockerDataDir,
 		"--storage-driver", "overlay2",
 		"--host", "unix://"+dockerSocketPath,
+		"--log-level", "error",
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
