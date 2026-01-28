@@ -7,12 +7,10 @@ import { SessionListTable } from "@/components/ide/session-list-table";
 import { getWorkspaceDisplayPath } from "@/components/ide/workspace-path";
 import type { BottomView, FileNode, FileStatus } from "@/lib/api-types";
 import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
-import { usePanelLayout } from "@/lib/hooks/use-panel-layout";
 import {
 	STORAGE_KEYS,
 	usePersistedState,
 } from "@/lib/hooks/use-persisted-state";
-import { usePrevious } from "@/lib/hooks/use-previous";
 import { useSessionFiles } from "@/lib/hooks/use-session-files";
 import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import { BottomPanel } from "./bottom-panel";
@@ -49,18 +47,12 @@ export function MainContent({
 		useMainPanelContext();
 	const { workspaces } = useWorkspaces();
 
-	const [bottomView, setBottomView] = usePersistedState<BottomView>(
-		STORAGE_KEYS.BOTTOM_VIEW,
-		"chat",
-	);
+	const [bottomView, setBottomView] = React.useState<BottomView>("chat");
 
 	// Helper to update view when file is selected
-	const setBottomViewToFile = React.useCallback(
-		(filePath: string) => {
-			setBottomView(`file:${filePath}`);
-		},
-		[setBottomView],
-	);
+	const setBottomViewToFile = React.useCallback((filePath: string) => {
+		setBottomView(`file:${filePath}`);
+	}, []);
 
 	// Get current session ID for keying storage
 	const currentSessionId = selectedSession?.id ?? null;
@@ -85,9 +77,6 @@ export function MainContent({
 		"session",
 	);
 
-	// Panel layout hook - now internal to MainContent
-	const panelLayout = usePanelLayout();
-
 	// Get changed files count for the bottom panel toggle
 	const { diffStats, changedFiles, diffEntries } = useSessionFiles(
 		selectedSession?.id ?? null,
@@ -110,21 +99,6 @@ export function MainContent({
 			createFileNodeFromPath(path, statusMap.get(path)),
 		);
 	}, [openFilePaths, statusMap]);
-
-	// Destructure stable handlers for use in effects
-	const { resetPanels } = panelLayout;
-
-	// Reset UI when session changes
-	// Note: File state is now keyed by session ID, so it loads automatically per session
-	const prevSessionId = usePrevious(currentSessionId);
-
-	React.useEffect(() => {
-		if (prevSessionId !== undefined && currentSessionId !== prevSessionId) {
-			// Reset panel state and view
-			resetPanels();
-			setBottomView("chat");
-		}
-	}, [currentSessionId, prevSessionId, resetPanels, setBottomView]);
 
 	const handleFileSelect = React.useCallback(
 		(path: string) => {
@@ -160,13 +134,7 @@ export function MainContent({
 				return newOpenPaths;
 			});
 		},
-		[
-			activeFilePath,
-			setOpenFilePaths,
-			setActiveFilePath,
-			setBottomView,
-			setBottomViewToFile,
-		],
+		[activeFilePath, setOpenFilePaths, setActiveFilePath, setBottomViewToFile],
 	);
 
 	// Extract active file path from bottomView
@@ -206,10 +174,7 @@ export function MainContent({
 
 	return (
 		<>
-			<main
-				ref={panelLayout.mainRef}
-				className="flex-1 flex flex-col overflow-hidden"
-			>
+			<main className="flex-1 flex flex-col overflow-hidden">
 				{view.type === "workspace-sessions" && selectedWorkspace ? (
 					<SessionListTable
 						workspaceId={selectedWorkspace.id}
@@ -226,12 +191,8 @@ export function MainContent({
 					/>
 				) : (
 					<BottomPanel
-						panelState={panelLayout.bottomPanelState}
-						style={panelLayout.getBottomPanelStyle()}
-						showPanelControls={false}
 						view={bottomView}
 						onViewChange={setBottomView}
-						onMinimize={panelLayout.handleBottomMinimize}
 						rightSidebarOpen={rightSidebarOpen}
 						onToggleRightSidebar={onToggleRightSidebar}
 						changedFilesCount={changedCount}

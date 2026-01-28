@@ -26,10 +26,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { FileStatus, SessionDiffFileEntry } from "@/lib/api-types";
 import {
-	STORAGE_KEYS,
-	usePersistedState,
-} from "@/lib/hooks/use-persisted-state";
-import {
 	type LazyFileNode,
 	useSessionFiles,
 } from "@/lib/hooks/use-session-files";
@@ -76,10 +72,7 @@ export function FilePanel({
 	style,
 	onCloseSession,
 }: FilePanelProps) {
-	const [showChangedOnly, setShowChangedOnly] = usePersistedState(
-		STORAGE_KEYS.SHOW_CHANGED_ONLY,
-		true,
-	);
+	const [showChangedOnly, setShowChangedOnly] = React.useState(true);
 	const [isExpandingAll, setIsExpandingAll] = React.useState(false);
 
 	const {

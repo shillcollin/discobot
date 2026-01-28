@@ -13,8 +13,6 @@ The layout module manages the IDE's panel system, including resizable panels, co
 | `components/ide/layout/diff-panel.tsx` | Tabbed file diff viewer wrapper |
 | `components/ide/layout/bottom-panel.tsx` | Chat or terminal toggle area |
 | `components/ide/resize-handle.tsx` | Draggable panel divider |
-| `components/ide/panel-controls.tsx` | Minimize/maximize/close buttons |
-| `lib/hooks/use-panel-layout.ts` | Panel state management hook |
 | `lib/hooks/use-persisted-state.ts` | localStorage persistence hook |
 
 ## Panel Architecture
@@ -63,38 +61,7 @@ Features:
 - Respects min/max constraints
 - Works for both horizontal and vertical splits
 
-### PanelControls Component
-
-Controls for panel minimize/maximize:
-
-```typescript
-interface PanelControlsProps {
-  isMinimized: boolean
-  isMaximized: boolean
-  onMinimize: () => void
-  onMaximize: () => void
-  onClose?: () => void
-}
-```
-
 ## State Management
-
-### usePanelLayout Hook
-
-Manages panel dimensions and collapse states:
-
-```typescript
-const {
-  sidebarWidth,
-  setSidebarWidth,
-  diffPanelHeight,
-  setDiffPanelHeight,
-  isDiffPanelCollapsed,
-  setDiffPanelCollapsed,
-  isBottomPanelCollapsed,
-  setBottomPanelCollapsed,
-} = usePanelLayout()
-```
 
 ### usePersistedState Hook
 
@@ -239,9 +206,12 @@ Wrapper for the tabbed diff viewer:
 Toggleable content area with persistent chat component:
 - Chat mode: Shows ChatPanel with AI conversation
 - Terminal mode: Shows TerminalView with xterm.js
+- File mode: Shows DiffContent for opened files
+- Service mode: Shows ServiceView for running services
 - ChatPanel is always mounted (never unmounted) to preserve component state and prevent re-initialization
 - When no session is selected, the chat panel displays centered with the welcome UI
-- Panel uses absolute positioning for terminal/chat overlays to avoid layout shifts
+- Panel uses absolute positioning for terminal/chat/file/service overlays to avoid layout shifts
+- Takes full flex space in the main content area
 
 ## CSS and Styling
 

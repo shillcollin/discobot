@@ -70,7 +70,6 @@ Located in `components/ide/`:
 |-----------|-------------|
 | `icon-renderer.tsx` | Theme-aware icon display |
 | `workspace-display.tsx` | Consistent workspace icon+name rendering |
-| `panel-controls.tsx` | Minimize/maximize buttons |
 | `resize-handle.tsx` | Draggable panel dividers |
 | `theme-toggle.tsx` | Dark/light mode switch |
 | `octobot-logo.tsx` | Application logo |

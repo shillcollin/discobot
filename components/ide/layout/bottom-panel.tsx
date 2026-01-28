@@ -15,10 +15,6 @@ import {
 import * as React from "react";
 import { ChatPanel } from "@/components/ide/chat-panel";
 import { IDELauncher } from "@/components/ide/ide-launcher";
-import {
-	PanelControls,
-	type PanelState,
-} from "@/components/ide/panel-controls";
 import { ServiceButton } from "@/components/ide/service-button";
 import { ServiceView } from "@/components/ide/service-view";
 import {
@@ -35,12 +31,8 @@ import { useServices } from "@/lib/hooks/use-services";
 import { cn } from "@/lib/utils";
 
 interface BottomPanelProps {
-	panelState: PanelState;
-	style: React.CSSProperties;
-	showPanelControls: boolean;
 	view: BottomView;
 	onViewChange: (view: BottomView) => void;
-	onMinimize: () => void;
 	rightSidebarOpen?: boolean;
 	onToggleRightSidebar?: () => void;
 	changedFilesCount?: number;
@@ -50,12 +42,8 @@ interface BottomPanelProps {
 }
 
 export function BottomPanel({
-	panelState,
-	style,
-	showPanelControls,
 	view,
 	onViewChange,
-	onMinimize,
 	rightSidebarOpen,
 	onToggleRightSidebar,
 	changedFilesCount = 0,
@@ -208,7 +196,7 @@ export function BottomPanel({
 	}, []);
 
 	return (
-		<div className="flex flex-col overflow-hidden" style={style}>
+		<div className="flex flex-col overflow-hidden flex-1">
 			{/* Bottom panel header */}
 			<div className="h-10 flex items-center justify-between bg-background border-b border-border shrink-0">
 				<div className="flex items-center gap-0 flex-1 min-w-0 h-full overflow-hidden">
@@ -366,14 +354,6 @@ export function BottomPanel({
 					)}
 				</div>
 				<div className="flex items-center gap-2">
-					{showPanelControls && (
-						<PanelControls
-							state={panelState}
-							onMinimize={onMinimize}
-							showMinimize={false}
-							showMaximize={false}
-						/>
-					)}
 					{activeService && activeService.status === "running" && (
 						<Button
 							variant="ghost"
@@ -453,80 +433,78 @@ export function BottomPanel({
 						))}
 				</div>
 			</div>
-			{panelState !== "minimized" && (
+			<div
+				className={cn(
+					"flex-1 overflow-hidden relative",
+					!selectedSessionId && "flex items-center justify-center",
+				)}
+			>
+				{/* Chat panel - always mounted */}
 				<div
 					className={cn(
-						"flex-1 overflow-hidden relative",
-						!selectedSessionId && "flex items-center justify-center",
+						"absolute inset-0",
+						view !== "chat" && "invisible pointer-events-none",
+						!selectedSessionId && "static", // Remove absolute positioning for centered layout
 					)}
 				>
-					{/* Chat panel - always mounted */}
+					<ChatPanel
+						className={cn(
+							"h-full",
+							!selectedSessionId && "w-full max-w-none", // Full width when centered
+						)}
+					/>
+				</div>
+				{/* Terminal - lazy mounted, stays mounted once viewed */}
+				{terminalMounted && (
 					<div
 						className={cn(
 							"absolute inset-0",
-							view !== "chat" && "invisible pointer-events-none",
-							!selectedSessionId && "static", // Remove absolute positioning for centered layout
+							view !== "terminal" && "invisible pointer-events-none",
 						)}
 					>
-						<ChatPanel
-							className={cn(
-								"h-full",
-								!selectedSessionId && "w-full max-w-none", // Full width when centered
-							)}
+						<TerminalView
+							ref={terminalRef}
+							sessionId={selectedSessionId}
+							root={terminalRoot}
+							className="h-full"
+							onToggleChat={() => onViewChange("chat")}
+							hideHeader
+							onConnectionStatusChange={setTerminalStatus}
 						/>
 					</div>
-					{/* Terminal - lazy mounted, stays mounted once viewed */}
-					{terminalMounted && (
-						<div
-							className={cn(
-								"absolute inset-0",
-								view !== "terminal" && "invisible pointer-events-none",
-							)}
-						>
-							<TerminalView
-								ref={terminalRef}
-								sessionId={selectedSessionId}
-								root={terminalRoot}
-								className="h-full"
-								onToggleChat={() => onViewChange("chat")}
-								hideHeader
-								onConnectionStatusChange={setTerminalStatus}
-							/>
-						</div>
-					)}
-					{/* Service views - lazy mounted, stay mounted once viewed */}
-					{selectedSessionId &&
-						services
-							.filter((s) => mountedServices.has(s.id))
-							.map((service) => (
-								<div
-									key={service.id}
-									className={cn(
-										"absolute inset-0",
-										activeServiceId !== service.id &&
-											"invisible pointer-events-none",
-									)}
-								>
-									<ServiceView
-										sessionId={selectedSessionId}
-										service={service}
-										className="h-full"
-									/>
-								</div>
-							))}
-					{/* File diff content - rendered for any file: view */}
-					{diffContent && (
-						<div
-							className={cn(
-								"absolute inset-0 flex flex-col",
-								!activeFilePath && "invisible pointer-events-none",
-							)}
-						>
-							{diffContent}
-						</div>
-					)}
-				</div>
-			)}
+				)}
+				{/* Service views - lazy mounted, stay mounted once viewed */}
+				{selectedSessionId &&
+					services
+						.filter((s) => mountedServices.has(s.id))
+						.map((service) => (
+							<div
+								key={service.id}
+								className={cn(
+									"absolute inset-0",
+									activeServiceId !== service.id &&
+										"invisible pointer-events-none",
+								)}
+							>
+								<ServiceView
+									sessionId={selectedSessionId}
+									service={service}
+									className="h-full"
+								/>
+							</div>
+						))}
+				{/* File diff content - rendered for any file: view */}
+				{diffContent && (
+					<div
+						className={cn(
+							"absolute inset-0 flex flex-col",
+							!activeFilePath && "invisible pointer-events-none",
+						)}
+					>
+						{diffContent}
+					</div>
+				)}
+			</div>
 		</div>
 	);
 }
