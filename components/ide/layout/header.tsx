@@ -124,10 +124,13 @@ export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 			await deleteSession(sessionId);
 			setConfirmDeleteSessionId(null);
 			if (isCurrentSession) {
-				showNewSession();
+				// Show new session screen with workspace pre-populated
+				showNewSession({
+					workspaceId: sessionWorkspace?.id,
+				});
 			}
 		},
-		[deleteSession, selectedSession?.id, showNewSession],
+		[deleteSession, selectedSession?.id, showNewSession, sessionWorkspace?.id],
 	);
 	const handleCancelSessionDelete = React.useCallback((e: React.MouseEvent) => {
 		e.stopPropagation();
