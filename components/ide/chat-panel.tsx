@@ -6,7 +6,11 @@ import * as React from "react";
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { ChatConversation } from "@/components/ide/chat-conversation";
 import { ChatNewContent } from "@/components/ide/chat-new-content";
-import { ChatPlanQueue } from "@/components/ide/chat-plan-queue";
+import {
+	ChatPlanQueue,
+	QueueButton,
+	QueuePanel,
+} from "@/components/ide/chat-plan-queue";
 import { PromptInputWithHistory } from "@/components/ide/prompt-input-with-history";
 import { getApiBase } from "@/lib/api-config";
 import {
@@ -311,37 +315,43 @@ export function ChatPanel({
 					onCopy={handleCopy}
 					onRegenerate={handleRegenerate}
 				/>
-
-				{/* Plan queue - shows when there's an active plan and not new */}
-				{currentPlan && <ChatPlanQueue plan={currentPlan} />}
 			</div>
 
 			{/* Input area for non-new sessions - outside centered container */}
-			<div
-				className={cn(
-					"shrink-0 transition-all duration-300 ease-in-out bg-background relative z-10",
-					"px-4 pb-4 max-w-3xl mx-auto w-full",
-				)}
-			>
-				<PromptInputWithHistory
-					ref={textareaRef}
-					sessionId={sessionId}
-					onSubmit={handleSubmit}
-					status={chatStatus}
-					isLocked={
-						session?.commitStatus === CommitStatus.PENDING ||
-						session?.commitStatus === CommitStatus.COMMITTING
-					}
-					placeholder={
-						session?.commitStatus === CommitStatus.PENDING ||
-						session?.commitStatus === CommitStatus.COMMITTING
-							? "Chat disabled during commit..."
-							: "Type a message..."
-					}
-					textareaClassName={cn("transition-all duration-300", "min-h-[60px]")}
-					submitDisabled={false}
-				/>
-			</div>
+			<ChatPlanQueue plan={currentPlan}>
+				<div
+					className={cn(
+						"shrink-0 transition-all duration-300 ease-in-out bg-background relative z-10",
+						"px-4 pb-4 max-w-3xl mx-auto w-full",
+					)}
+				>
+					{/* Expanded queue panel - shows above input when expanded */}
+					{currentPlan && <QueuePanel plan={currentPlan} />}
+
+					<PromptInputWithHistory
+						ref={textareaRef}
+						sessionId={sessionId}
+						onSubmit={handleSubmit}
+						status={chatStatus}
+						isLocked={
+							session?.commitStatus === CommitStatus.PENDING ||
+							session?.commitStatus === CommitStatus.COMMITTING
+						}
+						placeholder={
+							session?.commitStatus === CommitStatus.PENDING ||
+							session?.commitStatus === CommitStatus.COMMITTING
+								? "Chat disabled during commit..."
+								: "Type a message..."
+						}
+						textareaClassName={cn(
+							"transition-all duration-300",
+							"min-h-[60px]",
+						)}
+						submitDisabled={false}
+						queueButton={<QueueButton />}
+					/>
+				</div>
+			</ChatPlanQueue>
 
 			{/* Session ID - subtle display in lower right */}
 			<div className="absolute bottom-2 right-2 select-text">
