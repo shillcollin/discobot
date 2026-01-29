@@ -31,12 +31,12 @@ interface QueueContextValue {
 
 const QueueContext = React.createContext<QueueContextValue | null>(null);
 
+/**
+ * Hook to access queue context. Returns null when used outside ChatPlanQueue
+ * or when plan is empty (since provider isn't mounted in that case).
+ */
 function useQueue() {
-	const context = React.useContext(QueueContext);
-	if (!context) {
-		throw new Error("Queue components must be used within ChatPlanQueue");
-	}
-	return context;
+	return React.useContext(QueueContext);
 }
 
 interface ChatPlanQueueProps {
@@ -145,10 +145,17 @@ export function ChatPlanQueue({ plan, children }: ChatPlanQueueProps) {
 
 /**
  * QueueButton - Minimal button showing progress (e.g., 4/5)
- * Renders in the input footer
+ * Renders in the input footer. Returns null when no plan is active.
  */
 export const QueueButton = React.memo(function QueueButton() {
-	const { completedCount, totalCount, toggle } = useQueue();
+	const context = useQueue();
+
+	// Don't render when outside provider (no plan)
+	if (!context) {
+		return null;
+	}
+
+	const { completedCount, totalCount, toggle } = context;
 
 	return (
 		<Button
@@ -172,12 +179,19 @@ interface QueuePanelProps {
 
 /**
  * QueuePanel - Expanded panel showing full queue list
- * Renders above the input when expanded
+ * Renders above the input when expanded. Returns null when no plan is active.
  */
 export const QueuePanel = React.memo(function QueuePanel({
 	plan,
 }: QueuePanelProps) {
-	const { isExpanded, completedCount } = useQueue();
+	const context = useQueue();
+
+	// Don't render when outside provider (no plan)
+	if (!context) {
+		return null;
+	}
+
+	const { isExpanded, completedCount } = context;
 
 	if (!isExpanded) {
 		return null;

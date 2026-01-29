@@ -3,9 +3,9 @@ import { describe, it } from "node:test";
 import { render, screen } from "@testing-library/react";
 import {
 	ChatPlanQueue,
+	type PlanEntry,
 	QueueButton,
 	QueuePanel,
-	type PlanEntry,
 } from "./chat-plan-queue";
 
 // Mock plan data
@@ -112,11 +112,13 @@ describe("ChatPlanQueue", () => {
 			const plan = createMockPlan(); // 1 completed, 1 in_progress, 1 pending
 			const { container } = render(<ChatPlanQueue plan={plan} />);
 
-			const todoLabel = container.querySelector('[data-slot="collapsible-trigger"]');
+			const todoLabel = container.querySelector(
+				'[data-slot="collapsible-trigger"]',
+			);
 			assert.ok(todoLabel, "Todo label should be rendered");
 			assert.ok(
 				todoLabel?.textContent?.includes("Todo") &&
-				todoLabel?.textContent?.includes("1 completed"),
+					todoLabel?.textContent?.includes("1 completed"),
 				"Should show correct completion count (1 completed)",
 			);
 		});
@@ -159,24 +161,18 @@ describe("ChatPlanQueue", () => {
 				screen.getByText("In progress task"),
 				"In progress task should render",
 			);
-			assert.ok(
-				screen.getByText("Pending task"),
-				"Pending task should render",
-			);
+			assert.ok(screen.getByText("Pending task"), "Pending task should render");
 		});
 	});
 });
 
 describe("QueueButton", () => {
-	it("should throw error when used outside ChatPlanQueue context", () => {
-		assert.throws(
-			() => {
-				render(<QueueButton />);
-			},
-			{
-				message: "Queue components must be used within ChatPlanQueue",
-			},
-			"Should throw error when used outside context",
+	it("should return null when used outside ChatPlanQueue context", () => {
+		const { container } = render(<QueueButton />);
+		assert.strictEqual(
+			container.firstChild,
+			null,
+			"Should render nothing when used outside context",
 		);
 	});
 
@@ -192,37 +188,82 @@ describe("QueueButton", () => {
 		assert.ok(progressText, "Should show progress as 1/3");
 	});
 
-	it("should not throw when button is rendered with empty plan", () => {
+	it("should return null when rendered with empty plan", () => {
 		// When plan is empty, ChatPlanQueue renders children without context
-		// QueueButton will throw an error when rendered without context
-		// This is expected behavior - the button should only be used with a valid plan
-		assert.throws(
-			() => {
-				render(
-					<ChatPlanQueue plan={[]}>
-						<QueueButton />
-					</ChatPlanQueue>,
-				);
-			},
-			{
-				message: "Queue components must be used within ChatPlanQueue",
-			},
-			"Should throw error when QueueButton is used with empty plan",
+		// QueueButton should gracefully return null when context is not available
+		const { container } = render(
+			<ChatPlanQueue plan={[]}>
+				<QueueButton />
+			</ChatPlanQueue>,
+		);
+
+		// QueueButton should render nothing when there's no context
+		const button = container.querySelector("button");
+		assert.strictEqual(
+			button,
+			null,
+			"QueueButton should not render when plan is empty",
+		);
+	});
+
+	it("should return null when rendered with null plan", () => {
+		// When plan is null, ChatPlanQueue renders children without context
+		// QueueButton should gracefully return null
+		const { container } = render(
+			<ChatPlanQueue plan={null}>
+				<QueueButton />
+			</ChatPlanQueue>,
+		);
+
+		const button = container.querySelector("button");
+		assert.strictEqual(
+			button,
+			null,
+			"QueueButton should not render when plan is null",
 		);
 	});
 });
 
 describe("QueuePanel", () => {
-	it("should throw error when used outside ChatPlanQueue context", () => {
+	it("should return null when used outside ChatPlanQueue context", () => {
 		const plan = createMockPlan();
-		assert.throws(
-			() => {
-				render(<QueuePanel plan={plan} />);
-			},
-			{
-				message: "Queue components must be used within ChatPlanQueue",
-			},
-			"Should throw error when used outside context",
+		const { container } = render(<QueuePanel plan={plan} />);
+		assert.strictEqual(
+			container.firstChild,
+			null,
+			"Should render nothing when used outside context",
+		);
+	});
+
+	it("should return null when rendered with empty plan", () => {
+		const plan = createMockPlan();
+		const { container } = render(
+			<ChatPlanQueue plan={[]}>
+				<QueuePanel plan={plan} />
+			</ChatPlanQueue>,
+		);
+
+		// QueuePanel should render nothing when there's no context
+		assert.strictEqual(
+			container.firstChild,
+			null,
+			"QueuePanel should not render when plan is empty",
+		);
+	});
+
+	it("should return null when rendered with null plan", () => {
+		const plan = createMockPlan();
+		const { container } = render(
+			<ChatPlanQueue plan={null}>
+				<QueuePanel plan={plan} />
+			</ChatPlanQueue>,
+		);
+
+		// QueuePanel should render nothing when there's no context
+		assert.strictEqual(
+			container.firstChild,
+			null,
+			"QueuePanel should not render when plan is null",
 		);
 	});
 
@@ -255,6 +296,81 @@ describe("QueuePanel", () => {
 		// If we add a way to control expansion state, we'd test the expanded state
 		// For now, we just verify it doesn't crash
 		assert.ok(true, "QueuePanel renders without error");
+	});
+});
+
+describe("Regression: QueueButton context error with null/empty plan", () => {
+	it("should not throw when QueueButton is rendered inside ChatPlanQueue with null plan", () => {
+		// This is the specific bug scenario: ChatPlanQueue wraps input area with QueueButton
+		// but plan is null on new sessions. Previously this threw an error.
+		const { container } = render(
+			<ChatPlanQueue plan={null}>
+				<div data-testid="input-wrapper">
+					<QueueButton />
+					<input type="text" placeholder="Type a message..." />
+				</div>
+			</ChatPlanQueue>,
+		);
+
+		// The input wrapper should be rendered
+		const wrapper = container.querySelector('[data-testid="input-wrapper"]');
+		assert.ok(wrapper, "Input wrapper should be rendered");
+
+		// QueueButton should gracefully not render (return null)
+		const button = container.querySelector("button");
+		assert.strictEqual(
+			button,
+			null,
+			"QueueButton should not render with null plan",
+		);
+
+		// Input should still be rendered
+		const input = container.querySelector("input");
+		assert.ok(input, "Input should still be rendered");
+	});
+
+	it("should not throw when QueueButton is rendered inside ChatPlanQueue with empty plan", () => {
+		const { container } = render(
+			<ChatPlanQueue plan={[]}>
+				<div data-testid="input-wrapper">
+					<QueueButton />
+					<input type="text" placeholder="Type a message..." />
+				</div>
+			</ChatPlanQueue>,
+		);
+
+		const wrapper = container.querySelector('[data-testid="input-wrapper"]');
+		assert.ok(wrapper, "Input wrapper should be rendered");
+
+		const button = container.querySelector("button");
+		assert.strictEqual(
+			button,
+			null,
+			"QueueButton should not render with empty plan",
+		);
+	});
+
+	it("should render QueueButton when plan has entries", () => {
+		const plan = createMockPlan();
+		const { container } = render(
+			<ChatPlanQueue plan={plan}>
+				<div data-testid="input-wrapper">
+					<QueueButton />
+					<input type="text" placeholder="Type a message..." />
+				</div>
+			</ChatPlanQueue>,
+		);
+
+		// QueueButton should render when there's a valid plan
+		const wrapper = container.querySelector('[data-testid="input-wrapper"]');
+		const button = wrapper?.querySelector("button");
+		assert.ok(button, "QueueButton should render with valid plan");
+
+		// Should show progress count (1 completed / 3 total)
+		assert.ok(
+			button?.textContent?.includes("1/3"),
+			"Should show progress count",
+		);
 	});
 });
 
