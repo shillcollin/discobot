@@ -25,6 +25,10 @@ import {
 import type { Workspace } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useMainContentContext } from "@/lib/contexts/main-content-context";
+import {
+	STORAGE_KEYS,
+	usePersistedState,
+} from "@/lib/hooks/use-persisted-state";
 import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
 import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import {
@@ -54,10 +58,22 @@ export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 	const _selectedSessionId = getSelectedSessionId();
 	const selectedWorkspaceId = getSelectedWorkspaceId();
 
+	// Persist selected workspace ID in localStorage
+	const [_persistedWorkspaceId, setPersistedWorkspaceId] = usePersistedState<
+		string | null
+	>(STORAGE_KEYS.SELECTED_WORKSPACE_ID, null);
+
 	// Find the workspace using the helper method
 	const sessionWorkspace = selectedWorkspaceId
 		? workspaces.find((w) => w.id === selectedWorkspaceId)
 		: undefined;
+
+	// Update persisted workspace ID whenever selection changes
+	React.useEffect(() => {
+		if (selectedWorkspaceId) {
+			setPersistedWorkspaceId(selectedWorkspaceId);
+		}
+	}, [selectedWorkspaceId, setPersistedWorkspaceId]);
 
 	const [credentialsOpen, setCredentialsOpen] = React.useState(false);
 	const [confirmDeleteSessionId, setConfirmDeleteSessionId] = React.useState<

@@ -1,7 +1,12 @@
 import { generateId } from "ai";
 import * as React from "react";
 import type { Session } from "@/lib/api-types";
+import {
+	STORAGE_KEYS,
+	usePersistedState,
+} from "@/lib/hooks/use-persisted-state";
 import { useSession } from "@/lib/hooks/use-sessions";
+import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 
 export type MainContentView =
 	| { type: "new-session"; workspaceId?: string; agentId?: string }
@@ -69,6 +74,38 @@ export function MainContentProvider({ children }: MainContentProviderProps) {
 	} else if (view.type !== "new-session") {
 		tempSessionIdRef.current = null;
 	}
+
+	// Fetch workspaces to restore persisted selection
+	const { workspaces } = useWorkspaces();
+
+	// Get persisted workspace ID
+	const [persistedWorkspaceId] = usePersistedState<string | null>(
+		STORAGE_KEYS.SELECTED_WORKSPACE_ID,
+		null,
+	);
+
+	// Restore persisted workspace on mount
+	React.useEffect(() => {
+		// Only restore if we're on new-session view with no workspace selected
+		if (
+			view.type === "new-session" &&
+			!view.workspaceId &&
+			persistedWorkspaceId &&
+			workspaces.length > 0
+		) {
+			// Check if the persisted workspace still exists
+			const workspaceExists = workspaces.some(
+				(w) => w.id === persistedWorkspaceId,
+			);
+			if (workspaceExists) {
+				// Update view to include the persisted workspace
+				setView({
+					type: "new-session",
+					workspaceId: persistedWorkspaceId,
+				});
+			}
+		}
+	}, [view, persistedWorkspaceId, workspaces]);
 
 	// Fetch session data when viewing a session
 	const selectedSessionId = view.type === "session" ? view.sessionId : null;

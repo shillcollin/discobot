@@ -57,6 +57,7 @@ export const STORAGE_KEYS = {
 	AGENTS_PANEL_HEIGHT: "octobot:agentsPanelHeight",
 	LAST_AGENT_TYPE_ID: "octobot:lastAgentTypeId",
 	LAST_WORKSPACE_PATH: "octobot:lastWorkspacePath",
+	SELECTED_WORKSPACE_ID: "octobot:selectedWorkspaceId",
 	// Session visibility
 	SHOW_CLOSED_SESSIONS: "octobot:showClosedSessions",
 	// Per-session state (sessionStorage)
