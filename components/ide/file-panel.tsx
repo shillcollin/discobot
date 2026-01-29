@@ -13,17 +13,11 @@ import {
 	FolderOpen,
 	FolderPlus,
 	Loader2,
-	X,
 } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import type { FileStatus, SessionDiffFileEntry } from "@/lib/api-types";
+import { useSessionViewContext } from "@/lib/contexts/session-view-context";
 import {
 	type LazyFileNode,
 	useSessionFiles,
@@ -55,22 +49,17 @@ function getFolderStatus(
 }
 
 interface FilePanelProps {
-	sessionId: string | null;
-	onFileSelect: (path: string) => void;
-	selectedFilePath: string | null;
 	className?: string;
 	style?: React.CSSProperties;
-	onCloseSession?: (saveChanges: boolean) => void;
 }
 
-export function FilePanel({
-	sessionId,
-	onFileSelect,
-	selectedFilePath,
-	className,
-	style,
-	onCloseSession,
-}: FilePanelProps) {
+export function FilePanel({ className, style }: FilePanelProps) {
+	// Get session and file selection from context
+	const { selectedSessionId, activeView, handleFileSelect } =
+		useSessionViewContext();
+	const selectedFilePath = activeView.startsWith("file:")
+		? activeView.slice(5)
+		: null;
 	const [showChangedOnly, setShowChangedOnly] = React.useState(true);
 	const [isExpandingAll, setIsExpandingAll] = React.useState(false);
 
@@ -85,7 +74,7 @@ export function FilePanel({
 		expandAll,
 		collapseAll,
 		isPathLoading,
-	} = useSessionFiles(sessionId, !showChangedOnly);
+	} = useSessionFiles(selectedSessionId, !showChangedOnly);
 
 	// Filter to show only changed files when in "Changed" mode
 	const filteredFiles = React.useMemo(() => {
@@ -159,7 +148,7 @@ export function FilePanel({
 		return hasDir(filteredFiles);
 	}, [filteredFiles]);
 
-	if (!sessionId) {
+	if (!selectedSessionId) {
 		return (
 			<div
 				className={cn(
@@ -231,7 +220,7 @@ export function FilePanel({
 							depth={0}
 							expandedPaths={expandedPaths}
 							toggleExpand={toggleDirectory}
-							onFileSelect={onFileSelect}
+							onFileSelect={handleFileSelect}
 							selectedFilePath={selectedFilePath}
 							isPathLoading={isPathLoading}
 							diffEntries={diffEntries}
@@ -267,45 +256,6 @@ export function FilePanel({
 							</>
 						)}
 					</Button>
-				</div>
-			)}
-
-			{/* Close Session footer */}
-			{onCloseSession && (
-				<div className="px-3 py-2 border-t border-sidebar-border">
-					{changedCount > 0 ? (
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button
-									variant="outline"
-									size="sm"
-									className="w-full gap-2 text-xs"
-								>
-									<X className="h-3.5 w-3.5" />
-									Close Session
-									<ChevronDown className="h-3 w-3 ml-auto opacity-50" />
-								</Button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end" className="w-48">
-								<DropdownMenuItem onSelect={() => onCloseSession(true)}>
-									Close & Push Changes
-								</DropdownMenuItem>
-								<DropdownMenuItem onSelect={() => onCloseSession(false)}>
-									Close without Saving
-								</DropdownMenuItem>
-							</DropdownMenuContent>
-						</DropdownMenu>
-					) : (
-						<Button
-							variant="outline"
-							size="sm"
-							className="w-full gap-2 text-xs"
-							onClick={() => onCloseSession(false)}
-						>
-							<X className="h-3.5 w-3.5" />
-							Close Session
-						</Button>
-					)}
 				</div>
 			)}
 		</div>

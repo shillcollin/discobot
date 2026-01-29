@@ -17,7 +17,7 @@ import {
 	useDialogControl,
 } from "@/lib/hooks/use-dialog-control";
 import { useWorkspaces } from "@/lib/hooks/use-workspaces";
-import { useMainPanelContext } from "./main-panel-context";
+import { useMainContentContext } from "./main-content-context";
 
 // Dialog data types
 interface AgentDialogData {
@@ -81,7 +81,7 @@ interface DialogProviderProps {
 }
 
 export function DialogProvider({ children }: DialogProviderProps) {
-	const mainPanel = useMainPanelContext();
+	const mainPanel = useMainContentContext();
 	const workspace = useWorkspaces();
 	const { createAgent, updateAgent, mutate: mutateAgents } = useAgents();
 	useAgentTypes(); // Preload agent types for dialog

@@ -276,14 +276,13 @@ export async function proxyHttpRequest(
 
 /**
  * Generate HTML page for connection refused errors.
- * The page auto-refreshes every 5 seconds.
+ * The page auto-refreshes every 5 seconds and shows status updates.
  */
 function connectionRefusedHtml(port: number): string {
 	return `<!DOCTYPE html>
 <html>
 <head>
 	<meta charset="utf-8">
-	<meta http-equiv="refresh" content="5">
 	<title>Connecting to service...</title>
 	<style>
 		body {
@@ -321,13 +320,66 @@ function connectionRefusedHtml(port: number): string {
 		@media (prefers-color-scheme: dark) {
 			p { color: #999; }
 		}
+		.status {
+			font-size: 0.75rem;
+			color: #999;
+			margin-top: 1rem;
+			font-family: monospace;
+		}
+		.status.error { color: #c00; }
+		.status.success { color: #0a0; }
+		@media (prefers-color-scheme: dark) {
+			.status { color: #666; }
+			.status.error { color: #f66; }
+			.status.success { color: #6f6; }
+		}
 	</style>
+	<script>
+		let retryCount = 0;
+		let retryTimeout;
+
+		async function checkConnection() {
+			retryCount++;
+			const statusEl = document.getElementById('status');
+
+			try {
+				const response = await fetch(window.location.href, {
+					method: 'HEAD',
+					cache: 'no-cache'
+				});
+
+				if (response.ok) {
+					statusEl.textContent = 'HTTP ' + response.status + ' ' + response.statusText + ' - Connection established!';
+					statusEl.className = 'status success';
+					// Reload the page to show the actual content
+					setTimeout(() => window.location.reload(), 500);
+				} else {
+					statusEl.textContent = 'HTTP ' + response.status + ' ' + response.statusText + ' - Retrying... (attempt ' + retryCount + ')';
+					statusEl.className = 'status error';
+					retryTimeout = setTimeout(checkConnection, 2000);
+				}
+			} catch (err) {
+				statusEl.textContent = 'Connection refused - Retrying... (attempt ' + retryCount + ')';
+				statusEl.className = 'status error';
+				retryTimeout = setTimeout(checkConnection, 2000);
+			}
+		}
+
+		window.addEventListener('load', () => {
+			checkConnection();
+		});
+
+		window.addEventListener('beforeunload', () => {
+			if (retryTimeout) clearTimeout(retryTimeout);
+		});
+	</script>
 </head>
 <body>
 	<div class="container">
 		<div class="spinner"></div>
 		<h1>Waiting for service on port ${port}</h1>
-		<p>Retrying automatically...</p>
+		<p>Checking connection status...</p>
+		<div id="status" class="status">Connecting...</div>
 	</div>
 </body>
 </html>`;

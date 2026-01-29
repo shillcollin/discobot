@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Workspace } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
-import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
+import { useMainContentContext } from "@/lib/contexts/main-content-context";
 import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
 import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import {
@@ -49,7 +49,7 @@ export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 		showSession,
 		showWorkspaceSessions,
 		showNewSession,
-	} = useMainPanelContext();
+	} = useMainContentContext();
 
 	const _selectedSessionId = getSelectedSessionId();
 	const selectedWorkspaceId = getSelectedWorkspaceId();

@@ -29,7 +29,7 @@ import {
 } from "@/lib/api-constants";
 import type { Session, Workspace, WorkspaceStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
-import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
+import { useMainContentContext } from "@/lib/contexts/main-content-context";
 import {
 	STORAGE_KEYS,
 	usePersistedState,
@@ -76,7 +76,7 @@ function saveExpandedIds(ids: Set<string>) {
 export function SidebarTree({ className }: SidebarTreeProps) {
 	const { workspaces } = useWorkspaces();
 	const { view, showSession, showWorkspaceSessions, showNewSession } =
-		useMainPanelContext();
+		useMainContentContext();
 	const { workspaceDialog, deleteWorkspaceDialog } = useDialogContext();
 
 	const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());

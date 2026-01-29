@@ -1,122 +1,24 @@
 import { useChat } from "@ai-sdk/react";
-import {
-	DefaultChatTransport,
-	type DynamicToolUIPart,
-	type FileUIPart,
-	generateId,
-	type UIMessage,
-} from "ai";
-import {
-	AlertCircle,
-	CheckCircle,
-	Copy,
-	Loader2,
-	MessageSquare,
-	Paperclip,
-	RefreshCcw,
-	Search,
-} from "lucide-react";
-import { lazy, Suspense } from "react";
-
-// Lazy-load Framer Motion components to reduce initial bundle size (~35KB)
-const WelcomeHeader = lazy(() =>
-	import("@/components/ide/welcome-animation").then((mod) => ({
-		default: mod.WelcomeHeader,
-	})),
-);
-
-const WelcomeSelectors = lazy(() =>
-	import("@/components/ide/welcome-animation").then((mod) => ({
-		default: mod.WelcomeSelectors,
-	})),
-);
+import { DefaultChatTransport, type UIMessage } from "ai";
+import { AlertCircle } from "lucide-react";
 
 import * as React from "react";
-import { useDeferredValue } from "react";
-import { useSWRConfig } from "swr";
-import {
-	Attachment,
-	AttachmentPreview,
-	AttachmentRemove,
-	Attachments,
-} from "@/components/ai-elements/attachments";
-import {
-	Conversation,
-	ConversationContent,
-	ConversationEmptyState,
-	ConversationScrollButton,
-} from "@/components/ai-elements/conversation";
-import { ImageAttachment } from "@/components/ai-elements/image-attachment";
-import {
-	Message,
-	MessageAction,
-	MessageActions,
-	MessageContent,
-	MessageResponse,
-} from "@/components/ai-elements/message";
-import {
-	PromptInput,
-	PromptInputActionAddAttachments,
-	PromptInputActionMenu,
-	PromptInputActionMenuContent,
-	PromptInputActionMenuTrigger,
-	PromptInputFooter,
-	type PromptInputMessage,
-	PromptInputSubmit,
-	PromptInputTextarea,
-	PromptInputTools,
-	usePromptInputAttachments,
-} from "@/components/ai-elements/prompt-input";
-import {
-	Queue,
-	QueueItem,
-	QueueItemContent,
-	QueueItemDescription,
-	QueueItemIndicator,
-	QueueList,
-	QueueSection,
-	QueueSectionContent,
-	QueueSectionLabel,
-	QueueSectionTrigger,
-} from "@/components/ai-elements/queue";
-import { Shimmer } from "@/components/ai-elements/shimmer";
-import {
-	Tool,
-	ToolContent,
-	ToolHeader,
-	ToolInput,
-	ToolOutput,
-} from "@/components/ai-elements/tool";
-import { Button } from "@/components/ui/button";
+import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
+import { ChatConversation } from "@/components/ide/chat-conversation";
+import { ChatNewContent } from "@/components/ide/chat-new-content";
+import { ChatPlanQueue } from "@/components/ide/chat-plan-queue";
+import { PromptInputWithHistory } from "@/components/ide/prompt-input-with-history";
 import { getApiBase } from "@/lib/api-config";
 import {
 	CommitStatus,
 	SessionStatus as SessionStatusConstants,
 } from "@/lib/api-constants";
-import type { Agent, SessionStatus } from "@/lib/api-types";
-import { useDialogContext } from "@/lib/contexts/dialog-context";
-import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
-import { useAgentTypes } from "@/lib/hooks/use-agent-types";
-import { useAgents } from "@/lib/hooks/use-agents";
-import { useLazyRender } from "@/lib/hooks/use-lazy-render";
-import { useMessages } from "@/lib/hooks/use-messages";
-import { usePromptHistory } from "@/lib/hooks/use-prompt-history";
 import { useSession } from "@/lib/hooks/use-sessions";
-import { useWorkspaces } from "@/lib/hooks/use-workspaces";
+import {
+	getSessionHoverText,
+	getSessionStatusIndicator,
+} from "@/lib/session-utils";
 import { cn } from "@/lib/utils";
-import { PromptHistoryDropdown } from "./prompt-history-dropdown";
-
-type ChatMode = "welcome" | "conversation";
-
-// Helper to extract text content from AI SDK message parts
-function getMessageText(message: UIMessage): string {
-	return message.parts
-		.filter(
-			(part): part is { type: "text"; text: string } => part.type === "text",
-		)
-		.map((part) => part.text)
-		.join("");
-}
 
 // Plan entry structure from TodoWrite tool
 interface PlanEntry {
@@ -160,525 +62,84 @@ function extractLatestPlan(messages: UIMessage[]): PlanEntry[] | null {
 }
 
 interface ChatPanelProps {
+	/** Session ID for the chat (required) */
+	sessionId: string;
+	/** Initial messages for resuming an existing session. If provided, this is a resume scenario. */
+	initialMessages?: UIMessage[];
+	/** Callback when a new session is created - receives session ID, workspace ID, and agent ID */
+	onSessionCreated?: (
+		sessionId: string,
+		workspaceId: string,
+		agentId: string,
+	) => void;
+	/** Callback when chat completes (for refreshing file data) */
+	onChatComplete?: () => void;
+	/** Optional className */
 	className?: string;
 }
 
-// Map session status to human-readable text and icons
-function getStatusDisplay(status: SessionStatus): {
-	text: string;
-	icon: React.ReactNode;
-	isLoading: boolean;
-} {
-	switch (status) {
-		case "initializing":
-			return {
-				text: "Initializing session...",
-				icon: <Loader2 className="h-4 w-4 animate-spin" />,
-				isLoading: true,
-			};
-		case "reinitializing":
-			return {
-				text: "Reinitializing sandbox...",
-				icon: <Loader2 className="h-4 w-4 animate-spin" />,
-				isLoading: true,
-			};
-		case "cloning":
-			return {
-				text: "Cloning repository...",
-				icon: <Loader2 className="h-4 w-4 animate-spin" />,
-				isLoading: true,
-			};
-		case "pulling_image":
-			return {
-				text: "Pulling container image...",
-				icon: <Loader2 className="h-4 w-4 animate-spin" />,
-				isLoading: true,
-			};
-		case "creating_sandbox":
-			return {
-				text: "Creating sandbox...",
-				icon: <Loader2 className="h-4 w-4 animate-spin" />,
-				isLoading: true,
-			};
-		case "ready":
-			return {
-				text: "Ready",
-				icon: <CheckCircle className="h-4 w-4 text-green-500" />,
-				isLoading: false,
-			};
-		case "running":
-			return {
-				text: "Running",
-				icon: <CheckCircle className="h-4 w-4 text-green-500" />,
-				isLoading: false,
-			};
-		case "stopped":
-			return {
-				text: "Session stopped",
-				icon: <AlertCircle className="h-4 w-4 text-yellow-500" />,
-				isLoading: false,
-			};
-		case "error":
-			return {
-				text: "Session error",
-				icon: <AlertCircle className="h-4 w-4 text-destructive" />,
-				isLoading: false,
-			};
-		case "removing":
-			return {
-				text: "Removing session...",
-				icon: <Loader2 className="h-4 w-4 animate-spin text-destructive" />,
-				isLoading: true,
-			};
-		case "removed":
-			return {
-				text: "Session removed",
-				icon: <AlertCircle className="h-4 w-4 text-muted-foreground" />,
-				isLoading: false,
-			};
-		default:
-			return {
-				text: String(status),
-				icon: <AlertCircle className="h-4 w-4 text-muted-foreground" />,
-				isLoading: false,
-			};
-	}
-}
+export function ChatPanel({
+	sessionId,
+	initialMessages,
+	onSessionCreated,
+	onChatComplete,
+	className,
+}: ChatPanelProps) {
+	// Determine if this is a resume scenario based on initialMessages
+	const resume = initialMessages !== undefined;
 
-// Attachments preview component using new API
-function AttachmentsPreview() {
-	const attachments = usePromptInputAttachments();
-
-	if (attachments.files.length === 0) {
-		return null;
-	}
-
-	return (
-		<Attachments variant="inline" className="px-3 pt-3 pb-0">
-			{attachments.files.map((file) => (
-				<Attachment
-					key={file.id}
-					data={file}
-					onRemove={() => attachments.remove(file.id)}
-				>
-					<AttachmentPreview />
-					<span className="truncate max-w-[120px] text-xs">
-						{file.filename}
-					</span>
-					<AttachmentRemove />
-				</Attachment>
-			))}
-		</Attachments>
-	);
-}
-
-// Memoized message item to prevent re-renders when messages array updates
-interface MessageItemProps {
-	message: UIMessage;
-	onCopy: (text: string) => void;
-	onRegenerate: () => void;
-}
-
-const MessageItem = React.memo(function MessageItem({
-	message,
-	onCopy,
-	onRegenerate,
-}: MessageItemProps) {
-	const textContent = React.useMemo(() => getMessageText(message), [message]);
-
-	return (
-		<Message from={message.role}>
-			<MessageContent>
-				<div className="text-xs font-medium text-muted-foreground mb-1">
-					{message.role === "user" ? "You" : "Assistant"}
-				</div>
-				{/* Render message parts in order */}
-				{message.parts.map((part, partIdx) => {
-					if (part.type === "text") {
-						return (
-							// biome-ignore lint/suspicious/noArrayIndexKey: Text parts have no unique ID, order is stable
-							<MessageResponse key={`text-${partIdx}`}>
-								{part.text}
-							</MessageResponse>
-						);
-					}
-					if (part.type === "file") {
-						const filePart = part as FileUIPart;
-						if (filePart.mediaType?.startsWith("image/")) {
-							return (
-								<ImageAttachment
-									// biome-ignore lint/suspicious/noArrayIndexKey: File parts have no unique ID, order is stable
-									key={`file-${partIdx}`}
-									src={filePart.url}
-									filename={filePart.filename}
-								/>
-							);
-						}
-						// Non-image file attachment
-						return (
-							<div
-								// biome-ignore lint/suspicious/noArrayIndexKey: File parts have no unique ID, order is stable
-								key={`file-${partIdx}`}
-								className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm"
-							>
-								<span className="text-muted-foreground">
-									📎 {filePart.filename}
-								</span>
-							</div>
-						);
-					}
-					if (part.type === "dynamic-tool") {
-						const toolPart = part as DynamicToolUIPart;
-						return (
-							<Tool key={toolPart.toolCallId}>
-								<ToolHeader
-									type={toolPart.type}
-									state={toolPart.state}
-									toolName={toolPart.toolName}
-									title={toolPart.title}
-								/>
-								<ToolContent>
-									<ToolInput input={toolPart.input} />
-									<ToolOutput
-										output={toolPart.output}
-										errorText={toolPart.errorText}
-									/>
-								</ToolContent>
-							</Tool>
-						);
-					}
-					return null;
-				})}
-				{message.role === "assistant" && (
-					<MessageActions>
-						<MessageAction
-							label="Retry"
-							tooltip="Regenerate response"
-							onClick={onRegenerate}
-						>
-							<RefreshCcw className="size-3" />
-						</MessageAction>
-						<MessageAction
-							label="Copy"
-							tooltip="Copy to clipboard"
-							onClick={() => onCopy(textContent)}
-						>
-							<Copy className="size-3" />
-						</MessageAction>
-					</MessageActions>
-				)}
-			</MessageContent>
-		</Message>
-	);
-});
-
-// Lazy-rendered message wrapper - defers rendering until first visible
-// Uses IntersectionObserver to detect visibility, then keeps message rendered
-interface LazyMessageItemProps extends MessageItemProps {
-	/** Estimated height for placeholder before render (prevents layout shift) */
-	estimatedHeight?: number;
-}
-
-// IntersectionObserver options - use rootMargin to pre-render messages
-// slightly before they enter the viewport for smoother scrolling
-const LAZY_OBSERVER_OPTIONS: IntersectionObserverInit = {
-	rootMargin: "200px 0px", // Pre-render 200px above/below viewport
-};
-
-const LazyMessageItem = React.memo(function LazyMessageItem({
-	message,
-	onCopy,
-	onRegenerate,
-	estimatedHeight = 100,
-}: LazyMessageItemProps) {
-	const [ref, hasBeenVisible] = useLazyRender(LAZY_OBSERVER_OPTIONS);
-
-	return (
-		<div ref={ref}>
-			{hasBeenVisible ? (
-				<MessageItem
-					message={message}
-					onCopy={onCopy}
-					onRegenerate={onRegenerate}
-				/>
-			) : (
-				// Placeholder with estimated height to maintain scroll position
-				<div
-					className="flex items-center justify-center text-muted-foreground/30"
-					style={{ minHeight: estimatedHeight }}
-				>
-					<Loader2 className="h-4 w-4 animate-spin" />
-				</div>
-			)}
-		</div>
-	);
-});
-
-// Memoized input area component to prevent re-renders when typing
-interface ChatInputAreaProps {
-	mode: "welcome" | "conversation";
-	status: "ready" | "streaming" | "submitted" | "error";
-	localSelectedWorkspaceId: string | null;
-	localSelectedAgentId: string | null;
-	handleSubmit: (message: PromptInputMessage, e: React.FormEvent) => void;
-	/** Whether input is locked (e.g., during commit) */
-	isLocked?: boolean;
-	/** Message to show when locked */
-	lockedMessage?: string;
-	/** Session ID for draft persistence */
-	selectedSessionId: string | null;
-}
-
-const ChatInputArea = React.memo(
-	React.forwardRef<HTMLTextAreaElement, ChatInputAreaProps>(
-		function ChatInputArea(
-			{
-				mode,
-				status,
-				localSelectedWorkspaceId,
-				localSelectedAgentId,
-				handleSubmit,
-				isLocked = false,
-				lockedMessage,
-				selectedSessionId,
-			},
-			ref,
-		) {
-			const internalRef = React.useRef<HTMLTextAreaElement>(null);
-			const textareaRef =
-				(ref as React.RefObject<HTMLTextAreaElement>) || internalRef;
-
-			const {
-				history,
-				pinnedPrompts,
-				historyIndex,
-				isPinnedSelection,
-				isHistoryOpen,
-				setHistoryIndex,
-				onSelectHistory,
-				addToHistory,
-				pinPrompt,
-				unpinPrompt,
-				isPinned,
-				closeHistory,
-				handleKeyDown: historyKeyDown,
-			} = usePromptHistory({
-				textareaRef,
-				sessionId: selectedSessionId,
-			});
-
-			// Wrap handleSubmit to also add to history
-			const wrappedHandleSubmit = React.useCallback(
-				(message: PromptInputMessage, e: React.FormEvent) => {
-					const text = message.text;
-					handleSubmit(message, e);
-					// Add to history after submit
-					if (text) {
-						addToHistory(text);
-					}
-				},
-				[handleSubmit, addToHistory],
-			);
-
-			return (
-				<div
-					className={cn(
-						"shrink-0 transition-all duration-300 ease-in-out bg-background relative z-10",
-						mode === "welcome"
-							? "px-8 py-4 max-w-2xl mx-auto w-full"
-							: "px-4 pb-4 max-w-3xl mx-auto w-full",
-					)}
-				>
-					<div className="relative">
-						<PromptHistoryDropdown
-							history={history}
-							pinnedPrompts={pinnedPrompts}
-							historyIndex={historyIndex}
-							isPinnedSelection={isPinnedSelection}
-							isHistoryOpen={isHistoryOpen}
-							setHistoryIndex={setHistoryIndex}
-							onSelectHistory={onSelectHistory}
-							pinPrompt={pinPrompt}
-							unpinPrompt={unpinPrompt}
-							isPinned={isPinned}
-							textareaRef={textareaRef}
-							closeHistory={closeHistory}
-						/>
-						<PromptInput
-							onSubmit={wrappedHandleSubmit}
-							className="max-w-full"
-							accept="image/*"
-						>
-							<AttachmentsPreview />
-							<PromptInputTextarea
-								ref={textareaRef}
-								placeholder={
-									isLocked
-										? lockedMessage || "Input disabled"
-										: mode === "welcome"
-											? "What would you like to work on?"
-											: "Type a message..."
-								}
-								disabled={isLocked}
-								onKeyDown={historyKeyDown}
-								className={cn(
-									"transition-all duration-300",
-									mode === "welcome"
-										? "min-h-[80px] text-base"
-										: "min-h-[60px]",
-									isLocked && "opacity-50 cursor-not-allowed",
-								)}
-							/>
-							<PromptInputFooter>
-								<PromptInputTools>
-									<PromptInputActionMenu>
-										<PromptInputActionMenuTrigger>
-											<Paperclip className="size-4" />
-										</PromptInputActionMenuTrigger>
-										<PromptInputActionMenuContent>
-											<PromptInputActionAddAttachments />
-										</PromptInputActionMenuContent>
-									</PromptInputActionMenu>
-								</PromptInputTools>
-								<PromptInputSubmit
-									status={status}
-									disabled={
-										isLocked ||
-										(mode === "welcome" &&
-											(!localSelectedWorkspaceId || !localSelectedAgentId))
-									}
-								/>
-							</PromptInputFooter>
-						</PromptInput>
-					</div>
-				</div>
-			);
-		},
-	),
-);
-
-export function ChatPanel({ className }: ChatPanelProps) {
-	// Get data from contexts
-	const { workspaces } = useWorkspaces();
-	const { agents } = useAgents();
-	const { agentTypes } = useAgentTypes();
-	const {
-		view,
-		selectedSession,
-		getSelectedSessionId,
-		showSession,
-		showNewSession,
-	} = useMainPanelContext();
-	const { agentDialog, workspaceDialog } = useDialogContext();
-
-	// Derive values from view
-	const selectedSessionId = getSelectedSessionId();
-	const preselectedWorkspaceId =
-		view.type === "new-session" ? (view.workspaceId ?? null) : null;
-	const preselectedAgentId =
-		view.type === "new-session" ? (view.agentId ?? null) : null;
-
-	// Derive sessionAgent and sessionWorkspace from selectedSession
-	const sessionAgent = selectedSession
-		? agents.find((a) => a.id === selectedSession.agentId)
-		: undefined;
-	const sessionWorkspace = selectedSession
-		? workspaces.find((w) => w.id === selectedSession.workspaceId)
-		: undefined;
-
-	// For new chats, generate a client-side session ID
-	// This is generated once at mount and reset when a session is selected
-	const [pendingSessionId, setPendingSessionId] = React.useState<string | null>(
-		() => (selectedSessionId ? null : generateId()),
-	);
-
-	// Reset pending ID when session changes
-	React.useEffect(() => {
-		if (selectedSessionId) {
-			// Existing session selected, clear pending ID
-			setPendingSessionId(null);
-		} else if (!pendingSessionId) {
-			// No session and no pending ID, generate one
-			setPendingSessionId(generateId());
-		}
-	}, [selectedSessionId, pendingSessionId]);
-
-	// The effective chat ID: prefer existing session, fall back to pending
-	const chatId = selectedSessionId || pendingSessionId;
-
+	// State for new session workspace/agent selection
 	const [localSelectedWorkspaceId, setLocalSelectedWorkspaceId] =
-		React.useState<string | null>(
-			preselectedWorkspaceId ||
-				(workspaces.length > 0 ? workspaces[0].id : null),
-		);
+		React.useState<string | null>(null);
 	const [localSelectedAgentId, setLocalSelectedAgentId] = React.useState<
 		string | null
-	>(preselectedAgentId || (agents.length > 0 ? agents[0].id : null));
-	const [isShimmering, setIsShimmering] = React.useState(false);
-
-	// Track workspace selection trigger for shimmer effect
-	const [_workspaceSelectTrigger, setWorkspaceSelectTrigger] =
-		React.useState(0);
+	>(null);
 
 	// Ref for textarea to enable focusing
 	const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
 	// Focus textarea when showing new session screen
 	React.useEffect(() => {
-		if (view.type === "new-session" && textareaRef.current) {
+		if (!resume && textareaRef.current) {
 			// Small delay to ensure the element is rendered and transitions are complete
 			const timer = setTimeout(() => {
 				textareaRef.current?.focus();
 			}, 100);
 			return () => clearTimeout(timer);
 		}
-	}, [view]);
+	}, [resume]);
 
-	// Fetch session data to check if session exists
-	const { error: sessionError, isLoading: sessionLoading } =
-		useSession(selectedSessionId);
-
-	// Fetch existing messages when a session is selected
-	// Use selectedSessionId directly (not derived selectedSession) to avoid stale cache issues
-	const {
-		messages: existingMessages,
-		error: messagesError,
-		isLoading: messagesLoading,
-	} = useMessages(selectedSessionId);
+	// Fetch session data to check if session exists (only for existing sessions)
+	const { session } = useSession(resume ? sessionId : null);
 
 	// Use refs to store the latest selection values for use in fetch
 	// This ensures sendMessage always uses current values even if useChat caches the transport
 	const selectionRef = React.useRef({
 		workspaceId: localSelectedWorkspaceId,
 		agentId: localSelectedAgentId,
-		sessionId: selectedSessionId,
+		resume,
 	});
-
-	// Callback ref for notifying when a new session receives 200 response
-	const onSessionCreatedRef = React.useRef<
-		((sessionId: string) => void) | null
-	>(null);
 
 	// Keep refs in sync with state
 	React.useEffect(() => {
 		selectionRef.current = {
 			workspaceId: localSelectedWorkspaceId,
 			agentId: localSelectedAgentId,
-			sessionId: selectedSessionId,
+			resume,
 		};
-	}, [localSelectedWorkspaceId, localSelectedAgentId, selectedSessionId]);
+	}, [localSelectedWorkspaceId, localSelectedAgentId, resume]);
 
 	// Create transport with custom fetch that always uses latest selection values
 	const transport = React.useMemo(
 		() =>
 			new DefaultChatTransport({
 				api: `${getApiBase()}/chat`,
-				// Use custom fetch to inject latest workspace/agent IDs from ref
+				// Use custom fetch to inject latest workspace/agent IDs for new sessions
 				fetch: async (url, options) => {
-					const { sessionId, workspaceId, agentId } = selectionRef.current;
+					const { resume, workspaceId, agentId } = selectionRef.current;
 
-					// Only modify body for new sessions (no existing session)
-					if (!sessionId && options?.body) {
+					// Only modify body for new sessions
+					if (!resume && options?.body) {
 						const body = JSON.parse(options.body as string);
 						body.workspaceId = workspaceId;
 						body.agentId = agentId;
@@ -689,12 +150,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 						});
 
 						// If we got a 200 response, the server has acknowledged the session
-						if (response.ok && onSessionCreatedRef.current) {
-							// Extract session ID from the request body
-							const parsedBody = JSON.parse(options.body as string);
-							const newSessionId = parsedBody.id;
-							if (newSessionId) {
-								onSessionCreatedRef.current(newSessionId);
+						if (response.ok) {
+							// Call the callback to notify that the session was created
+							if (onSessionCreated && workspaceId && agentId) {
+								onSessionCreated(sessionId, workspaceId, agentId);
 							}
 						}
 
@@ -704,7 +163,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 					return fetch(url, options);
 				},
 			}),
-		[], // No dependencies - we use ref for dynamic values
+		[onSessionCreated, sessionId],
 	);
 
 	// Use AI SDK's useChat hook
@@ -715,156 +174,26 @@ export function ChatPanel({ className }: ChatPanelProps) {
 
 	const {
 		messages,
-		setMessages,
 		sendMessage,
 		status: chatStatus,
 		error: chatError,
 	} = useChat({
 		transport,
-		// Use the effective chat ID (existing session or pending)
-		id: chatId ?? undefined,
-		// Load existing messages when session is selected (UIMessage format from container)
-		messages: existingMessages.length > 0 ? existingMessages : undefined,
-		// Handle stream errors
+		id: sessionId,
+		resume,
 		onError: handleChatError,
-		// Enable resume for stream recovery after reconnection
-		// The server returns 204 when no active stream exists, which is handled gracefully
-		// by our patch to the AI SDK
-		resume: !!selectedSessionId,
+		messages: initialMessages,
+		onFinish: onChatComplete,
 	});
-
-	// Sync existingMessages to useChat state when they load or when chatId changes
-	// This is needed because the messages prop only sets initial state
-	// When chatId changes (session switch), we MUST update messages immediately to prevent
-	// stale messages from the previous session appearing after a stream finishes
-	const prevSyncRef = React.useRef<{
-		chatId: string | null;
-		messageIds: string;
-	}>({
-		chatId: null,
-		messageIds: "",
-	});
-	React.useEffect(() => {
-		// Compare by message IDs to detect actual content changes
-		const messageIds = existingMessages.map((m) => m.id).join(",");
-		const needsSync =
-			prevSyncRef.current.chatId !== chatId ||
-			prevSyncRef.current.messageIds !== messageIds;
-
-		if (needsSync) {
-			setMessages(existingMessages);
-			prevSyncRef.current = { chatId, messageIds };
-		}
-	}, [existingMessages, setMessages, chatId]);
-
-	// Defer message rendering to prevent UI freezing during rapid streaming updates
-	// React will prioritize user interactions over message list updates
-	const deferredMessages = useDeferredValue(messages);
 
 	// Derive loading state from chat status
 	const isLoading = chatStatus === "streaming" || chatStatus === "submitted";
 	const hasError = chatStatus === "error";
 
-	// Refresh diff data when chat finishes
-	const { mutate } = useSWRConfig();
-	const prevChatStatus = React.useRef(chatStatus);
-	const prevChatId = React.useRef(chatId);
-	React.useEffect(() => {
-		// When status changes from streaming/submitted to ready, refresh the diff
-		const wasLoading =
-			prevChatStatus.current === "streaming" ||
-			prevChatStatus.current === "submitted";
-		const isNowReady = chatStatus === "ready";
-		// Only refresh if chatId hasn't changed (user didn't switch sessions mid-stream)
-		const isSameChat = prevChatId.current === chatId;
-
-		if (wasLoading && isNowReady && selectedSessionId && isSameChat) {
-			// Refresh the diff data for this session
-			mutate(`session-diff-${selectedSessionId}-files`);
-		}
-
-		prevChatStatus.current = chatStatus;
-		prevChatId.current = chatId;
-	}, [chatStatus, selectedSessionId, mutate, chatId]);
-
-	// Check if session is not found (fetch returned error and we're not loading)
-	const sessionNotFound =
-		!!selectedSessionId && !!sessionError && !sessionLoading;
-
-	// Determine mode based on whether we have messages or a session
-	// Use truthiness check since props may be undefined when not passed
-	// Include selectedSessionId to handle cases where the session object hasn't loaded yet
-	const hasSession =
-		!!sessionAgent || !!sessionWorkspace || !!selectedSessionId;
-
-	// Mode is "conversation" if we have a session or messages (but not if session not found)
-	const mode: ChatMode =
-		!sessionNotFound && (hasSession || messages.length > 0)
-			? "conversation"
-			: "welcome";
-
-	React.useEffect(() => {
-		if (preselectedWorkspaceId) {
-			setLocalSelectedWorkspaceId(preselectedWorkspaceId);
-		}
-	}, [preselectedWorkspaceId]);
-
-	React.useEffect(() => {
-		if (preselectedAgentId) {
-			setLocalSelectedAgentId(preselectedAgentId);
-		}
-	}, [preselectedAgentId]);
-
-	// Auto-select first workspace when workspaces become available and nothing is selected
-	React.useEffect(() => {
-		// Only auto-select if nothing is currently selected or selected workspace doesn't exist
-		const currentWorkspaceExists = workspaces.some(
-			(ws) => ws.id === localSelectedWorkspaceId,
-		);
-		if (!localSelectedWorkspaceId || !currentWorkspaceExists) {
-			const workspaceToSelect = workspaces[0];
-			if (workspaceToSelect) {
-				setLocalSelectedWorkspaceId(workspaceToSelect.id);
-			}
-		}
-	}, [workspaces, localSelectedWorkspaceId]);
-
-	// Auto-select default agent when agents become available and nothing is selected
-	React.useEffect(() => {
-		// Only auto-select if nothing is currently selected or selected agent doesn't exist
-		const currentAgentExists = agents.some(
-			(a) => a.id === localSelectedAgentId,
-		);
-		if (!localSelectedAgentId || !currentAgentExists) {
-			// Prefer the default agent, otherwise use the first one
-			const defaultAgent = agents.find((a) => a.isDefault);
-			const agentToSelect = defaultAgent || agents[0];
-			if (agentToSelect) {
-				setLocalSelectedAgentId(agentToSelect.id);
-			}
-		}
-	}, [agents, localSelectedAgentId]);
-
-	// Watch for view changes to trigger workspace selection shimmer
-	React.useEffect(() => {
-		if (view.type === "new-session" && view.workspaceId) {
-			setWorkspaceSelectTrigger((prev) => prev + 1);
-			setLocalSelectedWorkspaceId(view.workspaceId);
-			setIsShimmering(true);
-			const timeout = setTimeout(() => setIsShimmering(false), 600);
-			return () => clearTimeout(timeout);
-		}
-	}, [view]);
-
-	const selectedWorkspace = workspaces.find(
-		(ws) => ws.id === localSelectedWorkspaceId,
-	);
-	const selectedAgent = agents.find((a) => a.id === localSelectedAgentId);
-
 	// Extract the current plan from deferred messages for consistent UI state
 	const currentPlan = React.useMemo(
-		() => extractLatestPlan(deferredMessages),
-		[deferredMessages],
+		() => extractLatestPlan(messages),
+		[messages],
 	);
 
 	// Handle form submission - memoized to prevent PromptInput re-renders
@@ -875,26 +204,8 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			if (!messageText?.trim() || isLoading) return;
 
 			// Validate selections for new sessions
-			if (
-				!selectedSessionId &&
-				(!localSelectedWorkspaceId || !localSelectedAgentId)
-			) {
+			if (!resume && (!localSelectedWorkspaceId || !localSelectedAgentId)) {
 				return;
-			}
-
-			// Track if this is a new session
-			const isNewSession = !selectedSessionId && pendingSessionId;
-
-			// For new sessions, set up callback to transition UI when server responds with 200
-			if (isNewSession) {
-				onSessionCreatedRef.current = (sessionId: string) => {
-					// Only transition if user hasn't switched sessions during the request
-					if (selectionRef.current.sessionId === null) {
-						showSession(sessionId);
-					}
-					// Clear the callback after use
-					onSessionCreatedRef.current = null;
-				};
 			}
 
 			try {
@@ -904,279 +215,140 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				});
 			} catch (err) {
 				console.error("Failed to send message:", err);
-				// Clear the callback on error
-				onSessionCreatedRef.current = null;
 			}
 		},
 		[
 			isLoading,
-			selectedSessionId,
+			resume,
 			localSelectedWorkspaceId,
 			localSelectedAgentId,
-			pendingSessionId,
 			sendMessage,
-			showSession,
 		],
 	);
 
-	const handleCopy = React.useCallback((text: string) => {
-		navigator.clipboard.writeText(text);
+	const handleCopy = React.useCallback((content: string) => {
+		navigator.clipboard.writeText(content);
 	}, []);
 
-	const handleRegenerate = React.useCallback(() => {
-		console.log("Regenerate last response");
+	const handleRegenerate = React.useCallback((messageId: string) => {
+		console.log("Regenerate message:", messageId);
 	}, []);
 
-	// Use chat status directly for the PromptInputSubmit component
-	const inputStatus = chatStatus;
-
-	const getAgentIcons = (agent: Agent) => {
-		const agentType = agentTypes.find((t) => t.id === agent.agentType);
-		return agentType?.icons;
-	};
-
-	// Unified layout with CSS transitions based on mode
 	return (
 		<div
 			className={cn(
 				"relative flex flex-col h-full bg-background transition-all duration-300 ease-in-out",
-				mode === "welcome" && "justify-center",
 				className,
 			)}
 		>
-			{/* Session not found message */}
-			{sessionNotFound && (
-				<div className="flex flex-col items-center justify-center flex-1 py-6">
-					<div className="text-center space-y-4">
-						<Search className="h-12 w-12 mx-auto text-muted-foreground/50" />
-						<h2 className="text-xl font-semibold">Session not found</h2>
-						<p className="text-muted-foreground text-sm">
-							The session you're looking for doesn't exist or has been deleted.
-						</p>
-						<Button variant="outline" onClick={() => showNewSession()}>
-							Start a new session
-						</Button>
-					</div>
-				</div>
-			)}
-
-			{/* Welcome header - animated in/out based on mode */}
-			<Suspense fallback={null}>
-				<WelcomeHeader show={mode === "welcome" && !sessionNotFound} />
-			</Suspense>
-
-			{/* Session status header - shows when not ready or running */}
-			{selectedSession &&
-				selectedSession.status !== SessionStatusConstants.READY &&
-				selectedSession.status !== SessionStatusConstants.RUNNING && (
-					<div
-						className={cn(
-							"flex items-center gap-2 py-3 px-4 border-b",
-							selectedSession.status === SessionStatusConstants.ERROR ||
-								selectedSession.status === SessionStatusConstants.REMOVING
-								? "bg-destructive/10 border-destructive/20"
-								: selectedSession.status === SessionStatusConstants.STOPPED
-									? "bg-yellow-500/10 border-yellow-500/20"
-									: selectedSession.status === SessionStatusConstants.REMOVED
-										? "bg-muted/30 border-border"
-										: "bg-muted/50 border-border",
-						)}
-					>
-						{getStatusDisplay(selectedSession.status).icon}
-						<span
+			{/* Error messages and status - always at top */}
+			<div className="shrink-0">
+				{/* Session status header - shows when not ready or running */}
+				{session &&
+					session.status !== SessionStatusConstants.READY &&
+					session.status !== SessionStatusConstants.RUNNING && (
+						<div
 							className={cn(
-								"text-sm font-medium",
-								selectedSession.status === SessionStatusConstants.ERROR ||
-									selectedSession.status === SessionStatusConstants.REMOVING
-									? "text-destructive"
-									: selectedSession.status === SessionStatusConstants.STOPPED
-										? "text-yellow-600 dark:text-yellow-500"
-										: "text-muted-foreground",
+								"flex items-center gap-2 py-3 px-4 border-b",
+								session.status === SessionStatusConstants.ERROR ||
+									session.status === SessionStatusConstants.REMOVING
+									? "bg-destructive/10 border-destructive/20"
+									: session.status === SessionStatusConstants.STOPPED
+										? "bg-yellow-500/10 border-yellow-500/20"
+										: session.status === SessionStatusConstants.REMOVED
+											? "bg-muted/30 border-border"
+											: "bg-muted/50 border-border",
 							)}
 						>
-							{getStatusDisplay(selectedSession.status).text}
-						</span>
-						{selectedSession.status === SessionStatusConstants.ERROR &&
-							selectedSession.errorMessage && (
-								<span className="text-sm text-destructive flex-1">
-									- {selectedSession.errorMessage}
-								</span>
-							)}
-					</div>
-				)}
-
-			{/* Messages loading error indicator */}
-			{messagesError && (
-				<div className="flex items-center gap-2 py-3 px-4 border-b bg-destructive/10 border-destructive/20 text-destructive">
-					<AlertCircle className="h-4 w-4 shrink-0" />
-					<span className="text-sm font-medium">Failed to load messages</span>
-					<span className="text-sm">: {messagesError.message}</span>
-				</div>
-			)}
-
-			{/* Chat stream error indicator */}
-			{hasError && chatError && (
-				<div className="flex items-center gap-2 py-3 px-4 border-b bg-destructive/10 border-destructive/20 text-destructive">
-					<AlertCircle className="h-4 w-4 shrink-0" />
-					<span className="text-sm font-medium">Error</span>
-					<span className="text-sm">: {chatError.message}</span>
-				</div>
-			)}
-
-			{/* Agent/Workspace selectors - animated in/out based on mode */}
-			<Suspense fallback={null}>
-				<WelcomeSelectors
-					show={mode === "welcome" && !sessionNotFound}
-					agents={agents}
-					workspaces={workspaces}
-					selectedAgent={selectedAgent}
-					selectedWorkspace={selectedWorkspace}
-					isShimmering={isShimmering}
-					getAgentIcons={getAgentIcons}
-					onSelectAgent={setLocalSelectedAgentId}
-					onSelectWorkspace={setLocalSelectedWorkspaceId}
-					onAddAgent={() => agentDialog.open()}
-					onAddWorkspace={() => workspaceDialog.open()}
-				/>
-			</Suspense>
-
-			{/* Conversation area - expands in conversation mode */}
-			{/* Show loading state while fetching messages for existing session */}
-			{!sessionNotFound &&
-				selectedSessionId &&
-				messagesLoading &&
-				mode === "conversation" && (
-					<div className="flex-1 flex items-center justify-center">
-						<Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-					</div>
-				)}
-			{/* Only render Conversation once messages are loaded (or for new sessions) */}
-			{!sessionNotFound && (!selectedSessionId || !messagesLoading) && (
-				<Conversation
-					className={cn(
-						"transition-all duration-300 ease-in-out",
-						mode === "welcome"
-							? "flex-none h-0 opacity-0"
-							: "flex-1 opacity-100",
-					)}
-				>
-					<ConversationContent className="p-4">
-						{deferredMessages.length === 0 ? (
-							<ConversationEmptyState
-								icon={<MessageSquare className="size-12 opacity-50" />}
-								title="Start a conversation"
-								description="Type a message below to begin chatting with the AI assistant."
-							/>
-						) : (
-							<div className="max-w-2xl mx-auto w-full space-y-4">
-								{deferredMessages.map((message, index) => {
-									// Render last few messages immediately (they're likely visible)
-									// Lazy-render older messages to improve initial load performance
-									const isRecentMessage = index >= deferredMessages.length - 3;
-									return isRecentMessage ? (
-										<MessageItem
-											key={message.id}
-											message={message}
-											onCopy={handleCopy}
-											onRegenerate={handleRegenerate}
-										/>
-									) : (
-										<LazyMessageItem
-											key={message.id}
-											message={message}
-											onCopy={handleCopy}
-											onRegenerate={handleRegenerate}
-											estimatedHeight={message.role === "user" ? 80 : 150}
-										/>
-									);
-								})}
-								{/* Show shimmer status when waiting for assistant response */}
-								{isLoading && (
-									<div className="flex items-center gap-2 py-2">
-										<Shimmer className="text-sm" duration={1.5}>
-											AI is thinking...
-										</Shimmer>
-									</div>
+							{getSessionStatusIndicator(session)}
+							<span
+								className={cn(
+									"text-sm font-medium",
+									session.status === SessionStatusConstants.ERROR ||
+										session.status === SessionStatusConstants.REMOVING
+										? "text-destructive"
+										: session.status === SessionStatusConstants.STOPPED
+											? "text-yellow-600 dark:text-yellow-500"
+											: "text-muted-foreground",
 								)}
-							</div>
-						)}
-					</ConversationContent>
-					<ConversationScrollButton />
-				</Conversation>
-			)}
+							>
+								{getSessionHoverText(session)}
+							</span>
+						</div>
+					)}
 
-			{/* Plan queue - shows when there's an active plan in conversation mode */}
-			{!sessionNotFound && mode === "conversation" && currentPlan && (
-				<Queue className="border-t border-x-0 border-b-0 rounded-none shadow-none">
-					<QueueSection>
-						<QueueSectionTrigger>
-							<QueueSectionLabel
-								count={currentPlan.length}
-								label={`Todo (${currentPlan.filter((e) => e.status === "completed").length} completed)`}
-							/>
-						</QueueSectionTrigger>
-						<QueueSectionContent>
-							<QueueList>
-								{currentPlan.map((entry, index) => {
-									const isCompleted = entry.status === "completed";
-									const isInProgress = entry.status === "in_progress";
+				{/* Chat stream error indicator */}
+				{hasError && chatError && (
+					<div className="flex items-center gap-2 py-3 px-4 border-b bg-destructive/10 border-destructive/20 text-destructive">
+						<AlertCircle className="h-4 w-4 shrink-0" />
+						<span className="text-sm font-medium">Error</span>
+						<span className="text-sm">: {chatError.message}</span>
+					</div>
+				)}
+			</div>
 
-									return (
-										<QueueItem
-											// biome-ignore lint/suspicious/noArrayIndexKey: Plan entries don't have unique IDs
-											key={index}
-											className={cn(isInProgress && "bg-blue-500/10")}
-										>
-											<div className="flex items-center gap-2">
-												{isInProgress ? (
-													<Loader2 className="h-3 w-3 text-blue-500 animate-spin shrink-0" />
-												) : (
-													<QueueItemIndicator completed={isCompleted} />
-												)}
-												<QueueItemContent completed={isCompleted}>
-													{entry.content}
-												</QueueItemContent>
-											</div>
-											{entry.priority && (
-												<QueueItemDescription completed={isCompleted}>
-													Priority: {entry.priority}
-												</QueueItemDescription>
-											)}
-										</QueueItem>
-									);
-								})}
-							</QueueList>
-						</QueueSectionContent>
-					</QueueSection>
-				</Queue>
-			)}
-
-			{/* Input area - transitions from centered/large to bottom/compact */}
-			{!sessionNotFound && (
-				<ChatInputArea
-					ref={textareaRef}
-					mode={mode}
-					status={inputStatus}
-					localSelectedWorkspaceId={localSelectedWorkspaceId}
-					localSelectedAgentId={localSelectedAgentId}
-					handleSubmit={handleSubmit}
-					isLocked={
-						selectedSession?.commitStatus === CommitStatus.PENDING ||
-						selectedSession?.commitStatus === CommitStatus.COMMITTING
-					}
-					lockedMessage="Chat disabled during commit..."
-					selectedSessionId={selectedSessionId}
+			{/* Content area - centered when new/empty, normal flow otherwise */}
+			<div
+				className={cn(
+					"flex flex-col flex-1 overflow-hidden",
+					messages.length === 0 && "justify-center",
+				)}
+			>
+				{/* Welcome UI - header and selectors for new sessions */}
+				<ChatNewContent
+					show={!resume && messages.length === 0}
+					selectedWorkspaceId={localSelectedWorkspaceId}
+					selectedAgentId={localSelectedAgentId}
+					onWorkspaceChange={setLocalSelectedWorkspaceId}
+					onAgentChange={setLocalSelectedAgentId}
 				/>
-			)}
+
+				{/* Conversation area */}
+				<ChatConversation
+					messages={messages}
+					messagesLoading={false}
+					isChatActive={isLoading}
+					onCopy={handleCopy}
+					onRegenerate={handleRegenerate}
+				/>
+
+				{/* Plan queue - shows when there's an active plan and not new */}
+				{currentPlan && <ChatPlanQueue plan={currentPlan} />}
+			</div>
+
+			{/* Input area for non-new sessions - outside centered container */}
+			<div
+				className={cn(
+					"shrink-0 transition-all duration-300 ease-in-out bg-background relative z-10",
+					"px-4 pb-4 max-w-3xl mx-auto w-full",
+				)}
+			>
+				<PromptInputWithHistory
+					ref={textareaRef}
+					sessionId={sessionId}
+					onSubmit={handleSubmit}
+					status={chatStatus}
+					isLocked={
+						session?.commitStatus === CommitStatus.PENDING ||
+						session?.commitStatus === CommitStatus.COMMITTING
+					}
+					placeholder={
+						session?.commitStatus === CommitStatus.PENDING ||
+						session?.commitStatus === CommitStatus.COMMITTING
+							? "Chat disabled during commit..."
+							: "Type a message..."
+					}
+					textareaClassName={cn("transition-all duration-300", "min-h-[60px]")}
+					submitDisabled={false}
+				/>
+			</div>
 
 			{/* Session ID - subtle display in lower right */}
-			{selectedSessionId && mode === "conversation" && (
-				<div className="absolute bottom-2 right-2 select-text">
-					<span className="text-[10px] text-muted-foreground/50 font-mono">
-						{selectedSessionId}
-					</span>
-				</div>
-			)}
+			<div className="absolute bottom-2 right-2 select-text">
+				<span className="text-[10px] text-muted-foreground/50 font-mono">
+					{sessionId}
+				</span>
+			</div>
 		</div>
 	);
 }

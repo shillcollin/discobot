@@ -525,7 +525,7 @@ export interface ServiceOutputEvent {
 // UI Types
 // ============================================================================
 
-/** Active view type in the main panel - includes chat, terminal, services, and file paths */
+/** Active view type in the session view - includes chat, terminal, services, and file paths */
 export type ActiveView =
 	| "chat"
 	| "terminal"

@@ -1,0 +1,177 @@
+import { Paperclip } from "lucide-react";
+import * as React from "react";
+import {
+	Attachment,
+	AttachmentPreview,
+	AttachmentRemove,
+	Attachments,
+} from "@/components/ai-elements/attachments";
+import {
+	PromptInput,
+	PromptInputActionAddAttachments,
+	PromptInputActionMenu,
+	PromptInputActionMenuContent,
+	PromptInputActionMenuTrigger,
+	PromptInputFooter,
+	type PromptInputMessage,
+	PromptInputSubmit,
+	PromptInputTextarea,
+	PromptInputTools,
+	usePromptInputAttachments,
+} from "@/components/ai-elements/prompt-input";
+import { PromptHistoryDropdown } from "@/components/ide/prompt-history-dropdown";
+import { usePromptHistory } from "@/lib/hooks/use-prompt-history";
+import { cn } from "@/lib/utils";
+
+interface PromptInputWithHistoryProps {
+	/** Session ID for persisting history */
+	sessionId: string | null;
+	/** Submit handler */
+	onSubmit: (message: PromptInputMessage, e: React.FormEvent) => void;
+	/** Input status */
+	status: "ready" | "streaming" | "submitted" | "error";
+	/** Whether input is locked */
+	isLocked?: boolean;
+	/** Placeholder text */
+	placeholder?: string;
+	/** Additional CSS classes for the container */
+	className?: string;
+	/** Additional CSS classes for the textarea */
+	textareaClassName?: string;
+	/** Whether submit button should be disabled */
+	submitDisabled?: boolean;
+}
+
+// Attachments preview component
+function AttachmentsPreview() {
+	const attachments = usePromptInputAttachments();
+
+	if (attachments.files.length === 0) {
+		return null;
+	}
+
+	return (
+		<Attachments variant="inline" className="px-3 pt-3 pb-0">
+			{attachments.files.map((file) => (
+				<Attachment
+					key={file.id}
+					data={file}
+					onRemove={() => attachments.remove(file.id)}
+				>
+					<AttachmentPreview />
+					<span className="truncate max-w-[120px] text-xs">
+						{file.filename}
+					</span>
+					<AttachmentRemove />
+				</Attachment>
+			))}
+		</Attachments>
+	);
+}
+
+/**
+ * PromptInputWithHistory - Text input with prompt history dropdown
+ * Encapsulates prompt history state and UI
+ */
+export const PromptInputWithHistory = React.memo(
+	React.forwardRef<HTMLTextAreaElement, PromptInputWithHistoryProps>(
+		function PromptInputWithHistory(
+			{
+				sessionId,
+				onSubmit,
+				status,
+				isLocked = false,
+				placeholder,
+				className,
+				textareaClassName,
+				submitDisabled = false,
+			},
+			ref,
+		) {
+			const internalRef = React.useRef<HTMLTextAreaElement>(null);
+			const textareaRef =
+				(ref as React.RefObject<HTMLTextAreaElement>) || internalRef;
+
+			const {
+				history,
+				pinnedPrompts,
+				historyIndex,
+				isPinnedSelection,
+				isHistoryOpen,
+				setHistoryIndex,
+				onSelectHistory,
+				addToHistory,
+				pinPrompt,
+				unpinPrompt,
+				isPinned,
+				closeHistory,
+				handleKeyDown: historyKeyDown,
+			} = usePromptHistory({
+				textareaRef,
+				sessionId,
+			});
+
+			// Wrap handleSubmit to also add to history
+			const wrappedHandleSubmit = React.useCallback(
+				(message: PromptInputMessage, e: React.FormEvent) => {
+					const text = message.text;
+					onSubmit(message, e);
+					// Add to history after submit
+					if (text) {
+						addToHistory(text);
+					}
+				},
+				[onSubmit, addToHistory],
+			);
+
+			return (
+				<div className={cn("relative", className)}>
+					<PromptHistoryDropdown
+						history={history}
+						pinnedPrompts={pinnedPrompts}
+						historyIndex={historyIndex}
+						isPinnedSelection={isPinnedSelection}
+						isHistoryOpen={isHistoryOpen}
+						setHistoryIndex={setHistoryIndex}
+						onSelectHistory={onSelectHistory}
+						pinPrompt={pinPrompt}
+						unpinPrompt={unpinPrompt}
+						isPinned={isPinned}
+						textareaRef={textareaRef}
+						closeHistory={closeHistory}
+					/>
+					<PromptInput
+						onSubmit={wrappedHandleSubmit}
+						className="max-w-full"
+						accept="image/*"
+					>
+						<AttachmentsPreview />
+						<PromptInputTextarea
+							ref={textareaRef}
+							placeholder={placeholder}
+							disabled={isLocked}
+							onKeyDown={historyKeyDown}
+							className={textareaClassName}
+						/>
+						<PromptInputFooter>
+							<PromptInputTools>
+								<PromptInputActionMenu>
+									<PromptInputActionMenuTrigger>
+										<Paperclip className="size-4" />
+									</PromptInputActionMenuTrigger>
+									<PromptInputActionMenuContent>
+										<PromptInputActionAddAttachments />
+									</PromptInputActionMenuContent>
+								</PromptInputActionMenu>
+							</PromptInputTools>
+							<PromptInputSubmit
+								status={status}
+								disabled={isLocked || submitDisabled}
+							/>
+						</PromptInputFooter>
+					</PromptInput>
+				</div>
+			);
+		},
+	),
+);

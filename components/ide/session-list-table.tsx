@@ -12,6 +12,7 @@ import {
 import * as React from "react";
 import { IconRenderer } from "@/components/ide/icon-renderer";
 import { getSessionDisplayName } from "@/components/ide/session-name";
+import { getWorkspaceDisplayPath } from "@/components/ide/workspace-path";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -29,42 +30,68 @@ import {
 	SessionStatus as SessionStatusConstants,
 } from "@/lib/api-constants";
 import type { Session } from "@/lib/api-types";
-import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
+import { useMainContentContext } from "@/lib/contexts/main-content-context";
 import { useAgentTypes } from "@/lib/hooks/use-agent-types";
 import { useAgents } from "@/lib/hooks/use-agents";
+import {
+	STORAGE_KEYS,
+	usePersistedState,
+} from "@/lib/hooks/use-persisted-state";
 import {
 	useDeleteSession,
 	useSession,
 	useSessions,
 } from "@/lib/hooks/use-sessions";
+import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import {
 	getSessionStatusColor,
 	getSessionStatusIndicator,
 } from "@/lib/session-utils";
 import { cn, formatTimeAgo } from "@/lib/utils";
 
-interface SessionListTableProps {
-	workspaceId: string;
-	workspaceName: string;
-	onSessionSelect: (session: { id: string }) => void;
-	onClose?: () => void;
-	showClosedSessions?: boolean;
-}
+export function SessionListTable() {
+	const { view, showSession, showNewSession } = useMainContentContext();
+	const { workspaces } = useWorkspaces();
 
-export function SessionListTable({
-	workspaceId,
-	workspaceName,
-	onSessionSelect,
-	onClose,
-	showClosedSessions = false,
-}: SessionListTableProps) {
+	// Get workspace ID from view
+	const workspaceId =
+		view.type === "workspace-sessions" ? view.workspaceId : null;
+
+	// Find the workspace
+	const selectedWorkspace = workspaceId
+		? workspaces.find((w) => w.id === workspaceId)
+		: null;
+
+	const workspaceName = selectedWorkspace
+		? selectedWorkspace.displayName ||
+			getWorkspaceDisplayPath(
+				selectedWorkspace.path,
+				selectedWorkspace.sourceType,
+			)
+		: "";
+
+	// Get show closed sessions preference
+	const [showClosedSessions] = usePersistedState(
+		STORAGE_KEYS.SHOW_CLOSED_SESSIONS,
+		false,
+	);
+
 	const { sessions, isLoading } = useSessions(workspaceId, {
 		includeClosed: showClosedSessions,
 	});
-	const { showNewSession } = useMainPanelContext();
 
 	const handleNewSession = () => {
-		showNewSession({ workspaceId });
+		if (workspaceId) {
+			showNewSession({ workspaceId });
+		}
+	};
+
+	const handleSessionSelect = (session: { id: string }) => {
+		showSession(session.id);
+	};
+
+	const handleClose = () => {
+		showNewSession();
 	};
 
 	if (isLoading) {
@@ -94,15 +121,13 @@ export function SessionListTable({
 							<Plus className="h-4 w-4 mr-1" />
 							New Session
 						</Button>
-						{onClose && (
-							<button
-								type="button"
-								onClick={onClose}
-								className="text-sm text-muted-foreground hover:text-foreground transition-colors px-3"
-							>
-								Close
-							</button>
-						)}
+						<button
+							type="button"
+							onClick={handleClose}
+							className="text-sm text-muted-foreground hover:text-foreground transition-colors px-3"
+						>
+							Close
+						</button>
 					</div>
 				</div>
 			</div>
@@ -114,7 +139,7 @@ export function SessionListTable({
 						<p className="text-muted-foreground">
 							No sessions found. Create one to get started.
 						</p>
-						<Button onClick={() => showNewSession({ workspaceId })}>
+						<Button onClick={handleNewSession}>
 							<Plus className="h-4 w-4 mr-2" />
 							Create Session
 						</Button>
@@ -125,7 +150,7 @@ export function SessionListTable({
 							<SessionRow
 								key={session.id}
 								session={session}
-								onSessionSelect={onSessionSelect}
+								onSessionSelect={handleSessionSelect}
 							/>
 						))}
 					</div>

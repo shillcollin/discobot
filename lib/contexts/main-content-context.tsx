@@ -1,19 +1,24 @@
+import { generateId } from "ai";
 import * as React from "react";
 import type { Session } from "@/lib/api-types";
 import { useSession } from "@/lib/hooks/use-sessions";
 
-export type MainPanelView =
+export type MainContentView =
 	| { type: "new-session"; workspaceId?: string; agentId?: string }
 	| { type: "session"; sessionId: string }
 	| { type: "workspace-sessions"; workspaceId: string };
 
-export interface MainPanelContextValue {
+export interface MainContentContextValue {
 	// Current view state
-	view: MainPanelView;
+	view: MainContentView;
 
 	// Helper methods to get current IDs
 	getSelectedSessionId: () => string | null;
 	getSelectedWorkspaceId: () => string | null;
+	// Get session ID including temporary ID for new sessions
+	getSessionIdForView: () => string | null;
+	// Check if current view is a new session
+	isNewSession: () => boolean;
 
 	// Session data and loading state
 	selectedSession: Session | null | undefined;
@@ -26,30 +31,44 @@ export interface MainPanelContextValue {
 	}) => void;
 	showSession: (sessionId: string) => void;
 	showWorkspaceSessions: (workspaceId: string) => void;
+	// Handle session creation - updates view with workspace/agent IDs if current session matches
+	sessionCreated: (
+		sessionId: string,
+		workspaceId: string,
+		agentId: string,
+	) => void;
 }
 
-const MainPanelContext = React.createContext<MainPanelContextValue | null>(
+const MainContentContext = React.createContext<MainContentContextValue | null>(
 	null,
 );
 
-export function useMainPanelContext() {
-	const context = React.useContext(MainPanelContext);
+export function useMainContentContext() {
+	const context = React.useContext(MainContentContext);
 	if (!context) {
 		throw new Error(
-			"useMainPanelContext must be used within a MainPanelProvider",
+			"useMainContentContext must be used within a MainContentProvider",
 		);
 	}
 	return context;
 }
 
-interface MainPanelProviderProps {
+interface MainContentProviderProps {
 	children: React.ReactNode;
 }
 
-export function MainPanelProvider({ children }: MainPanelProviderProps) {
-	const [view, setView] = React.useState<MainPanelView>({
+export function MainContentProvider({ children }: MainContentProviderProps) {
+	const [view, setView] = React.useState<MainContentView>({
 		type: "new-session",
 	});
+
+	// Generate a stable temporary session ID for new sessions
+	const tempSessionIdRef = React.useRef<string | null>(null);
+	if (view.type === "new-session" && !tempSessionIdRef.current) {
+		tempSessionIdRef.current = generateId();
+	} else if (view.type !== "new-session") {
+		tempSessionIdRef.current = null;
+	}
 
 	// Fetch session data when viewing a session
 	const selectedSessionId = view.type === "session" ? view.sessionId : null;
@@ -59,6 +78,20 @@ export function MainPanelProvider({ children }: MainPanelProviderProps) {
 	// Helper methods to get current IDs
 	const getSelectedSessionId = React.useCallback(() => {
 		return view.type === "session" ? view.sessionId : null;
+	}, [view]);
+
+	const getSessionIdForView = React.useCallback(() => {
+		if (view.type === "session") {
+			return view.sessionId;
+		}
+		if (view.type === "new-session") {
+			return tempSessionIdRef.current;
+		}
+		return null;
+	}, [view]);
+
+	const isNewSession = React.useCallback(() => {
+		return view.type === "new-session";
 	}, [view]);
 
 	const getSelectedWorkspaceId = React.useCallback(() => {
@@ -95,32 +128,56 @@ export function MainPanelProvider({ children }: MainPanelProviderProps) {
 		setView({ type: "workspace-sessions", workspaceId });
 	}, []);
 
-	const value = React.useMemo<MainPanelContextValue>(
+	const sessionCreated = React.useCallback(
+		(sessionId: string, workspaceId: string, agentId: string) => {
+			// Only update if we're currently in new-session view and the session ID matches
+			if (
+				view.type === "new-session" &&
+				tempSessionIdRef.current === sessionId
+			) {
+				// Stay on new-session view with workspace/agent IDs stored
+				setView({
+					type: "new-session",
+					workspaceId,
+					agentId,
+				});
+			}
+		},
+		[view],
+	);
+
+	const value = React.useMemo<MainContentContextValue>(
 		() => ({
 			view,
 			getSelectedSessionId,
 			getSelectedWorkspaceId,
+			getSessionIdForView,
+			isNewSession,
 			selectedSession,
 			isSessionLoading,
 			showNewSession,
 			showSession,
 			showWorkspaceSessions,
+			sessionCreated,
 		}),
 		[
 			view,
 			getSelectedSessionId,
 			getSelectedWorkspaceId,
+			getSessionIdForView,
+			isNewSession,
 			selectedSession,
 			isSessionLoading,
 			showNewSession,
 			showSession,
 			showWorkspaceSessions,
+			sessionCreated,
 		],
 	);
 
 	return (
-		<MainPanelContext.Provider value={value}>
+		<MainContentContext.Provider value={value}>
 			{children}
-		</MainPanelContext.Provider>
+		</MainContentContext.Provider>
 	);
 }
