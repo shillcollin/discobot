@@ -79,6 +79,11 @@ export function ChatPlanQueue({ plan, children }: ChatPlanQueueProps) {
 
 	// Early return after all hooks
 	if (!plan || plan.length === 0) {
+		// If children provided, render them without queue context
+		// This ensures the input area is always visible even without a plan
+		if (children) {
+			return <>{children}</>;
+		}
 		return null;
 	}
 
