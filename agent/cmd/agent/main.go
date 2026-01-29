@@ -261,6 +261,13 @@ func run() error {
 	startupStart := time.Now()
 	fmt.Printf("octobot-agent: container startup beginning at %s\n", startupStart.Format(time.RFC3339))
 
+	// Step 0: Fix localhost resolution to use IPv4 consistently
+	// This prevents IPv4/IPv6 mismatches where servers bind to ::1 but clients connect to 127.0.0.1
+	if err := fixLocalhostResolution(); err != nil {
+		// Log but don't fail - this is a best-effort fix
+		fmt.Printf("octobot-agent: warning: failed to fix localhost resolution: %v\n", err)
+	}
+
 	// Determine configuration from environment
 	agentBinary := envOrDefault("AGENT_BINARY", defaultAgentBinary)
 	runAsUser := envOrDefault("AGENT_USER", defaultUser)
@@ -417,6 +424,107 @@ func run() error {
 	fmt.Printf("octobot-agent: [%.3fs] total startup time\n", time.Since(startupStart).Seconds())
 	fmt.Printf("octobot-agent: starting agent API\n")
 	return runAgent(agentBinary, userInfo, dockerCmd, proxyCmd)
+}
+
+// fixLocalhostResolution modifies /etc/hosts to ensure localhost resolves to IPv4 (127.0.0.1).
+// This fixes IPv4/IPv6 mismatches where Node.js servers bind to ::1 (IPv6) by default when
+// using "localhost", but HTTP clients (like Bun's fetch) resolve localhost to 127.0.0.1 (IPv4).
+// The fix removes ::1 from the localhost line to force consistent IPv4 resolution.
+func fixLocalhostResolution() error {
+	const hostsPath = "/etc/hosts"
+
+	// Read current hosts file
+	data, err := os.ReadFile(hostsPath)
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", hostsPath, err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var newLines []string
+	modified := false
+	hasIPv4Localhost := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Skip empty lines and comments
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			newLines = append(newLines, line)
+			continue
+		}
+
+		// Parse the line: first field is IP, rest are hostnames
+		fields := strings.Fields(trimmed)
+		if len(fields) < 2 {
+			newLines = append(newLines, line)
+			continue
+		}
+
+		ip := fields[0]
+		hostnames := fields[1:]
+
+		// Check if this line has "localhost" as a hostname
+		hasLocalhost := false
+		for _, h := range hostnames {
+			if h == "localhost" {
+				hasLocalhost = true
+				break
+			}
+		}
+
+		if !hasLocalhost {
+			// Line doesn't affect localhost resolution, keep it
+			newLines = append(newLines, line)
+			continue
+		}
+
+		// This line has localhost
+		if ip == "127.0.0.1" {
+			// Keep IPv4 localhost line
+			newLines = append(newLines, line)
+			hasIPv4Localhost = true
+		} else if ip == "::1" {
+			// Remove localhost from IPv6 line, but keep other hostnames
+			var remainingHostnames []string
+			for _, h := range hostnames {
+				if h != "localhost" {
+					remainingHostnames = append(remainingHostnames, h)
+				}
+			}
+
+			if len(remainingHostnames) > 0 {
+				// Keep the line with remaining hostnames (e.g., ip6-localhost)
+				newLines = append(newLines, ip+"\t"+strings.Join(remainingHostnames, " "))
+			}
+			// If no remaining hostnames, the line is dropped entirely
+			modified = true
+			fmt.Printf("octobot-agent: removed 'localhost' from ::1 line in /etc/hosts\n")
+		} else {
+			// Some other IP with localhost, keep it
+			newLines = append(newLines, line)
+		}
+	}
+
+	// Ensure we have an IPv4 localhost entry
+	if !hasIPv4Localhost {
+		newLines = append([]string{"127.0.0.1\tlocalhost"}, newLines...)
+		modified = true
+		fmt.Printf("octobot-agent: added '127.0.0.1 localhost' to /etc/hosts\n")
+	}
+
+	if !modified {
+		fmt.Printf("octobot-agent: /etc/hosts already configured correctly for localhost\n")
+		return nil
+	}
+
+	// Write back the modified hosts file
+	newContent := strings.Join(newLines, "\n")
+	if err := os.WriteFile(hostsPath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", hostsPath, err)
+	}
+
+	fmt.Printf("octobot-agent: /etc/hosts updated to ensure localhost resolves to 127.0.0.1\n")
+	return nil
 }
 
 // setupGitSafeDirectories configures git safe.directory for all workspace paths.
