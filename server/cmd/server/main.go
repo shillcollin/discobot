@@ -1369,6 +1369,13 @@ func main() {
 		sandboxWatcherCancel()
 	}
 
+	// Shutdown sandbox manager (gracefully stop all VMs and providers)
+	if sandboxManager != nil {
+		log.Println("Shutting down sandbox providers...")
+		sandboxManager.Shutdown()
+		log.Println("Sandbox providers stopped")
+	}
+
 	// Stop session status poller
 	if sessionStatusPoller != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)

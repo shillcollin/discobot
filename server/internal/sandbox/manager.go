@@ -120,6 +120,21 @@ func (m *Manager) ListProviderStatuses() map[string]ProviderStatus {
 	return statuses
 }
 
+// Shutdown gracefully shuts down all providers that support cleanup.
+// Providers implementing a Close() method will have it called.
+func (m *Manager) Shutdown() {
+	for name, provider := range m.providers {
+		// Check if provider implements Close() method using type assertion
+		if closer, ok := provider.(interface{ Close() error }); ok {
+			if err := closer.Close(); err != nil {
+				// Log error but continue shutting down other providers
+				_ = err // Logging happens inside provider's Close()
+			}
+		}
+		_ = name // Keep for potential logging
+	}
+}
+
 // ProviderProxy implements the Provider interface and routes to the appropriate provider.
 // This is used when we need a single Provider interface but want to support multiple backends.
 type ProviderProxy struct {
