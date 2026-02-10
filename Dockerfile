@@ -143,9 +143,10 @@ LABEL io.discobot.sandbox-image=true
 # Copy the extracted CLI version from version-extractor stage
 COPY --from=version-extractor /cli-version /tmp/cli-version
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    ca-certificates \
     curl \
     docker-buildx \
     docker.io \
@@ -161,6 +162,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     vim \
     && curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \
+    && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true \
     && apt-get install -y --no-install-recommends nodejs \
     # Install Claude Code CLI with version derived from SDK (0.2.X -> 2.1.X)
     && CLI_VERSION=$(cat /tmp/cli-version) \
@@ -244,7 +246,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install kernel, systemd, Docker, and minimal tools
 # Use a specific stable kernel version with virtio drivers built-in
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     # Kernel with virtio support built-in (no modules needed)
     # Using specific version to avoid metapackage dependency issues
     linux-image-6.8.0-31-generic \
@@ -258,7 +262,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     docker.io \
     iptables \
     # Minimal essential tools
-    ca-certificates \
     socat \
     # e2fsprogs for mkfs.ext4 to format data disk
     e2fsprogs \
@@ -314,7 +317,9 @@ RUN mkdir -p /.data /.workspace /workspace /Users \
 FROM ubuntu:24.04 AS vz-image-builder
 
 # Install tools for image creation and kernel extraction
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     squashfs-tools \
     && rm -rf /var/lib/apt/lists/*
 
