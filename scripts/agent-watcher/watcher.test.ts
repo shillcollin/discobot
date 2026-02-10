@@ -182,18 +182,11 @@ describe("AgentWatcher", () => {
 	});
 
 	describe("with mock command runner", () => {
-		it("calls docker build and inspect with correct arguments", async () => {
+		it("calls docker build and tag with correct arguments", async () => {
 			const calls: Array<{ command: string; args: string[]; cwd: string }> = [];
 
 			const mockRunner: CommandRunner = async (command, args, cwd) => {
 				calls.push({ command, args, cwd });
-				if (args.includes("inspect")) {
-					return {
-						stdout: "sha256:abc123def456\n",
-						stderr: "",
-						exitCode: 0,
-					};
-				}
 				return { stdout: "", stderr: "", exitCode: 0 };
 			};
 
@@ -210,23 +203,23 @@ describe("AgentWatcher", () => {
 
 			const result = await watcher.buildImage();
 
-			assert.equal(calls.length, 3);
+			assert.equal(calls.length, 2);
 			assert.equal(calls[0].command, "docker");
 			assert.deepEqual(calls[0].args, ["build", "-t", "my-image:dev", "."]);
 			assert.equal(calls[0].cwd, tempDir);
 			assert.equal(calls[1].command, "docker");
-			assert.deepEqual(calls[1].args, [
-				"inspect",
-				"--format={{.Id}}",
-				"my-image:dev",
-			]);
-			assert.equal(calls[2].command, "docker");
-			assert.deepEqual(calls[2].args, [
-				"tag",
-				"my-image:dev",
-				"discobot-local/my-image:abc123de",
-			]);
-			assert.equal(result, "discobot-local/my-image:abc123de");
+			assert.equal(calls[1].args[0], "tag");
+			assert.equal(calls[1].args[1], "my-image:dev");
+			// args[2] is the timestamped tag: discobot-local/my-image:<timestamp>
+			assert.ok(
+				calls[1].args[2].startsWith("discobot-local/my-image:"),
+				"Should create timestamped local tag",
+			);
+			// Result should be the timestamped tag reference
+			assert.ok(
+				result?.startsWith("discobot-local/my-image:"),
+				"Should return timestamped tag reference",
+			);
 		});
 
 		it("returns null on build failure", async () => {
@@ -249,18 +242,13 @@ describe("AgentWatcher", () => {
 			assert.equal(result, null);
 		});
 
-		it("doBuild triggers build and updates env file with tagged reference", async () => {
+		it("doBuild triggers build and updates env file with timestamped tag", async () => {
 			let buildCalls = 0;
-			const mockImageId = "sha256:abc123def456789";
-			const expectedTag = "discobot-local/test-image:abc123de";
 
 			const mockRunner: CommandRunner = async (_command, args) => {
 				if (args.includes("build")) {
 					buildCalls++;
 					return { stdout: "", stderr: "", exitCode: 0 };
-				}
-				if (args.includes("inspect")) {
-					return { stdout: `${mockImageId}\n`, stderr: "", exitCode: 0 };
 				}
 				if (args.includes("tag")) {
 					return { stdout: "", stderr: "", exitCode: 0 };
@@ -291,11 +279,19 @@ describe("AgentWatcher", () => {
 
 			assert.equal(buildCalls, 1);
 			assert.equal(buildCompleted, true);
-			assert.equal(completedImageRef, expectedTag);
+			// Should return timestamped local tag
+			assert.ok(
+				(completedImageRef as string | null)?.startsWith(
+					"discobot-local/test-image:",
+				),
+				"Should return timestamped tag reference",
+			);
 
-			// Check env file was updated with the tagged reference
+			// Check env file was updated with the timestamped tag
 			const envContent = await readFile(envPath, "utf-8");
-			assert.ok(envContent.includes(`SANDBOX_IMAGE=${expectedTag}`));
+			assert.ok(
+				envContent.includes("SANDBOX_IMAGE=discobot-local/test-image:"),
+			);
 		});
 
 		it("queues build if one is in progress", async () => {
@@ -316,9 +312,6 @@ describe("AgentWatcher", () => {
 				}
 				if (args.includes("inspect")) {
 					return { stdout: "sha256:test123\n", stderr: "", exitCode: 0 };
-				}
-				if (args.includes("tag")) {
-					return { stdout: "", stderr: "", exitCode: 0 };
 				}
 				return { stdout: "", stderr: "", exitCode: 1 };
 			};
@@ -380,9 +373,6 @@ describe("AgentWatcher", () => {
 						exitCode: 0,
 					};
 				}
-				if (args.includes("tag")) {
-					return { stdout: "", stderr: "", exitCode: 0 };
-				}
 				return { stdout: "", stderr: "", exitCode: 1 };
 			};
 
@@ -431,9 +421,6 @@ describe("AgentWatcher", () => {
 				}
 				if (args.includes("inspect")) {
 					return { stdout: "sha256:test123\n", stderr: "", exitCode: 0 };
-				}
-				if (args.includes("tag")) {
-					return { stdout: "", stderr: "", exitCode: 0 };
 				}
 				return { stdout: "", stderr: "", exitCode: 1 };
 			};
@@ -509,9 +496,6 @@ describe("AgentWatcher", () => {
 				}
 				if (args.includes("inspect")) {
 					return { stdout: "sha256:test123\n", stderr: "", exitCode: 0 };
-				}
-				if (args.includes("tag")) {
-					return { stdout: "", stderr: "", exitCode: 0 };
 				}
 				return { stdout: "", stderr: "", exitCode: 1 };
 			};
@@ -600,7 +584,7 @@ CMD ["echo", "hello"]
 		}
 	});
 
-	it("builds real Docker image and updates env file with short ID tag", async () => {
+	it("builds real Docker image and updates env file with timestamped tag", async () => {
 		const watcher = new AgentWatcher({
 			agentDir,
 			projectRoot: tempDir,
@@ -622,39 +606,45 @@ CMD ["echo", "hello"]
 		await watcher.doBuild();
 
 		assert.equal(buildSuccess, true, "Build should succeed");
-		assert.ok(imageRef, "Image reference should not be null");
 		assert.ok(
-			(imageRef as string).startsWith("discobot-local/"),
-			`Should return tagged reference (discobot-local/...), got: ${imageRef}`,
+			(imageRef as string | null)?.startsWith(
+				"discobot-local/agent-watcher-test:",
+			),
+			`Should return timestamped local tag, got: ${imageRef}`,
 		);
 
-		// Extract the short ID from the returned reference
-		const shortId = (imageRef as string).split(":")[1];
-		assert.equal(shortId?.length, 8, "Short ID should be 8 characters");
-
-		// Verify env file was updated with the tagged reference
+		// Verify env file was updated with the timestamped tag
 		const envContent = await readFile(envPath, "utf-8");
 		assert.ok(
-			envContent.includes("SANDBOX_IMAGE=discobot-local/"),
-			"Env file should contain tagged reference",
+			envContent.includes("SANDBOX_IMAGE=discobot-local/agent-watcher-test:"),
+			"Env file should contain timestamped local tag",
 		);
 
-		// Verify the reference in env file matches what was returned
+		// Verify the tag in env file matches what was returned
 		assert.ok(
 			envContent.includes(`SANDBOX_IMAGE=${imageRef}`),
-			"Env file should contain the exact tagged reference",
+			"Env file should contain the exact timestamped tag",
 		);
 
-		// Verify the short ID matches the first 8 chars of the actual image ID
-		const inspectResult = execSync(
+		// Verify both images exist in Docker (dev tag and timestamped tag)
+		const devInspectResult = execSync(
 			"docker inspect agent-watcher-test:e2e --format '{{.Id}}'",
 			{ encoding: "utf-8" },
 		);
-		const actualImageId = inspectResult.trim().replace(/^sha256:/, "");
+		assert.ok(
+			devInspectResult.trim().startsWith("sha256:"),
+			"Dev tag image should exist in Docker",
+		);
+
+		// Verify timestamped tag also exists and points to same image
+		const localInspectResult = execSync(
+			`docker inspect ${imageRef} --format '{{.Id}}'`,
+			{ encoding: "utf-8" },
+		);
 		assert.equal(
-			actualImageId.slice(0, 8),
-			shortId,
-			"Short ID should match first 8 chars of actual image ID",
+			localInspectResult.trim(),
+			devInspectResult.trim(),
+			"Timestamped tag should point to same image as dev tag",
 		);
 	});
 });
