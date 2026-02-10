@@ -24,7 +24,6 @@ export function DiscobotLogo({ className, size = 24 }: DiscobotLogoProps) {
 			<title>Discobot logo</title>
 
 			{/* Disco ball sphere */}
-			<circle cx="24" cy="26" r="18" fill="currentColor" opacity="0.15" />
 			<circle
 				cx="24"
 				cy="26"
