@@ -188,7 +188,11 @@ describe("AgentWatcher", () => {
 			const mockRunner: CommandRunner = async (command, args, cwd) => {
 				calls.push({ command, args, cwd });
 				if (args.includes("inspect")) {
-					return { stdout: "sha256:abcdef1234567890\n", stderr: "", exitCode: 0 };
+					return {
+						stdout: "sha256:abcdef1234567890\n",
+						stderr: "",
+						exitCode: 0,
+					};
 				}
 				return { stdout: "", stderr: "", exitCode: 0 };
 			};
@@ -259,7 +263,11 @@ describe("AgentWatcher", () => {
 					return { stdout: "", stderr: "", exitCode: 0 };
 				}
 				if (args.includes("inspect")) {
-					return { stdout: "sha256:abc12345deadbeef\n", stderr: "", exitCode: 0 };
+					return {
+						stdout: "sha256:abc12345deadbeef\n",
+						stderr: "",
+						exitCode: 0,
+					};
 				}
 				if (args.includes("tag")) {
 					return { stdout: "", stderr: "", exitCode: 0 };

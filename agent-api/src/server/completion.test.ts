@@ -71,7 +71,12 @@ describe("Git user configuration via headers", () => {
 
 		await finishCompletion();
 		clearCompletionEvents();
-		await rm(testDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+		await rm(testDir, {
+			recursive: true,
+			force: true,
+			maxRetries: 3,
+			retryDelay: 100,
+		});
 	});
 
 	it("passes git user headers to completion", async () => {
