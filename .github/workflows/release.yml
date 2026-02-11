@@ -75,16 +75,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Extract version from tag: v0.1.0-alpha12 → 0.1.0-12
+      # Extract versions from tag
+      # Full version for Go server: v0.1.0-alpha12 → 0.1.0-alpha12
+      # Tauri version for Windows installer: v0.1.0-alpha12 → 0.1.0-12
       - name: Parse version from tag
         id: version
         shell: bash
         run: |
           TAG="${GITHUB_REF_NAME#v}"  # Strip 'v' prefix
-          # Strip alpha/beta/rc: 0.1.0-alpha12 → 0.1.0-12
-          VERSION=$(echo "$TAG" | sed -E 's/(alpha|beta|rc)//g')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Parsed version: $VERSION"
+          echo "full=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Full version: $TAG"
+          # Strip alpha/beta/rc text for Tauri (Windows installer compatibility)
+          TAURI_VERSION=$(echo "$TAG" | sed -E 's/(alpha|beta|rc)//g')
+          echo "tauri=$TAURI_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tauri version: $TAURI_VERSION"
 
       # Build Tauri app and create release
       - name: Build and Release
@@ -93,7 +97,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_TARGET_TRIPLE: ${{ matrix.target }}
           TAURI_BUNDLER_DMG_IGNORE_CI: false
-          DISCOBOT_VERSION: ${{ steps.version.outputs.version }}
+          DISCOBOT_VERSION: ${{ steps.version.outputs.full }}
           # macOS code signing
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -109,5 +113,5 @@ jobs:
           prerelease: false
           args: >-
             --target ${{ matrix.target }}
-            --config '{"version":"${{ steps.version.outputs.version }}"}'
+            --config '{"version":"${{ steps.version.outputs.tauri }}"}'
             ${{ matrix.bundles && format('--bundles {0}', matrix.bundles) || '' }}
