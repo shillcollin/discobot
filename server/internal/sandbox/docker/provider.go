@@ -169,33 +169,48 @@ func NewProvider(cfg *config.Config, sessionProjectResolver SessionProjectResolv
 	// Pull the sandbox image and cleanup old images in the background
 	// This prevents blocking server startup while still ensuring the image is available
 	go func() {
-		// Pull the sandbox image if it's a remote tag (not a digest)
-		// Retry with exponential backoff until successful
-		backoff := 5 * time.Second
-		maxBackoff := 5 * time.Minute
-		attempt := 1
-
-		for {
-			pullCtx, pullCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			err := p.pullSandboxImage(pullCtx, cfg.SandboxImage)
-			pullCancel()
+		// Check if the image is local-only (cannot be pulled from registry)
+		if isLocalImage(cfg.SandboxImage) {
+			// For local images, just verify they exist
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_, err := p.client.ImageInspect(ctx, cfg.SandboxImage)
+			cancel()
 
 			if err == nil {
-				log.Printf("Successfully pulled sandbox image in background")
-				break
+				log.Printf("Local sandbox image exists: %s", cfg.SandboxImage)
+			} else {
+				log.Printf("Warning: Local sandbox image not found: %s", cfg.SandboxImage)
+				log.Printf("Local images must be built or loaded manually (e.g., via docker load)")
 			}
+			// Don't attempt to pull local images - skip to cleanup
+		} else {
+			// For remote images, pull with retry and exponential backoff
+			backoff := 5 * time.Second
+			maxBackoff := 5 * time.Minute
+			attempt := 1
 
-			log.Printf("Warning: Failed to pull sandbox image (attempt %d): %v", attempt, err)
-			log.Printf("Retrying in %v...", backoff)
+			for {
+				pullCtx, pullCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				err := p.pullSandboxImage(pullCtx, cfg.SandboxImage)
+				pullCancel()
 
-			time.Sleep(backoff)
+				if err == nil {
+					log.Printf("Successfully pulled sandbox image in background")
+					break
+				}
 
-			// Exponential backoff with cap
-			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
+				log.Printf("Warning: Failed to pull sandbox image (attempt %d): %v", attempt, err)
+				log.Printf("Retrying in %v...", backoff)
+
+				time.Sleep(backoff)
+
+				// Exponential backoff with cap
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+				attempt++
 			}
-			attempt++
 		}
 
 		// Clean up old sandbox images with the discobot label
@@ -501,10 +516,7 @@ func (p *Provider) ensureImage(ctx context.Context, image string) error {
 
 	// Local images (sha256 digests or discobot-local/ prefixed tags) cannot be pulled from a registry.
 	// They should have been loaded via ImageLoad. If they're missing, that's an error.
-	if strings.HasPrefix(image, "sha256:") {
-		return fmt.Errorf("image %s not found locally and cannot be pulled (bare digest reference)", image)
-	}
-	if strings.HasPrefix(image, "discobot-local/") {
+	if isLocalImage(image) {
 		return fmt.Errorf("image %s not found locally and cannot be pulled (local image)", image)
 	}
 
@@ -524,20 +536,30 @@ func (p *Provider) ensureImage(ctx context.Context, image string) error {
 	return nil
 }
 
-// isDigestReference checks if an image reference is a digest (e.g., image@sha256:...)
-// Digest references should not be pulled as they refer to a specific immutable image.
-func isDigestReference(image string) bool {
-	return strings.Contains(image, "@sha256:")
+// isLocalImage checks if an image is a local image that cannot be pulled from a registry.
+// Local images include:
+// - Images with discobot-local/ prefix (locally built images)
+// - Bare digest references (sha256:...)
+func isLocalImage(image string) bool {
+	return strings.HasPrefix(image, "discobot-local/") || strings.HasPrefix(image, "sha256:")
 }
 
-// pullSandboxImage pulls the sandbox image if it's a remote tag reference (not a digest).
+// pullSandboxImage pulls the sandbox image if it doesn't exist locally and can be pulled.
 func (p *Provider) pullSandboxImage(ctx context.Context, image string) error {
-	// Skip pulling if it's a digest reference
-	if isDigestReference(image) {
-		log.Printf("Sandbox image is a digest reference, skipping pull: %s", image)
+	// Check if image already exists locally
+	_, err := p.client.ImageInspect(ctx, image)
+	if err == nil {
+		log.Printf("Sandbox image already exists locally, skipping pull: %s", image)
 		return nil
 	}
 
+	// Image doesn't exist locally. Check if it's a local-only image that can't be pulled.
+	if isLocalImage(image) {
+		log.Printf("Sandbox image is a local image and doesn't exist, cannot pull: %s", image)
+		return fmt.Errorf("local image %s not found and cannot be pulled from registry", image)
+	}
+
+	// Image doesn't exist, pull it (works for both tags and digest references)
 	log.Printf("Pulling sandbox image: %s", image)
 	reader, err := p.client.ImagePull(ctx, image, imageTypes.PullOptions{})
 	if err != nil {

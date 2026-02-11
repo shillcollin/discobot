@@ -12,16 +12,26 @@ import (
 	"github.com/docker/docker/client"
 )
 
-func TestIsDigestReference(t *testing.T) {
+func TestIsLocalImage(t *testing.T) {
 	tests := []struct {
 		name     string
 		image    string
 		expected bool
 	}{
 		{
-			name:     "digest reference with sha256",
-			image:    "ghcr.io/obot-platform/discobot@sha256:abc123def456",
+			name:     "local image with discobot-local prefix",
+			image:    "discobot-local/agent-api:latest",
 			expected: true,
+		},
+		{
+			name:     "bare digest reference",
+			image:    "sha256:abc123def456",
+			expected: true,
+		},
+		{
+			name:     "registry digest reference",
+			image:    "ghcr.io/obot-platform/discobot@sha256:abc123def456",
+			expected: false,
 		},
 		{
 			name:     "tag reference",
@@ -39,27 +49,17 @@ func TestIsDigestReference(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "local image with tag",
+			name:     "local image without registry",
 			image:    "discobot:local",
-			expected: false,
-		},
-		{
-			name:     "short digest",
-			image:    "ubuntu@sha256:abc",
-			expected: true,
-		},
-		{
-			name:     "tag with sha256 in name",
-			image:    "myimage:sha256-tag",
 			expected: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isDigestReference(tt.image)
+			result := isLocalImage(tt.image)
 			if result != tt.expected {
-				t.Errorf("isDigestReference(%q) = %v, want %v", tt.image, result, tt.expected)
+				t.Errorf("isLocalImage(%q) = %v, want %v", tt.image, result, tt.expected)
 			}
 		})
 	}
@@ -96,9 +96,9 @@ func TestPullSandboxImage_SkipsDigestReferences(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "digest reference should be skipped",
-			image:   "ubuntu@sha256:1234567890abcdef",
-			wantErr: false, // Should not error, just skip
+			name:    "local image that doesn't exist should error",
+			image:   "discobot-local/nonexistent:latest",
+			wantErr: true, // Cannot pull local images from registry
 		},
 	}
 
@@ -191,36 +191,39 @@ func TestCleanupOldSandboxImages_ListsLabeledImages(t *testing.T) {
 }
 
 func TestPullSandboxImage_Logging(t *testing.T) {
-	// Test that the function logs appropriately for different scenarios
+	// Test that the function correctly identifies local images
 	tests := []struct {
-		name         string
-		image        string
-		shouldLog    string
-		shouldNotLog string
+		name    string
+		image   string
+		isLocal bool
 	}{
 		{
-			name:         "digest reference logs skip message",
-			image:        "image@sha256:abc123",
-			shouldLog:    "digest reference",
-			shouldNotLog: "Pulling sandbox image",
+			name:    "local image with discobot-local prefix",
+			image:   "discobot-local/agent-api:latest",
+			isLocal: true,
 		},
 		{
-			name:         "tag reference would attempt pull",
-			image:        "image:tag",
-			shouldLog:    "", // Would log "Pulling" but we can't test actual pull without Docker
-			shouldNotLog: "digest reference",
+			name:    "bare digest",
+			image:   "sha256:abc123",
+			isLocal: true,
+		},
+		{
+			name:    "registry image with digest",
+			image:   "image@sha256:abc123",
+			isLocal: false,
+		},
+		{
+			name:    "registry image with tag",
+			image:   "image:tag",
+			isLocal: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Just verify the digest detection logic
-			isDigest := isDigestReference(tt.image)
-			if isDigest && !strings.Contains(tt.image, "@sha256:") {
-				t.Errorf("Expected digest reference to contain @sha256:")
-			}
-			if !isDigest && strings.Contains(tt.image, "@sha256:") {
-				t.Errorf("Expected non-digest reference to not contain @sha256:")
+			result := isLocalImage(tt.image)
+			if result != tt.isLocal {
+				t.Errorf("isLocalImage(%q) = %v, want %v", tt.image, result, tt.isLocal)
 			}
 		})
 	}
@@ -244,19 +247,20 @@ func TestLabelFormat(t *testing.T) {
 	}
 }
 
-// Benchmark digest detection
-func BenchmarkIsDigestReference(b *testing.B) {
+// Benchmark local image detection
+func BenchmarkIsLocalImage(b *testing.B) {
 	images := []string{
+		"discobot-local/agent-api:latest",
+		"sha256:abc123def456",
 		"ghcr.io/obot-platform/discobot@sha256:abc123def456",
 		"ghcr.io/obot-platform/discobot:v1.0.0",
 		"ubuntu:latest",
-		"alpine@sha256:fedcba654321",
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, img := range images {
-			_ = isDigestReference(img)
+			_ = isLocalImage(img)
 		}
 	}
 }
