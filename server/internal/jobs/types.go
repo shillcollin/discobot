@@ -62,10 +62,13 @@ func (p SessionDeletePayload) Priority() int                 { return 5 }
 
 // SessionCommitPayload is the payload for session_commit jobs.
 type SessionCommitPayload struct {
-	ProjectID string `json:"projectId"`
-	SessionID string `json:"sessionId"`
+	ProjectID   string `json:"projectId"`
+	SessionID   string `json:"sessionId"`
+	WorkspaceID string `json:"workspaceId"`
 }
 
-func (p SessionCommitPayload) JobType() JobType              { return JobTypeSessionCommit }
-func (p SessionCommitPayload) ResourceKey() (string, string) { return ResourceTypeSession, p.SessionID }
-func (p SessionCommitPayload) MaxAttempts() int              { return 1 }
+func (p SessionCommitPayload) JobType() JobType { return JobTypeSessionCommit }
+func (p SessionCommitPayload) ResourceKey() (string, string) {
+	return ResourceTypeWorkspace, p.WorkspaceID
+}
+func (p SessionCommitPayload) MaxAttempts() int { return 1 }
