@@ -209,7 +209,7 @@ function AuthProvidersSection({
 				)}
 			</div>
 			<p className="text-xs text-muted-foreground">
-				Configure at least one provider to use this agent.
+				Configure at least one provider to use this coding agent.
 			</p>
 		</div>
 	);
@@ -302,17 +302,19 @@ export function AddAgentDialog({
 	};
 
 	const isEditing = !!editingAgent;
-	const dialogTitle = isEditing ? "Configure Agent" : "Add Agent";
+	const dialogTitle = isEditing
+		? "Configure Coding Agent"
+		: "Register Coding Agent";
 	const dialogDescription = isEditing
-		? "Update this agent's configuration and capabilities."
-		: "Create a new AI coding agent by selecting a type and configuring its capabilities.";
+		? "Update this coding agent's configuration and capabilities."
+		: "Register a coding agent by selecting an agent type and configuring authentication.";
 	const submitButtonText = isEditing
 		? isSubmitting
 			? "Saving..."
 			: "Save Changes"
 		: isSubmitting
-			? "Creating..."
-			: "Create Agent";
+			? "Registering..."
+			: "Register Agent";
 
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
@@ -324,7 +326,7 @@ export function AddAgentDialog({
 
 				<div className="flex-1 overflow-y-auto space-y-6 py-4 pr-2">
 					<div className="space-y-2">
-						<Label>Agent Type</Label>
+						<Label>Coding Agent Type</Label>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
 								<Button
@@ -342,7 +344,7 @@ export function AddAgentDialog({
 										</div>
 									) : (
 										<span className="text-muted-foreground">
-											{isLoading ? "Loading..." : "Select agent type"}
+											{isLoading ? "Loading..." : "Select coding agent type"}
 										</span>
 									)}
 									<ChevronDown className="h-4 w-4 opacity-50" />

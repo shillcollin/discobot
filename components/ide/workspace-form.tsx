@@ -169,6 +169,8 @@ interface WorkspaceFormProps {
 	showFormatHints?: boolean;
 	/** Initial value for the input field */
 	initialValue?: string;
+	/** Mode to customize placeholder and examples */
+	mode?: "git" | "local" | "generic";
 	className?: string;
 }
 
@@ -181,6 +183,7 @@ export const WorkspaceForm = React.forwardRef<
 		onValidationChange,
 		showFormatHints = true,
 		initialValue,
+		mode = "generic",
 		className,
 	},
 	ref,
@@ -245,6 +248,18 @@ export const WorkspaceForm = React.forwardRef<
 	React.useEffect(() => {
 		onValidationChange?.(validation.isValid);
 	}, [validation.isValid, onValidationChange]);
+
+	// Customize placeholder based on mode
+	const placeholder = React.useMemo(() => {
+		switch (mode) {
+			case "git":
+				return "org/repo or https://github.com/org/repo";
+			case "local":
+				return "~/projects/app or /var/www/site";
+			default:
+				return "~/projects/app or org/repo";
+		}
+	}, [mode]);
 
 	const handleSubmit = React.useCallback(() => {
 		if (!validation.isValid) return;
@@ -327,7 +342,7 @@ export const WorkspaceForm = React.forwardRef<
 							onChange={(e) => setInput(e.target.value)}
 							onFocus={() => setShowSuggestions(true)}
 							onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-							placeholder="~/projects/app"
+							placeholder={placeholder}
 							className={cn(
 								"font-mono text-sm",
 								validation.error &&
@@ -485,8 +500,18 @@ export const WorkspaceForm = React.forwardRef<
 				<div className="text-xs text-muted-foreground space-y-1">
 					<p className="font-medium">Examples:</p>
 					<ul className="list-disc list-inside space-y-0.5 pl-1">
-						<li>~/projects/myapp</li>
-						<li>./relative/path</li>
+						{(mode === "local" || mode === "generic") && (
+							<>
+								<li>~/projects/myapp</li>
+								<li>./relative/path</li>
+							</>
+						)}
+						{(mode === "git" || mode === "generic") && (
+							<>
+								<li>vercel/next.js</li>
+								<li>https://github.com/facebook/react</li>
+							</>
+						)}
 					</ul>
 				</div>
 			)}

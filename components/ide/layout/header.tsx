@@ -25,6 +25,7 @@ import { isTauri } from "@/lib/api-config";
 import type { Workspace } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useMainContentContext } from "@/lib/contexts/main-content-context";
+import { useAgents } from "@/lib/hooks/use-agents";
 import {
 	STORAGE_KEYS,
 	usePersistedState,
@@ -43,6 +44,7 @@ interface HeaderProps {
 
 export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 	const { workspaces, deleteWorkspace } = useWorkspaces();
+	const { agents } = useAgents();
 	const dialogs = useDialogContext();
 	const {
 		getSelectedSessionId,
@@ -211,168 +213,183 @@ export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 				</Button>
 				<DiscobotBrand logoSize={22} />
 
-				<span className="text-muted-foreground shrink-0">/</span>
-
-				{/* Workspace dropdown */}
-				{isSessionLoading ? (
-					<span className="text-sm text-muted-foreground px-2">Loading...</span>
-				) : workspaces.length === 0 ? (
-					<Button
-						variant="ghost"
-						size="sm"
-						className="gap-1.5 text-muted-foreground shrink-0 tauri-no-drag"
-						onClick={() => dialogs.workspaceDialog.open()}
-					>
-						<Plus className="h-4 w-4" />
-						Add Workspace
-					</Button>
-				) : (
-					<DropdownMenu
-						onOpenChange={(open) => !open && setConfirmDeleteWorkspaceId(null)}
-					>
-						<DropdownMenuTrigger asChild>
-							<button
-								type="button"
-								className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
-							>
-								{sessionWorkspace ? (
-									<WorkspaceDisplay
-										workspace={sessionWorkspace}
-										iconSize={16}
-										iconClassName="h-4 w-4"
-										textClassName="truncate max-w-[150px]"
-										showTooltip={true}
-									/>
-								) : (
-									<span className="text-muted-foreground">
-										Select Workspace
-									</span>
-								)}
-								<ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-							</button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start" className="w-64">
-							{workspaces.map((ws) => (
-								<WorkspaceDropdownItem
-									key={ws.id}
-									workspace={ws}
-									isSelected={sessionWorkspace?.id === ws.id}
-									isConfirming={confirmDeleteWorkspaceId === ws.id}
-									onSelect={() => handleWorkspaceSelect(ws)}
-									onDeleteClick={(e) => handleWorkspaceDeleteClick(e, ws.id)}
-									onConfirmDelete={(e) =>
-										handleConfirmWorkspaceDelete(e, ws.id)
-									}
-									onCancelDelete={handleCancelWorkspaceDelete}
-								/>
-							))}
-							<DropdownMenuSeparator />
-							<DropdownMenuItem
-								onClick={() => dialogs.workspaceDialog.open()}
-								className="flex items-center gap-2"
-							>
-								<Plus className="h-4 w-4 shrink-0" />
-								<span>Add Workspace</span>
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-				)}
-
-				{/* Session dropdown - only show if workspace has sessions */}
-				{sessionWorkspace && workspaceSessions.length > 0 && (
+				{/* Only show workspace and session dropdowns if there are agents */}
+				{agents.length > 0 && (
 					<>
 						<span className="text-muted-foreground shrink-0">/</span>
-						<DropdownMenu
-							onOpenChange={(open) => !open && setConfirmDeleteSessionId(null)}
-						>
-							<DropdownMenuTrigger asChild>
-								<button
-									type="button"
-									className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
-									title={
-										selectedSession?.commitStatus === "failed" ||
-										selectedSession?.status === "error"
-											? getSessionHoverText(selectedSession)
-											: undefined
-									}
-								>
-									{selectedSession ? (
-										<>
-											{getSessionStatusIndicator(selectedSession)}
-											<span className="truncate max-w-[200px] font-medium">
-												{getSessionDisplayName(selectedSession)}
-											</span>
-										</>
-									) : (
-										<span className="text-muted-foreground">
-											Select Session
-										</span>
-									)}
-									<ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-								</button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent
-								align="start"
-								className="min-w-72 max-w-[54rem]"
+
+						{/* Workspace dropdown */}
+						{isSessionLoading ? (
+							<span className="text-sm text-muted-foreground px-2">
+								Loading...
+							</span>
+						) : workspaces.length === 0 ? (
+							<Button
+								variant="ghost"
+								size="sm"
+								className="gap-1.5 text-muted-foreground shrink-0 tauri-no-drag"
+								onClick={() => dialogs.workspaceDialog.open()}
 							>
-								{[...workspaceSessions]
-									.sort(
-										(a, b) =>
-											new Date(b.timestamp).getTime() -
-											new Date(a.timestamp).getTime(),
-									)
-									.map((session) => (
-										<SessionDropdownItem
-											key={session.id}
-											session={session}
-											isSelected={selectedSession?.id === session.id}
-											isConfirming={confirmDeleteSessionId === session.id}
-											onSelect={() => showSession(session.id)}
+								<Plus className="h-4 w-4" />
+								Add Workspace
+							</Button>
+						) : (
+							<DropdownMenu
+								onOpenChange={(open) =>
+									!open && setConfirmDeleteWorkspaceId(null)
+								}
+							>
+								<DropdownMenuTrigger asChild>
+									<button
+										type="button"
+										className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
+									>
+										{sessionWorkspace ? (
+											<WorkspaceDisplay
+												workspace={sessionWorkspace}
+												iconSize={16}
+												iconClassName="h-4 w-4"
+												textClassName="truncate max-w-[150px]"
+												showTooltip={true}
+											/>
+										) : (
+											<span className="text-muted-foreground">
+												Select Workspace
+											</span>
+										)}
+										<ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+									</button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-64">
+									{workspaces.map((ws) => (
+										<WorkspaceDropdownItem
+											key={ws.id}
+											workspace={ws}
+											isSelected={sessionWorkspace?.id === ws.id}
+											isConfirming={confirmDeleteWorkspaceId === ws.id}
+											onSelect={() => handleWorkspaceSelect(ws)}
 											onDeleteClick={(e) =>
-												handleSessionDeleteClick(e, session.id)
+												handleWorkspaceDeleteClick(e, ws.id)
 											}
 											onConfirmDelete={(e) =>
-												handleConfirmSessionDelete(e, session.id)
+												handleConfirmWorkspaceDelete(e, ws.id)
 											}
-											onCancelDelete={handleCancelSessionDelete}
+											onCancelDelete={handleCancelWorkspaceDelete}
 										/>
 									))}
-								<DropdownMenuSeparator />
-								<DropdownMenuItem
-									onClick={() =>
-										showNewSession({
-											workspaceId: selectedWorkspaceId ?? undefined,
-										})
-									}
-									className="flex items-center gap-2"
-								>
-									<Plus className="h-4 w-4 shrink-0" />
-									<span>New Session</span>
-								</DropdownMenuItem>
-							</DropdownMenuContent>
-						</DropdownMenu>
+									<DropdownMenuSeparator />
+									<DropdownMenuItem
+										onClick={() => dialogs.workspaceDialog.open()}
+										className="flex items-center gap-2"
+									>
+										<Plus className="h-4 w-4 shrink-0" />
+										<span>Add Workspace</span>
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						)}
 					</>
 				)}
 
-				{/* New Session button - always visible when there are workspaces */}
-				{workspaces.length > 0 && (
-					<>
-						<span className="text-muted-foreground shrink-0">/</span>
-						<Button
-							variant="ghost"
-							size="sm"
-							className="gap-1.5 text-muted-foreground shrink-0 tauri-no-drag"
-							onClick={() =>
-								showNewSession({
-									workspaceId: selectedWorkspaceId ?? undefined,
-								})
-							}
-						>
-							<Plus className="h-4 w-4" />
-							New Session
-						</Button>
-					</>
-				)}
+				{/* Session dropdown - only show if workspace has sessions and agents exist */}
+				{agents.length > 0 &&
+					sessionWorkspace &&
+					workspaceSessions.length > 0 && (
+						<>
+							<span className="text-muted-foreground shrink-0">/</span>
+							<DropdownMenu
+								onOpenChange={(open) =>
+									!open && setConfirmDeleteSessionId(null)
+								}
+							>
+								<DropdownMenuTrigger asChild>
+									<button
+										type="button"
+										className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
+										title={
+											selectedSession?.commitStatus === "failed" ||
+											selectedSession?.status === "error"
+												? getSessionHoverText(selectedSession)
+												: undefined
+										}
+									>
+										{selectedSession ? (
+											<>
+												{getSessionStatusIndicator(selectedSession)}
+												<span className="truncate max-w-[200px] font-medium">
+													{getSessionDisplayName(selectedSession)}
+												</span>
+											</>
+										) : (
+											<span className="text-muted-foreground">
+												Select Session
+											</span>
+										)}
+										<ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+									</button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent
+									align="start"
+									className="min-w-72 max-w-[54rem]"
+								>
+									{[...workspaceSessions]
+										.sort(
+											(a, b) =>
+												new Date(b.timestamp).getTime() -
+												new Date(a.timestamp).getTime(),
+										)
+										.map((session) => (
+											<SessionDropdownItem
+												key={session.id}
+												session={session}
+												isSelected={selectedSession?.id === session.id}
+												isConfirming={confirmDeleteSessionId === session.id}
+												onSelect={() => showSession(session.id)}
+												onDeleteClick={(e) =>
+													handleSessionDeleteClick(e, session.id)
+												}
+												onConfirmDelete={(e) =>
+													handleConfirmSessionDelete(e, session.id)
+												}
+												onCancelDelete={handleCancelSessionDelete}
+											/>
+										))}
+									<DropdownMenuSeparator />
+									<DropdownMenuItem
+										onClick={() =>
+											showNewSession({
+												workspaceId: selectedWorkspaceId ?? undefined,
+											})
+										}
+										className="flex items-center gap-2"
+									>
+										<Plus className="h-4 w-4 shrink-0" />
+										<span>New Session</span>
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						</>
+					)}
+
+				{/* New Session button - always visible (leads to onboarding if no agents) */}
+
+				<span className="text-muted-foreground shrink-0">/</span>
+				<Button
+					variant="ghost"
+					size="sm"
+					className="gap-1.5 text-muted-foreground shrink-0 tauri-no-drag"
+					onClick={() =>
+						showNewSession({
+							workspaceId:
+								agents.length > 0
+									? (selectedWorkspaceId ?? undefined)
+									: undefined,
+						})
+					}
+				>
+					<Plus className="h-4 w-4" />
+					New Session
+				</Button>
 			</div>
 			<div className="flex items-center gap-1 shrink-0 relative h-full">
 				<Button

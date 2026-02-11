@@ -1,4 +1,16 @@
-import { Bot, ChevronDown, MessageSquare, Plus } from "lucide-react";
+import {
+	Bot,
+	ChevronDown,
+	Container,
+	FileDiff,
+	FolderGit2,
+	FolderOpen,
+	MessageSquare,
+	Network,
+	Plus,
+	Sparkles,
+	Terminal,
+} from "lucide-react";
 import { IconRenderer } from "@/components/ide/icon-renderer";
 import { WorkspaceDisplay } from "@/components/ide/workspace-display";
 import { Button } from "@/components/ui/button";
@@ -10,29 +22,249 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Agent, Icon, Workspace } from "@/lib/api-types";
+import { openUrl } from "@/lib/tauri";
 
 interface WelcomeHeaderProps {
 	show: boolean;
 	hasAgent: boolean;
 	hasWorkspace: boolean;
+	agentsCount: number;
+	workspacesCount: number;
+	onAddAgent?: () => void;
+	onAddWorkspace?: (mode?: "git" | "local" | "generic") => void;
 }
 
 export function WelcomeHeader({
 	show,
 	hasAgent,
 	hasWorkspace,
+	agentsCount,
+	workspacesCount,
+	onAddAgent,
+	onAddWorkspace,
 }: WelcomeHeaderProps) {
 	if (!show) return null;
 
-	// Determine the title and message based on what's missing
+	// Special onboarding UI when no agents exist
+	if (agentsCount === 0) {
+		return (
+			<div className="flex flex-col items-center py-12 px-6 max-w-2xl mx-auto">
+				<div className="text-center space-y-6">
+					{/* Icon with gradient background */}
+					<div className="relative mx-auto w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+						<Sparkles className="h-10 w-10 text-primary" />
+					</div>
+
+					{/* Title and description */}
+					<div className="space-y-3">
+						<h2 className="text-2xl font-bold">Welcome to Discobot</h2>
+						<div className="space-y-2 text-muted-foreground leading-relaxed">
+							<p className="text-base">
+								To get started, you'll need to register a coding agent.
+							</p>
+							<p className="text-sm">
+								Coding agents are AI assistants that help you write code, debug
+								issues, and build features. Discobot supports multiple agent
+								types, each with different models, modes, and capabilities to
+								match your workflow.
+							</p>
+						</div>
+					</div>
+
+					{/* Feature highlights */}
+					<div className="grid grid-cols-1 gap-3 text-left max-w-md mx-auto mt-6">
+						<div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+							<Bot className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+							<div className="space-y-1">
+								<div className="font-medium text-sm">
+									Multiple Coding Agents
+								</div>
+								<div className="text-xs text-muted-foreground">
+									Currently only Claude Code supported.{" "}
+									<button
+										type="button"
+										onClick={() =>
+											openUrl(
+												"https://github.com/obot-platform/discobot/issues/new",
+											)
+										}
+										className="underline hover:text-foreground transition-colors"
+									>
+										Open an issue
+									</button>{" "}
+									for OpenCode, Gemini CLI, or others you want supported next!
+								</div>
+							</div>
+						</div>
+						<div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+							<MessageSquare className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+							<div className="space-y-1">
+								<div className="font-medium text-sm">
+									Session-Based Agent Selection
+								</div>
+								<div className="text-xs text-muted-foreground">
+									Choose which coding agent to use for each session
+								</div>
+							</div>
+						</div>
+						<div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+							<Container className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+							<div className="space-y-1">
+								<div className="font-medium text-sm">
+									Isolated Sandboxed Sessions
+								</div>
+								<div className="text-xs text-muted-foreground">
+									Run parallel sessions in secure containers with full app
+									debugging capabilities
+								</div>
+							</div>
+						</div>
+						<div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+							<Terminal className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+							<div className="space-y-1">
+								<div className="font-medium text-sm">Use Your Own IDE</div>
+								<div className="text-xs text-muted-foreground">
+									Launch remote IDE sessions directly into each sandbox
+								</div>
+							</div>
+						</div>
+						<div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+							<Network className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+							<div className="space-y-1">
+								<div className="font-medium text-sm">SSH into Sandboxes</div>
+								<div className="text-xs text-muted-foreground">
+									Direct SSH access to every sandbox environment
+								</div>
+							</div>
+						</div>
+						<div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+							<FileDiff className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+							<div className="space-y-1">
+								<div className="font-medium text-sm">
+									Integrated Lightweight Tools
+								</div>
+								<div className="text-xs text-muted-foreground">
+									Built-in terminal, diff viewer, and editor for quick edits
+								</div>
+							</div>
+						</div>
+					</div>
+
+					{/* CTA button */}
+					<div className="pt-4">
+						<Button
+							size="lg"
+							onClick={onAddAgent}
+							className="gap-2 shadow-lg shadow-primary/20"
+						>
+							<Plus className="h-5 w-5" />
+							<span>Register Your First Agent</span>
+						</Button>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
+	// Workspace onboarding when agent exists but no workspaces
+	if (agentsCount > 0 && workspacesCount === 0) {
+		return (
+			<div className="flex flex-col items-center py-12 px-6 max-w-2xl mx-auto">
+				<div className="text-center space-y-6">
+					{/* Icon with gradient background */}
+					<div className="relative mx-auto w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+						<FolderGit2 className="h-10 w-10 text-primary" />
+					</div>
+
+					{/* Title and description */}
+					<div className="space-y-3">
+						<h2 className="text-2xl font-bold">Create Your First Workspace</h2>
+						<div className="space-y-2 text-muted-foreground leading-relaxed">
+							<p className="text-base">
+								A workspace is a coding environment where your agent works on
+								projects.
+							</p>
+							<p className="text-sm">
+								Each workspace can be a local folder or a git repository. The
+								agent can read, write, and execute code within the workspace's
+								isolated sandbox.
+							</p>
+						</div>
+					</div>
+
+					{/* Workspace options */}
+					<div className="grid grid-cols-1 gap-3 text-left max-w-md mx-auto mt-6">
+						<button
+							type="button"
+							onClick={() => onAddWorkspace?.("git")}
+							className="flex items-start gap-3 p-4 rounded-lg bg-muted/30 border-2 border-transparent hover:border-primary/50 hover:bg-muted/50 transition-all text-left"
+						>
+							<FolderGit2 className="h-6 w-6 text-primary shrink-0 mt-0.5" />
+							<div className="space-y-1 flex-1">
+								<div className="font-medium">Clone a Git Repository</div>
+								<div className="text-sm text-muted-foreground">
+									Clone an existing repository from GitHub, GitLab, or any Git
+									URL
+								</div>
+							</div>
+						</button>
+
+						<button
+							type="button"
+							onClick={() => onAddWorkspace?.("local")}
+							className="flex items-start gap-3 p-4 rounded-lg bg-muted/30 border-2 border-transparent hover:border-primary/50 hover:bg-muted/50 transition-all text-left"
+						>
+							<FolderOpen className="h-6 w-6 text-primary shrink-0 mt-0.5" />
+							<div className="space-y-1 flex-1">
+								<div className="font-medium">Use Existing Project on Disk</div>
+								<div className="text-sm text-muted-foreground">
+									Point to a local folder that contains your project
+								</div>
+							</div>
+						</button>
+
+						<button
+							type="button"
+							onClick={() => {
+								// TODO: Handle sample project creation
+								// This should clone a well-known repo and create a workspace
+								console.log("Try sample project - not yet implemented");
+								onAddWorkspace?.("git");
+							}}
+							className="flex items-start gap-3 p-4 rounded-lg bg-primary/10 border-2 border-primary/30 hover:border-primary/50 hover:bg-primary/15 transition-all text-left"
+						>
+							<Sparkles className="h-6 w-6 text-primary shrink-0 mt-0.5" />
+							<div className="space-y-1 flex-1">
+								<div className="font-medium">Try a Sample Project</div>
+								<div className="text-sm text-muted-foreground">
+									Quick start with a pre-configured demo project
+								</div>
+							</div>
+						</button>
+					</div>
+
+					{/* Info note */}
+					<div className="pt-4">
+						<p className="text-xs text-muted-foreground">
+							Sessions run in isolated sandboxes — files on disk won't be
+							modified until you commit, so you can safely try out existing
+							projects
+						</p>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
+	// Standard UI when agents exist
 	let title = "Start a new session";
 	let message =
 		"Describe what you want to work on and I'll help you get started.";
 
 	// Priority: agent first, then workspace
 	if (!hasAgent) {
-		title = "Create an agent";
-		message = "Select an agent to get started.";
+		title = "Select an agent";
+		message = "Choose an agent to get started.";
 	} else if (!hasWorkspace) {
 		title = "Create a workspace";
 		message = "Select a workspace to get started.";
@@ -77,6 +309,9 @@ export function WelcomeSelectors({
 	onAddWorkspace,
 }: WelcomeSelectorsProps) {
 	if (!show) return null;
+
+	// Don't show selectors when there are no agents or workspaces (onboarding screen handles this)
+	if (agents.length === 0 || workspaces.length === 0) return null;
 
 	return (
 		<div className="flex flex-col items-center gap-3 py-4">

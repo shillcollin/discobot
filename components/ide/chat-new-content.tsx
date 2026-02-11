@@ -36,8 +36,8 @@ export function ChatNewContent({
 	onAgentChange,
 }: ChatNewContentProps) {
 	const { agentDialog, workspaceDialog } = useDialogContext();
-	const { workspaces } = useWorkspaces();
-	const { agents } = useAgents();
+	const { workspaces, isLoading: isLoadingWorkspaces } = useWorkspaces();
+	const { agents, isLoading: isLoadingAgents } = useAgents();
 	const { agentTypes } = useAgentTypes();
 
 	// Persist agent ID selection in localStorage (component-local state)
@@ -199,12 +199,21 @@ export function ChatNewContent({
 		return null;
 	}
 
+	// Don't render until agents and workspaces have loaded to prevent flickering
+	if (isLoadingAgents || isLoadingWorkspaces) {
+		return null;
+	}
+
 	return (
 		<>
 			<WelcomeHeader
 				show={show}
 				hasAgent={!!selectedAgent}
 				hasWorkspace={!!selectedWorkspace}
+				agentsCount={agents.length}
+				workspacesCount={workspaces.length}
+				onAddAgent={() => agentDialog.open()}
+				onAddWorkspace={(mode) => workspaceDialog.open({ mode })}
 			/>
 			<WelcomeSelectors
 				show={show}

@@ -40,6 +40,7 @@ export function DialogLayer() {
 					open={dialogs.workspaceDialog.isOpen}
 					onOpenChange={dialogs.workspaceDialog.onOpenChange}
 					onAdd={dialogs.handleAddWorkspace}
+					mode={dialogs.workspaceDialog.data?.mode}
 				/>
 			</Suspense>
 

@@ -24,13 +24,17 @@ interface AgentDialogData {
 	agentTypeId?: string;
 }
 
+interface WorkspaceDialogData {
+	mode?: "git" | "local" | "generic";
+}
+
 interface CredentialsDialogData {
 	providerId?: string;
 }
 
 interface DialogContextValue {
 	// Dialog controls
-	workspaceDialog: DialogControl;
+	workspaceDialog: DialogControl<WorkspaceDialogData>;
 	agentDialog: DialogControl<AgentDialogData>;
 	deleteWorkspaceDialog: DialogControl<Workspace>;
 	credentialsDialog: DialogControl<CredentialsDialogData>;
@@ -75,7 +79,7 @@ export function DialogProvider({ children }: DialogProviderProps) {
 	const { credentials } = useCredentials();
 
 	// Dialog controls using the generic hook
-	const workspaceDialog = useDialogControl();
+	const workspaceDialog = useDialogControl<WorkspaceDialogData>();
 	const agentDialog = useDialogControl<AgentDialogData>();
 	const deleteWorkspaceDialog = useDialogControl<Workspace>();
 	const credentialsDialog = useDialogControl<CredentialsDialogData>();

@@ -16,12 +16,14 @@ interface AddWorkspaceDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onAdd: (workspace: CreateWorkspaceRequest) => Promise<void>;
+	mode?: "git" | "local" | "generic";
 }
 
 export function AddWorkspaceDialog({
 	open,
 	onOpenChange,
 	onAdd,
+	mode = "generic",
 }: AddWorkspaceDialogProps) {
 	const formRef = React.useRef<WorkspaceFormRef>(null);
 	const [isValid, setIsValid] = React.useState(false);
@@ -55,21 +57,39 @@ export function AddWorkspaceDialog({
 		}
 	};
 
+	// Customize dialog content based on mode
+	const dialogContent = {
+		git: {
+			title: "Clone Git Repository",
+			description:
+				"Clone an existing repository from GitHub, GitLab, or any Git URL.",
+		},
+		local: {
+			title: "Open Directory",
+			description: "Point to a local folder that contains your project.",
+		},
+		generic: {
+			title: "Add Workspace",
+			description:
+				"Create a new workspace from a local folder or git repository.",
+		},
+	};
+
+	const { title, description } = dialogContent[mode];
+
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>
-					<DialogTitle>Add Workspace</DialogTitle>
-					<DialogDescription>
-						A workspace is a local software project. It must be a Git repository
-						or cloned from a Git repository.
-					</DialogDescription>
+					<DialogTitle>{title}</DialogTitle>
+					<DialogDescription>{description}</DialogDescription>
 				</DialogHeader>
 				<div className="py-4">
 					<WorkspaceForm
 						ref={formRef}
 						onSubmit={handleFormSubmit}
 						onValidationChange={setIsValid}
+						mode={mode}
 					/>
 					{error && (
 						<div className="mt-4 flex items-start gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md">
@@ -77,6 +97,25 @@ export function AddWorkspaceDialog({
 							<span>{error}</span>
 						</div>
 					)}
+					<div className="mt-4 text-xs text-muted-foreground space-y-1">
+						<p className="font-medium">Supported formats:</p>
+						<ul className="list-disc list-inside space-y-0.5 pl-1">
+							{(mode === "local" || mode === "generic") && (
+								<li>Local paths: ~/projects/app, /var/www/site</li>
+							)}
+							{(mode === "git" || mode === "generic") && (
+								<>
+									<li>
+										GitHub: org/repo, github.com/org/repo,
+										git@github.com:org/repo
+									</li>
+									<li>
+										Git: https://gitlab.com/org/repo, git@bitbucket.org:org/repo
+									</li>
+								</>
+							)}
+						</ul>
+					</div>
 				</div>
 				<DialogFooter>
 					<Button
