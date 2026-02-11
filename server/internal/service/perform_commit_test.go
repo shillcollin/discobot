@@ -291,6 +291,13 @@ func TestPerformCommit_WorkspaceUnchangedNoExistingPatches(t *testing.T) {
 	project := env.createTestProject(t)
 	agent := env.createTestAgent(t, project.ID)
 	workspace, initialCommit := env.createTestWorkspace(t, project.ID)
+
+	// Set workspace commit status to pending
+	workspace.CommitStatus = model.CommitStatusPending
+	if err := env.store.UpdateWorkspace(context.Background(), workspace); err != nil {
+		t.Fatalf("Failed to update workspace: %v", err)
+	}
+
 	session := env.createTestSession(t, project.ID, workspace.ID, agent.ID, initialCommit)
 
 	callCount := 0
@@ -392,6 +399,12 @@ func TestPerformCommit_WorkspaceChangedWithPatches(t *testing.T) {
 	agent := env.createTestAgent(t, project.ID)
 	workspace, initialCommit := env.createTestWorkspace(t, project.ID)
 
+	// Set workspace commit status to pending
+	workspace.CommitStatus = model.CommitStatusPending
+	if err := env.store.UpdateWorkspace(context.Background(), workspace); err != nil {
+		t.Fatalf("Failed to update workspace: %v", err)
+	}
+
 	// Create session with the initial commit
 	session := env.createTestSession(t, project.ID, workspace.ID, agent.ID, initialCommit)
 
@@ -488,6 +501,12 @@ func TestPerformCommit_WorkspaceChangedNoPatches(t *testing.T) {
 	project := env.createTestProject(t)
 	agent := env.createTestAgent(t, project.ID)
 	workspace, initialCommit := env.createTestWorkspace(t, project.ID)
+
+	// Set workspace commit status to pending
+	workspace.CommitStatus = model.CommitStatusPending
+	if err := env.store.UpdateWorkspace(context.Background(), workspace); err != nil {
+		t.Fatalf("Failed to update workspace: %v", err)
+	}
 
 	// Create session with the initial commit
 	session := env.createTestSession(t, project.ID, workspace.ID, agent.ID, initialCommit)
@@ -615,6 +634,12 @@ func TestPerformCommit_WorkspaceChangedGetCommitsError(t *testing.T) {
 	project := env.createTestProject(t)
 	agent := env.createTestAgent(t, project.ID)
 	workspace, initialCommit := env.createTestWorkspace(t, project.ID)
+
+	// Set workspace commit status to pending
+	workspace.CommitStatus = model.CommitStatusPending
+	if err := env.store.UpdateWorkspace(context.Background(), workspace); err != nil {
+		t.Fatalf("Failed to update workspace: %v", err)
+	}
 
 	// Create session with the initial commit
 	session := env.createTestSession(t, project.ID, workspace.ID, agent.ID, initialCommit)
@@ -820,6 +845,12 @@ func TestPerformCommit_WorkspaceUnchangedWithExistingPatches(t *testing.T) {
 	agent := env.createTestAgent(t, project.ID)
 	workspace, initialCommit := env.createTestWorkspace(t, project.ID)
 
+	// Set workspace commit status to pending
+	workspace.CommitStatus = model.CommitStatusPending
+	if err := env.store.UpdateWorkspace(context.Background(), workspace); err != nil {
+		t.Fatalf("Failed to update workspace: %v", err)
+	}
+
 	// Create session with baseCommit equal to workspace commit (no change scenario)
 	session := env.createTestSession(t, project.ID, workspace.ID, agent.ID, initialCommit)
 
@@ -935,6 +966,13 @@ func TestPerformCommit_SandboxNotRunning(t *testing.T) {
 	project := env.createTestProject(t)
 	agent := env.createTestAgent(t, project.ID)
 	workspace, initialCommit := env.createTestWorkspace(t, project.ID)
+
+	// Set workspace commit status to pending
+	workspace.CommitStatus = model.CommitStatusPending
+	if err := env.store.UpdateWorkspace(context.Background(), workspace); err != nil {
+		t.Fatalf("Failed to update workspace: %v", err)
+	}
+
 	session := env.createTestSession(t, project.ID, workspace.ID, agent.ID, initialCommit)
 
 	// Set up mock handler to return patches
