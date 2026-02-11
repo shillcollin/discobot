@@ -23,6 +23,16 @@ const (
 	testImageNew = "busybox:1.37"
 )
 
+// testSessionInitializer implements service.SessionInitializer for tests
+// by directly calling CreateForSession on the sandbox service.
+type testSessionInitializer struct {
+	sandboxSvc *service.SandboxService
+}
+
+func (t *testSessionInitializer) Initialize(ctx context.Context, sessionID string) error {
+	return t.sandboxSvc.CreateForSession(ctx, sessionID)
+}
+
 // skipIfNoDocker skips the test if Docker is not available
 func skipIfNoDocker(t *testing.T) {
 	t.Helper()
@@ -278,8 +288,9 @@ func TestReconcileSandboxes_ReplacesOutdatedImage(t *testing.T) {
 	oldSandboxID := sb.ID
 	t.Logf("Sandbox created with ID: %s", oldSandboxID)
 
-	// Create sandbox service with NEW image as expected
+	// Create sandbox service with NEW image as expected, with session initializer
 	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc.SetSessionInitializer(&testSessionInitializer{sandboxSvc: sandboxSvc})
 
 	// Run reconciliation
 	t.Log("Running sandbox reconciliation...")
@@ -355,10 +366,20 @@ func TestReconcileSandboxes_RemovesOrphanedSandboxes(t *testing.T) {
 	setup := newTestSandboxSetup(t)
 	ctx := context.Background()
 
-	// Create a sandbox WITHOUT a corresponding session in the database
-	orphanSessionID := fmt.Sprintf("orphan-%d", time.Now().UnixNano())
-	t.Logf("Creating orphaned sandbox (no session in DB)")
+	// Create a real session so we can create a sandbox for it, then delete the session
+	// to make the sandbox orphaned
+	project := setup.createTestProject(t)
+	workspace := setup.createTestWorkspace(t, project)
+	session := setup.createTestSession(t, workspace, "orphan-session")
+	orphanSessionID := session.ID
+
+	t.Logf("Creating sandbox for session that will become orphaned")
 	setup.createSandboxWithImage(t, orphanSessionID, testImageOld)
+
+	// Delete the session to make the sandbox orphaned
+	if err := setup.store.DeleteSession(ctx, orphanSessionID); err != nil {
+		t.Fatalf("Failed to delete session: %v", err)
+	}
 
 	// Verify sandbox exists
 	sb, err := setup.provider.Get(ctx, orphanSessionID)
@@ -420,8 +441,9 @@ func TestReconcileSandboxes_MultipleSandboxes(t *testing.T) {
 
 	t.Logf("Original sandbox IDs: %v", originalIDs)
 
-	// Create sandbox service
+	// Create sandbox service with session initializer
 	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc.SetSessionInitializer(&testSessionInitializer{sandboxSvc: sandboxSvc})
 
 	// Run reconciliation
 	t.Log("Running sandbox reconciliation...")
