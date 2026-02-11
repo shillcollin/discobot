@@ -466,7 +466,7 @@ function SessionRow({
 							<Bot className="h-4 w-4 text-muted-foreground shrink-0" />
 						)}
 						<span className="text-xs text-muted-foreground truncate">
-							{agent.name}
+							{agentType?.name || agent.agentType}
 						</span>
 					</div>
 				)}

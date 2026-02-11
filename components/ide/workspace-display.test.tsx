@@ -30,7 +30,6 @@ describe("WorkspaceDisplay Component", () => {
 			id: "ws-1",
 			path: "/home/user/very-long-project-name",
 			sourceType: "local" as const,
-			provider: "docker" as const,
 			status: "ready" as const,
 			displayName: "My Project",
 		};
@@ -58,7 +57,6 @@ describe("WorkspaceDisplay Component", () => {
 			id: "ws-2",
 			path: "/home/user/project-one",
 			sourceType: "local" as const,
-			provider: "docker" as const,
 			status: "ready" as const,
 		};
 
@@ -81,7 +79,6 @@ describe("WorkspaceDisplay Component", () => {
 			id: "ws-3",
 			path: "https://github.com/octocat/hello-world",
 			sourceType: "git" as const,
-			provider: "docker" as const,
 			status: "ready" as const,
 		};
 
@@ -104,7 +101,6 @@ describe("WorkspaceDisplay Component", () => {
 			id: "ws-4",
 			path: "/test",
 			sourceType: "local" as const,
-			provider: "docker" as const,
 			status: "ready" as const,
 		};
 
@@ -123,7 +119,6 @@ describe("WorkspaceDisplay Component", () => {
 			id: "ws-5",
 			path: "/test",
 			sourceType: "local" as const,
-			provider: "docker" as const,
 			status: "ready" as const,
 		};
 
@@ -142,7 +137,6 @@ describe("WorkspaceDisplay Component", () => {
 			id: "ws-6",
 			path: "/test/path",
 			sourceType: "local" as const,
-			provider: "docker" as const,
 			status: "ready" as const,
 		};
 
@@ -171,7 +165,6 @@ describe("WorkspaceDisplay Component", () => {
 				id: "ws-local",
 				path: "/home/user/project",
 				sourceType: "local" as const,
-				provider: "docker" as const,
 				status: "ready" as const,
 				displayName: "Local Custom",
 			},
@@ -179,7 +172,6 @@ describe("WorkspaceDisplay Component", () => {
 				id: "ws-git",
 				path: "https://github.com/org/repo",
 				sourceType: "git" as const,
-				provider: "docker" as const,
 				status: "ready" as const,
 				displayName: "Git Custom",
 			},

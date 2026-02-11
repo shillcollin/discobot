@@ -64,7 +64,6 @@ describe("ChatNewContent - Workspace Selection Logic", () => {
 		path: `/path/to/${id}`,
 		displayName,
 		sourceType: "local",
-		provider: "docker",
 		status: "ready",
 	});
 

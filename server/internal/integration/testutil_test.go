@@ -756,12 +756,11 @@ func (ts *TestServer) CreateAndStartSandbox(sessionID string) {
 }
 
 // CreateTestAgent creates a test agent
-func (ts *TestServer) CreateTestAgent(project *model.Project, name, agentType string) *model.Agent {
+func (ts *TestServer) CreateTestAgent(project *model.Project, _, agentType string) *model.Agent {
 	ts.T.Helper()
 
 	agent := &model.Agent{
 		ProjectID: project.ID,
-		Name:      name,
 		AgentType: agentType,
 		IsDefault: false,
 	}

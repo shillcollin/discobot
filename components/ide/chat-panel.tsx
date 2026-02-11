@@ -429,43 +429,45 @@ export function ChatPanel({
 				/>
 			</div>
 
-			{/* Input area for non-new sessions - outside centered container */}
-			<ChatPlanQueue plan={currentPlan}>
-				<div
-					className={cn(
-						"shrink-0 transition-all duration-300 ease-in-out bg-background relative z-10",
-						"px-4 pb-4 max-w-3xl mx-auto w-full",
-					)}
-				>
-					{/* Expanded queue panel - shows above input when expanded */}
-					{currentPlan && <QueuePanel plan={currentPlan} />}
-
-					<PromptInputWithHistory
-						ref={textareaRef}
-						sessionId={sessionId}
-						isNewSession={!resume}
-						onSubmit={handleSubmit}
-						onStop={canStop ? handleStop : undefined}
-						status={chatStatus}
-						isLocked={
-							session?.commitStatus === CommitStatus.PENDING ||
-							session?.commitStatus === CommitStatus.COMMITTING
-						}
-						placeholder={
-							session?.commitStatus === CommitStatus.PENDING ||
-							session?.commitStatus === CommitStatus.COMMITTING
-								? "Chat disabled during commit..."
-								: "Type a message..."
-						}
-						textareaClassName={cn(
-							"transition-all duration-300",
-							"min-h-[60px]",
+			{/* Input area - only show when agent and workspace are selected (or for existing sessions) */}
+			{(resume || (localSelectedAgentId && localSelectedWorkspaceId)) && (
+				<ChatPlanQueue plan={currentPlan}>
+					<div
+						className={cn(
+							"shrink-0 transition-all duration-300 ease-in-out bg-background relative z-10",
+							"px-4 pb-4 max-w-3xl mx-auto w-full",
 						)}
-						submitDisabled={false}
-						queueButton={<QueueButton />}
-					/>
-				</div>
-			</ChatPlanQueue>
+					>
+						{/* Expanded queue panel - shows above input when expanded */}
+						{currentPlan && <QueuePanel plan={currentPlan} />}
+
+						<PromptInputWithHistory
+							ref={textareaRef}
+							sessionId={sessionId}
+							isNewSession={!resume}
+							onSubmit={handleSubmit}
+							onStop={canStop ? handleStop : undefined}
+							status={chatStatus}
+							isLocked={
+								session?.commitStatus === CommitStatus.PENDING ||
+								session?.commitStatus === CommitStatus.COMMITTING
+							}
+							placeholder={
+								session?.commitStatus === CommitStatus.PENDING ||
+								session?.commitStatus === CommitStatus.COMMITTING
+									? "Chat disabled during commit..."
+									: "Type a message..."
+							}
+							textareaClassName={cn(
+								"transition-all duration-300",
+								"min-h-[60px]",
+							)}
+							submitDisabled={false}
+							queueButton={<QueueButton />}
+						/>
+					</div>
+				</ChatPlanQueue>
+			)}
 
 			{/* Session ID - subtle display in lower right */}
 			<div className="absolute bottom-2 right-2 select-text">

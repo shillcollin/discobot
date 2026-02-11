@@ -62,7 +62,6 @@ Located in `components/ide/`:
 | `delete-workspace-dialog.tsx` | Workspace deletion confirmation |
 | `credentials-dialog.tsx` | API key/OAuth configuration |
 | `system-requirements-dialog.tsx` | Startup requirement checks |
-| `welcome-modal.tsx` | First-run onboarding |
 
 #### Utilities
 

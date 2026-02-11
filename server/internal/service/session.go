@@ -481,7 +481,7 @@ func (s *SessionService) Initialize(
 		}
 
 		// Update session to use default agent
-		log.Printf("Session %s: assigning default agent %s (%s)", sessionID, defaultAgent.ID, defaultAgent.Name)
+		log.Printf("Session %s: assigning default agent %s (type: %s)", sessionID, defaultAgent.ID, defaultAgent.AgentType)
 		sessionModel.AgentID = &defaultAgent.ID
 		if err := s.store.UpdateSession(ctx, sessionModel); err != nil {
 			return fmt.Errorf("failed to update session with default agent: %w", err)

@@ -5,7 +5,6 @@ import type {
 	CreateAgentRequest,
 	CreateWorkspaceRequest,
 	StatusMessage,
-	SupportedAgentType,
 	Workspace,
 } from "@/lib/api-types";
 import { useAgentTypes } from "@/lib/hooks/use-agent-types";
@@ -43,22 +42,10 @@ interface DialogContextValue {
 		close: () => void;
 	};
 
-	// Welcome modal state
-	welcome: {
-		skipped: boolean;
-		setSkipped: (skipped: boolean) => void;
-		systemStatusChecked: boolean;
-		pendingAgentType: SupportedAgentType | null;
-	};
-
 	// Action handlers
 	handleAddWorkspace: (data: CreateWorkspaceRequest) => Promise<void>;
 	handleAddOrEditAgent: (data: CreateAgentRequest) => Promise<void>;
 	handleConfirmDeleteWorkspace: (deleteFiles: boolean) => Promise<void>;
-	handleWelcomeComplete: (
-		needsCredential: boolean,
-		workspace: CreateWorkspaceRequest | null,
-	) => Promise<void>;
 
 	// Data for dialogs
 	authProviders: ReturnType<typeof useAuthProviders>["authProviders"];
@@ -82,7 +69,7 @@ interface DialogProviderProps {
 export function DialogProvider({ children }: DialogProviderProps) {
 	const mainPanel = useMainContentContext();
 	const workspace = useWorkspaces();
-	const { createAgent, updateAgent, mutate: mutateAgents } = useAgents();
+	const { createAgent } = useAgents();
 	useAgentTypes(); // Preload agent types for dialog
 	const { authProviders } = useAuthProviders();
 	const { credentials } = useCredentials();
@@ -94,16 +81,11 @@ export function DialogProvider({ children }: DialogProviderProps) {
 	const credentialsDialog = useDialogControl<CredentialsDialogData>();
 
 	// System status state (special case - populated by API)
-	const [systemStatusChecked, setSystemStatusChecked] = React.useState(false);
 	const [systemStatusMessages, setSystemStatusMessages] = React.useState<
 		StatusMessage[]
 	>([]);
 	const [showSystemRequirements, setShowSystemRequirements] =
 		React.useState(false);
-
-	// Welcome modal state
-	const [welcomeSkipped, setWelcomeSkipped] = React.useState(false);
-	const [pendingAgentType] = React.useState<SupportedAgentType | null>(null);
 
 	// Check system status on mount
 	React.useEffect(() => {
@@ -116,8 +98,6 @@ export function DialogProvider({ children }: DialogProviderProps) {
 				}
 			} catch (error) {
 				console.error("Failed to check system status:", error);
-			} finally {
-				setSystemStatusChecked(true);
 			}
 		}
 		checkSystemStatus();
@@ -127,26 +107,20 @@ export function DialogProvider({ children }: DialogProviderProps) {
 	const handleAddWorkspace = React.useCallback(
 		async (data: CreateWorkspaceRequest) => {
 			const ws = await workspace.createWorkspace(data);
-			workspaceDialog.close();
+			// Dialog will close itself on success
 			if (ws) {
 				mainPanel.showNewSession({ workspaceId: ws.id });
 			}
 		},
-		[workspace, mainPanel, workspaceDialog],
+		[workspace, mainPanel],
 	);
 
 	const handleAddOrEditAgent = React.useCallback(
 		async (agentData: CreateAgentRequest) => {
-			const editingAgent = agentDialog.data?.agent;
-			if (editingAgent) {
-				await updateAgent(editingAgent.id, agentData);
-				mutateAgents();
-			} else {
-				await createAgent(agentData);
-			}
+			await createAgent(agentData);
 			agentDialog.close();
 		},
-		[agentDialog, createAgent, updateAgent, mutateAgents],
+		[agentDialog, createAgent],
 	);
 
 	const handleConfirmDeleteWorkspace = React.useCallback(
@@ -173,88 +147,9 @@ export function DialogProvider({ children }: DialogProviderProps) {
 		[deleteWorkspaceDialog, workspace, mainPanel],
 	);
 
-	const handleWelcomeComplete = React.useCallback(
-		async (
-			needsCredential: boolean,
-			workspaceData: CreateWorkspaceRequest | null,
-		) => {
-			// If we need credentials, open the credentials dialog for Anthropic
-			if (needsCredential) {
-				credentialsDialog.open({ providerId: "anthropic" });
-				return;
-			}
-
-			// Create workspace if provided
-			if (workspaceData) {
-				const ws = await workspace.createWorkspace(workspaceData);
-				if (ws) {
-					mainPanel.showNewSession({ workspaceId: ws.id });
-				}
-			}
-		},
-		[workspace, mainPanel, credentialsDialog],
-	);
-
 	const closeSystemRequirements = React.useCallback(() => {
 		setShowSystemRequirements(false);
 	}, []);
-
-	// Monitor credentials - when Anthropic credentials are created, auto-create Claude Code agent
-	const prevCredentialsCount = React.useRef(credentials.length);
-	const agentCreationInProgress = React.useRef(false);
-	const { agents } = useAgents();
-
-	React.useEffect(() => {
-		// Skip if agent creation already in progress or agents already exist
-		if (agentCreationInProgress.current || agents.length > 0) return;
-
-		// Skip if credentials count hasn't changed (no new credentials)
-		if (credentials.length === prevCredentialsCount.current) return;
-
-		prevCredentialsCount.current = credentials.length;
-
-		// Check if we now have Anthropic credentials
-		const hasAnthropicCredential = credentials.some(
-			(c) => c.isConfigured && c.provider === "anthropic",
-		);
-
-		if (hasAnthropicCredential) {
-			// Credentials were successfully created - now create Claude Code agent automatically
-			agentCreationInProgress.current = true;
-
-			(async () => {
-				try {
-					const newAgent = await createAgent({
-						name: "Claude Code",
-						description: "AI coding agent powered by Claude",
-						agentType: "claude-code",
-					});
-					await api.setDefaultAgent(newAgent.id);
-					await mutateAgents();
-
-					// Close credentials dialog if still open
-					if (credentialsDialog.isOpen) {
-						credentialsDialog.close();
-					}
-
-					// Welcome modal will automatically reopen for workspace step if needed
-				} catch (error) {
-					console.error(
-						"Failed to create Claude Code agent after credentials setup:",
-						error,
-					);
-				} finally {
-					agentCreationInProgress.current = false;
-				}
-			})();
-		}
-	}, [
-		credentials,
-		agents.length,
-		createAgent,
-		mutateAgents,
-		credentialsDialog,
-	]);
 
 	const value = React.useMemo<DialogContextValue>(
 		() => ({
@@ -271,19 +166,10 @@ export function DialogProvider({ children }: DialogProviderProps) {
 				close: closeSystemRequirements,
 			},
 
-			// Welcome modal
-			welcome: {
-				skipped: welcomeSkipped,
-				setSkipped: setWelcomeSkipped,
-				systemStatusChecked,
-				pendingAgentType,
-			},
-
 			// Action handlers
 			handleAddWorkspace,
 			handleAddOrEditAgent,
 			handleConfirmDeleteWorkspace,
-			handleWelcomeComplete,
 
 			// Data
 			authProviders,
@@ -297,13 +183,9 @@ export function DialogProvider({ children }: DialogProviderProps) {
 			showSystemRequirements,
 			systemStatusMessages,
 			closeSystemRequirements,
-			welcomeSkipped,
-			systemStatusChecked,
-			pendingAgentType,
 			handleAddWorkspace,
 			handleAddOrEditAgent,
 			handleConfirmDeleteWorkspace,
-			handleWelcomeComplete,
 			authProviders,
 			credentials,
 		],

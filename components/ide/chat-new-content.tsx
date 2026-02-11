@@ -180,6 +180,11 @@ export function ChatNewContent({
 		return agentType?.icons;
 	};
 
+	const getAgentName = (agent: Agent): string => {
+		const agentType = agentTypes.find((t) => t.id === agent.agentType);
+		return agentType?.name || agent.agentType;
+	};
+
 	const handleSelectAgent = (agentId: string) => {
 		setLocalSelectedAgentId(agentId); // This automatically persists via usePersistedState
 		onAgentChange(agentId);
@@ -196,7 +201,11 @@ export function ChatNewContent({
 
 	return (
 		<>
-			<WelcomeHeader show={show} />
+			<WelcomeHeader
+				show={show}
+				hasAgent={!!selectedAgent}
+				hasWorkspace={!!selectedWorkspace}
+			/>
 			<WelcomeSelectors
 				show={show}
 				agents={agents}
@@ -204,6 +213,7 @@ export function ChatNewContent({
 				selectedAgent={selectedAgent}
 				selectedWorkspace={selectedWorkspace}
 				getAgentIcons={getAgentIcons}
+				getAgentName={getAgentName}
 				onSelectAgent={handleSelectAgent}
 				onSelectWorkspace={handleSelectWorkspace}
 				onAddAgent={() => agentDialog.open()}
