@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -234,8 +235,31 @@ func TestCreateWorkspace_TildeExpansion(t *testing.T) {
 	project := ts.CreateTestProject(user, "Test Project")
 	client := ts.AuthenticatedClient(user)
 
+	// Create a real git repo under ~ so path validation passes
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("Failed to get home directory: %v", err)
+	}
+	testSubdir := fmt.Sprintf(".discobot-test-tilde-%d", time.Now().UnixNano())
+	testPath := filepath.Join(homeDir, testSubdir)
+	if err := os.MkdirAll(testPath, 0755); err != nil {
+		t.Fatalf("Failed to create test directory: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(testPath) })
+
+	// Initialize as a git repo
+	runWorkspaceGit(t, testPath, "init")
+	runWorkspaceGit(t, testPath, "config", "user.email", "test@example.com")
+	runWorkspaceGit(t, testPath, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(testPath, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatalf("Failed to create README: %v", err)
+	}
+	runWorkspaceGit(t, testPath, "add", ".")
+	runWorkspaceGit(t, testPath, "commit", "-m", "Initial commit")
+
+	tildeRelPath := "~/" + testSubdir
 	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]string{
-		"path":       "~/code/myproject",
+		"path":       tildeRelPath,
 		"sourceType": "local",
 	})
 	defer resp.Body.Close()
@@ -247,16 +271,15 @@ func TestCreateWorkspace_TildeExpansion(t *testing.T) {
 
 	path := workspace["path"].(string)
 	// Path should not contain ~
-	if path == "~/code/myproject" || path[0] == '~' {
+	if path == tildeRelPath || path[0] == '~' {
 		t.Errorf("Expected tilde to be expanded, got '%v'", path)
 	}
-	// Path should contain /code/myproject
+	// Path should be absolute
 	if !filepath.IsAbs(path) {
 		t.Errorf("Expected absolute path, got '%v'", path)
 	}
-	// Path should end with /code/myproject
-	homeDir, _ := os.UserHomeDir()
-	expected := filepath.Join(homeDir, "code/myproject")
+	// Path should resolve to the test directory
+	expected := testPath
 	if path != expected {
 		t.Errorf("Expected path '%s', got '%s'", expected, path)
 	}
