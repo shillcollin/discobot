@@ -460,10 +460,15 @@ export function useSessionFileDiff(
 export function useSessionFileContent(
 	sessionId: string | null,
 	path: string | null,
+	options?: { fromBase?: boolean },
 ) {
+	const fromBase = options?.fromBase ?? false;
 	const { data, error, isLoading, mutate } = useSWR(
-		sessionId && path ? `session-file-${sessionId}-${path}` : null,
-		() => (sessionId && path ? api.readSessionFile(sessionId, path) : null),
+		sessionId && path
+			? `session-file-${sessionId}-${path}${fromBase ? "-base" : ""}`
+			: null,
+		() =>
+			sessionId && path ? api.readSessionFile(sessionId, path, options) : null,
 		{ shouldRetryOnError },
 	);
 

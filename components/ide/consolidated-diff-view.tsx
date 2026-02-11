@@ -1,61 +1,62 @@
-import { PatchDiff } from "@pierre/diffs/react";
 import {
+	AlertTriangle,
 	Check,
 	ChevronDown,
 	ChevronRight,
 	Columns2,
-	Edit,
 	Loader2,
 	Rows2,
+	Save,
+	X,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import * as React from "react";
+import { lazy, Suspense } from "react";
+import { useSWRConfig } from "swr";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+
+// Lazy-load Monaco DiffEditor (~2MB)
+const DiffEditor = lazy(() =>
+	import("@monaco-editor/react").then((mod) => ({ default: mod.DiffEditor })),
+);
+
+const EditorLoader = () => (
+	<div className="flex items-center justify-center py-8 text-muted-foreground">
+		<Loader2 className="h-5 w-5 animate-spin mr-2" />
+		Loading diff...
+	</div>
+);
+
 import { api } from "@/lib/api-client";
 import { useSessionViewContext } from "@/lib/contexts/session-view-context";
+import { useFileEdit } from "@/lib/hooks/use-file-edit";
 import {
 	STORAGE_KEYS,
 	usePersistedState,
 } from "@/lib/hooks/use-persisted-state";
 import {
+	useSessionFileContent,
 	useSessionFileDiff,
 	useSessionFiles,
 } from "@/lib/hooks/use-session-files";
 import { cn } from "@/lib/utils";
+import {
+	countDiffLinesFast,
+	DIFF_HARD_LIMIT,
+	DIFF_WARNING_THRESHOLD,
+	getLanguageFromPath,
+	reconstructOriginalFromPatch,
+} from "@/lib/utils/diff-utils";
 
 type DiffStyle = "split" | "unified";
-
-// Diff size thresholds (in lines) - same as diff-content.tsx
-const DIFF_WARNING_THRESHOLD = 10000; // Show warning but allow loading
-const DIFF_HARD_LIMIT = 20000; // Never render, show fallback only
-
-/**
- * Fast count of diff lines without parsing the entire patch.
- * Counts lines that start with ' ', '+', or '-' (diff content lines).
- * This is much faster than parsing for large diffs.
- */
-function countDiffLinesFast(patch: string): number {
-	let count = 0;
-	let inHunk = false;
-
-	for (const line of patch.split("\n")) {
-		// Start of a hunk
-		if (line.startsWith("@@")) {
-			inHunk = true;
-			continue;
-		}
-
-		// Count actual diff content lines (context, additions, deletions)
-		if (
-			inHunk &&
-			(line.startsWith(" ") || line.startsWith("+") || line.startsWith("-"))
-		) {
-			count++;
-		}
-	}
-
-	return count;
-}
 
 /**
  * Generate a simple hash from a string for comparison purposes
@@ -93,12 +94,112 @@ function FileDiffSection({
 	onEdit,
 }: FileDiffSectionProps) {
 	const { resolvedTheme } = useTheme();
+	const { mutate } = useSWRConfig();
 
 	const {
 		diff,
 		isLoading: isDiffLoading,
 		error: diffError,
 	} = useSessionFileDiff(sessionId, filePath);
+
+	// Load current file content for Monaco DiffEditor
+	// For deleted files, we don't load current content (it doesn't exist)
+	const { content: currentContent, isLoading: isContentLoading } =
+		useSessionFileContent(
+			sessionId,
+			isExpanded && diff?.status !== "deleted" ? filePath : null,
+		);
+
+	// For deleted files, load the original content from base commit
+	const {
+		content: baseContent,
+		isLoading: isBaseContentLoading,
+		error: baseContentError,
+	} = useSessionFileContent(
+		sessionId,
+		isExpanded && diff?.status === "deleted" ? filePath : null,
+		{ fromBase: true },
+	);
+
+	// Cache the original content - only recalculate when file path changes or initial load
+	const [cachedOriginal, setCachedOriginal] = React.useState<{
+		filePath: string;
+		content: string;
+	} | null>(null);
+
+	// Reconstruct original content from current content and patch (only once per file)
+	React.useEffect(() => {
+		if (!diff?.patch || !isExpanded) return;
+		if (cachedOriginal?.filePath === filePath) return;
+
+		let original = "";
+
+		if (diff.status === "deleted") {
+			// For deleted files, try to use the base content from git
+			if (baseContent) {
+				original = baseContent;
+			} else if (baseContentError || (!isBaseContentLoading && !baseContent)) {
+				// Fallback: reconstruct from patch if base content fails or isn't available
+				// Extract all deletion lines from the patch
+				const lines = diff.patch.split("\n");
+				const contentLines: string[] = [];
+				for (const line of lines) {
+					// Skip diff headers (---, +++, @@)
+					if (
+						line.startsWith("---") ||
+						line.startsWith("+++") ||
+						line.startsWith("@@")
+					) {
+						continue;
+					}
+					// Extract deletion lines (but not added lines)
+					if (line.startsWith("-")) {
+						contentLines.push(line.substring(1)); // Remove the '-' prefix
+					}
+				}
+				original = contentLines.join("\n");
+			}
+		} else if (currentContent) {
+			// For non-deleted files, reconstruct from current content and patch
+			original = reconstructOriginalFromPatch(currentContent, diff.patch);
+		}
+
+		if (original) {
+			setCachedOriginal({ filePath, content: original });
+		}
+	}, [
+		currentContent,
+		baseContent,
+		baseContentError,
+		isBaseContentLoading,
+		diff,
+		filePath,
+		isExpanded,
+		cachedOriginal,
+	]);
+
+	const originalContent = cachedOriginal?.content || "";
+
+	// Detect language for syntax highlighting
+	const language = React.useMemo(
+		() => getLanguageFromPath(filePath),
+		[filePath],
+	);
+
+	// Integrate useFileEdit hook for editing functionality (always enabled)
+	const fileEdit = useFileEdit(
+		sessionId,
+		filePath,
+		currentContent,
+		isContentLoading,
+	);
+
+	// Use ref to access latest fileEdit in onMount callback
+	const fileEditRef = React.useRef(fileEdit);
+
+	React.useEffect(() => {
+		fileEditRef.current = fileEdit;
+	}, [fileEdit]);
 
 	// Compute hash of current patch
 	const [patchHash, setPatchHash] = React.useState<string | null>(null);
@@ -113,14 +214,10 @@ function FileDiffSection({
 	// File is reviewed if the stored hash matches the current patch hash
 	const isReviewed = patchHash !== null && patchHash === currentPatchHash;
 
-	// Handle review - auto-collapse when marked as reviewed
+	// Handle review - navigation is handled by toggleReviewed in parent
 	const handleReviewClick = () => {
 		if (patchHash) {
 			onToggleReview(patchHash);
-			if (!isReviewed && isExpanded) {
-				// Collapse when marking as reviewed
-				onToggleExpand();
-			}
 		}
 	};
 
@@ -133,6 +230,9 @@ function FileDiffSection({
 	// Track whether user wants to force load a large diff
 	const [forceLoadLargeDiff, setForceLoadLargeDiff] = React.useState(false);
 
+	// Track conflict dialog state
+	const [showConflictDialog, setShowConflictDialog] = React.useState(false);
+
 	// Track previous file path to detect changes
 	const prevFilePathRef = React.useRef(filePath);
 
@@ -144,6 +244,38 @@ function FileDiffSection({
 		}
 	});
 
+	// Auto-unmark as reviewed when user makes edits
+	React.useEffect(() => {
+		if (fileEdit.state.isDirty && isReviewed && patchHash) {
+			onToggleReview(patchHash);
+		}
+	}, [fileEdit.state.isDirty, isReviewed, patchHash, onToggleReview]);
+
+	// Keyboard shortcut: Cmd+S / Ctrl+S to save
+	React.useEffect(() => {
+		if (!isExpanded) return;
+
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+				e.preventDefault();
+				if (fileEdit.state.isDirty && !fileEdit.state.isSaving) {
+					fileEdit.save().then((success) => {
+						if (success) {
+							// Refresh diff data after save
+							setTimeout(() => {
+								mutate(`session-diff-${sessionId}-files`);
+								mutate(`session-diff-${sessionId}-${filePath}`);
+							}, 100);
+						}
+					});
+				}
+			}
+		};
+
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [isExpanded, fileEdit, sessionId, filePath, mutate]);
+
 	const isOverHardLimit = diffLineCount > DIFF_HARD_LIMIT;
 	const isOverWarningThreshold =
 		diffLineCount > DIFF_WARNING_THRESHOLD && diffLineCount <= DIFF_HARD_LIMIT;
@@ -151,7 +283,12 @@ function FileDiffSection({
 		(isOverWarningThreshold && !forceLoadLargeDiff) || isOverHardLimit;
 
 	return (
-		<div className="border-b border-border">
+		<div
+			className={cn(
+				"border-b border-border",
+				isExpanded && "flex-1 flex flex-col overflow-hidden",
+			)}
+		>
 			{/* File header - always visible */}
 			<div
 				className={cn(
@@ -159,10 +296,18 @@ function FileDiffSection({
 					isReviewed && "opacity-60",
 				)}
 			>
-				<button
-					type="button"
-					className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-80 transition-opacity"
+				{/* biome-ignore lint/a11y/useSemanticElements: Can't use button - contains other buttons */}
+				<div
+					role="button"
+					tabIndex={0}
+					className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
 					onClick={onToggleExpand}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" || e.key === " ") {
+							e.preventDefault();
+							onToggleExpand();
+						}
+					}}
 				>
 					{isExpanded ? (
 						<ChevronDown className="h-4 w-4 shrink-0" />
@@ -205,23 +350,66 @@ function FileDiffSection({
 							Reviewed
 						</span>
 					)}
-				</button>
+				</div>
 				<div className="flex items-center gap-1 shrink-0">
-					{/* Edit button - only show for non-deleted files */}
-					{diff?.status !== "deleted" && (
-						<Button
-							variant="ghost"
-							size="sm"
-							className="h-6 px-2 text-xs"
+					{/* Status indicators */}
+					{fileEdit.state.hasConflict && (
+						<button
+							type="button"
+							className="flex items-center gap-1 text-xs text-yellow-500 shrink-0 hover:underline"
 							onClick={(e) => {
 								e.stopPropagation();
-								onEdit();
+								setShowConflictDialog(true);
 							}}
-							title="Edit file"
+							title="Click to resolve conflict"
 						>
-							<Edit className="h-3 w-3 mr-1" />
-							Edit
-						</Button>
+							<AlertTriangle className="h-3 w-3" />
+							Conflict
+						</button>
+					)}
+
+					{/* Save/Discard buttons - only show when dirty and for non-deleted files */}
+					{diff?.status !== "deleted" && fileEdit.state.isDirty && (
+						<>
+							<Button
+								variant="default"
+								size="sm"
+								className="h-6 px-2 text-xs"
+								onClick={async (e) => {
+									e.stopPropagation();
+									const success = await fileEdit.save();
+									if (success) {
+										// Refresh diff data after save
+										setTimeout(() => {
+											mutate(`session-diff-${sessionId}-files`);
+											mutate(`session-diff-${sessionId}-${filePath}`);
+										}, 100);
+									}
+								}}
+								disabled={fileEdit.state.isSaving}
+								title="Save changes (Cmd/Ctrl+S)"
+							>
+								{fileEdit.state.isSaving ? (
+									<Loader2 className="h-3 w-3 mr-1 animate-spin" />
+								) : (
+									<Save className="h-3 w-3 mr-1" />
+								)}
+								Save
+							</Button>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-6 px-2 text-xs"
+								onClick={(e) => {
+									e.stopPropagation();
+									fileEdit.discard();
+								}}
+								title="Discard changes"
+							>
+								<X className="h-3 w-3 mr-1" />
+								Discard
+							</Button>
+						</>
 					)}
 					<Button
 						variant={isReviewed ? "secondary" : "ghost"}
@@ -246,8 +434,8 @@ function FileDiffSection({
 
 			{/* Expandable diff content */}
 			{isExpanded && (
-				<div className="bg-background">
-					{isDiffLoading ? (
+				<div className="flex-1 bg-background overflow-hidden">
+					{isDiffLoading || isContentLoading || isBaseContentLoading ? (
 						<div className="flex items-center justify-center py-8 text-muted-foreground">
 							<Loader2 className="h-5 w-5 animate-spin mr-2" />
 							Loading diff...
@@ -288,28 +476,140 @@ function FileDiffSection({
 										</Button>
 									)}
 									<Button size="sm" variant="outline" onClick={onEdit}>
-										<Edit className="h-3 w-3 mr-1" />
 										View in Tab
 									</Button>
 								</div>
 							</div>
 						</div>
+					) : !originalContent && (isContentLoading || isBaseContentLoading) ? (
+						<div className="flex items-center justify-center py-8 text-muted-foreground">
+							Loading file content...
+						</div>
 					) : (
-						<PatchDiff
-							patch={diff.patch}
-							options={{
-								theme: {
-									dark: "github-dark",
-									light: "github-light",
-								},
-								themeType: resolvedTheme === "dark" ? "dark" : "light",
-								diffStyle,
-								lineDiffType: "word-alt",
-							}}
-						/>
+						<Suspense fallback={<EditorLoader />}>
+							<DiffEditor
+								key={filePath}
+								height="100%"
+								language={language}
+								original={originalContent}
+								modified={
+									diff.status === "deleted" ? "" : fileEdit.state.content || ""
+								}
+								theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+								options={{
+									readOnly: diff.status === "deleted",
+									renderSideBySide: diffStyle === "split",
+									minimap: { enabled: false },
+									hideUnchangedRegions: {
+										enabled: true,
+										minimumLineCount: 3,
+										contextLineCount: 3,
+									},
+									diffWordWrap: "on",
+									scrollBeyondLastLine: false,
+									automaticLayout: true,
+									fontSize: 13,
+								}}
+								onMount={(editor) => {
+									// Get the modified (right-side) editor
+									const modifiedEditor = editor.getModifiedEditor();
+
+									// Attach change listener
+									const disposable = modifiedEditor.onDidChangeModelContent(
+										() => {
+											// Use ref to get latest fileEdit
+											const currentFileEdit = fileEditRef.current;
+
+											// Always handle edits (unless it's a deleted file)
+											if (diff.status !== "deleted") {
+												const value = modifiedEditor.getValue();
+												currentFileEdit.handleEdit(value);
+											}
+										},
+									);
+
+									// Clean up on unmount
+									return () => disposable.dispose();
+								}}
+							/>
+						</Suspense>
 					)}
 				</div>
 			)}
+
+			{/* Conflict Resolution Dialog */}
+			<Dialog open={showConflictDialog} onOpenChange={setShowConflictDialog}>
+				<DialogContent className="max-w-4xl h-[80vh]">
+					<DialogHeader>
+						<DialogTitle>File Conflict Detected</DialogTitle>
+						<DialogDescription>
+							The file has been modified since you started editing. Choose how
+							to proceed.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="flex-1 overflow-hidden" style={{ height: "500px" }}>
+						{fileEdit.state.conflictContent && (
+							<Suspense fallback={<EditorLoader />}>
+								<DiffEditor
+									key={`conflict-${filePath}`}
+									height="100%"
+									language={language}
+									original={fileEdit.state.conflictContent}
+									modified={fileEdit.state.content}
+									theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+									options={{
+										readOnly: true,
+										renderSideBySide: true,
+										minimap: { enabled: false },
+										scrollBeyondLastLine: false,
+										automaticLayout: true,
+									}}
+								/>
+							</Suspense>
+						)}
+						<div className="mt-4 space-y-2 text-sm">
+							<p>
+								<strong>Left (Server):</strong> Current file content on disk
+							</p>
+							<p>
+								<strong>Right (Your Changes):</strong> Your local edits
+							</p>
+						</div>
+					</div>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => {
+								setShowConflictDialog(false);
+							}}
+						>
+							Keep Editing
+						</Button>
+						<Button
+							variant="outline"
+							onClick={() => {
+								fileEdit.acceptServerContent();
+								setShowConflictDialog(false);
+							}}
+						>
+							Use Disk Version
+						</Button>
+						<Button
+							variant="default"
+							onClick={async () => {
+								const success = await fileEdit.forceSave();
+								if (success) {
+									mutate(`session-diff-${sessionId}-files`);
+									mutate(`session-diff-${sessionId}-${filePath}`);
+									setShowConflictDialog(false);
+								}
+							}}
+						>
+							Force Save My Changes
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }
@@ -335,14 +635,26 @@ export function ConsolidatedDiffView() {
 		false,
 	);
 
-	// Track collapsed files per session (in sessionStorage)
-	// Default (empty array) = all files expanded
-	// Note: Using arrays instead of Sets because Sets don't survive JSON serialization
-	const [collapsedFiles, setCollapsedFiles] = usePersistedState<string[]>(
-		STORAGE_KEYS.CONSOLIDATED_DIFF_EXPANDED,
-		[],
-		"session",
+	// Track collapsed files (not persisted - always start with all collapsed)
+	// Initialize with all files collapsed
+	const [collapsedFiles, setCollapsedFiles] = React.useState<string[]>(() =>
+		diffEntries.map((f) => f.path),
 	);
+
+	// Reset collapsed state only when the file paths actually change (e.g., switching sessions)
+	// Not when diffEntries updates due to cache invalidation after save
+	const filePaths = React.useMemo(
+		() => diffEntries.map((f) => f.path).join(","),
+		[diffEntries],
+	);
+	const prevFilePathsRef = React.useRef(filePaths);
+
+	React.useEffect(() => {
+		if (prevFilePathsRef.current !== filePaths) {
+			setCollapsedFiles(diffEntries.map((f) => f.path));
+			prevFilePathsRef.current = filePaths;
+		}
+	}, [filePaths, diffEntries]);
 
 	// Track reviewed state per session+file with patch hash (in localStorage)
 	// Format: { sessionId: { filePath: patchHash } }
@@ -364,50 +676,73 @@ export function ConsolidatedDiffView() {
 	const toggleExpanded = React.useCallback(
 		(filePath: string) => {
 			setCollapsedFiles((prev) => {
-				const set = new Set(prev);
-				if (set.has(filePath)) {
-					set.delete(filePath);
-				} else {
-					set.add(filePath);
+				const isCurrentlyExpanded = !prev.includes(filePath);
+
+				if (isCurrentlyExpanded) {
+					// File is expanded, collapse it (close accordion)
+					return diffEntries.map((f) => f.path);
 				}
-				return Array.from(set);
+
+				// File is collapsed, expand it and collapse all others
+				const allOtherFiles = diffEntries
+					.map((f) => f.path)
+					.filter((p) => p !== filePath);
+				return allOtherFiles;
 			});
 		},
-		[setCollapsedFiles],
+		[diffEntries],
 	);
 
 	const toggleReviewed = React.useCallback(
 		(filePath: string, patchHash: string) => {
 			if (!selectedSessionId) return;
 
-			setReviewedFiles((prev) => {
-				const sessionFiles = { ...(prev[selectedSessionId] || {}) };
+			// Get current reviewed files for this session
+			const sessionFiles = { ...(reviewedFiles[selectedSessionId] || {}) };
+			const wasReviewed = sessionFiles[filePath] === patchHash;
 
-				// If already reviewed with this exact hash, unmark it
-				// Otherwise, mark as reviewed with the new hash
-				if (sessionFiles[filePath] === patchHash) {
-					delete sessionFiles[filePath];
+			// Check if this file is currently expanded
+			const isCurrentlyExpanded = !collapsedFiles.includes(filePath);
+
+			// Update reviewed state
+			if (wasReviewed) {
+				delete sessionFiles[filePath];
+			} else {
+				sessionFiles[filePath] = patchHash;
+			}
+
+			setReviewedFiles((prev) => ({
+				...prev,
+				[selectedSessionId]: sessionFiles,
+			}));
+
+			// Only auto-advance if we just marked as reviewed AND the file is currently expanded
+			if (!wasReviewed && isCurrentlyExpanded) {
+				const currentIndex = diffEntries.findIndex((f) => f.path === filePath);
+				const nextUnreviewed = diffEntries
+					.slice(currentIndex + 1)
+					.find((f) => !sessionFiles[f.path]);
+
+				if (nextUnreviewed) {
+					// Collapse all others and expand the next unreviewed file
+					const allOtherFiles = diffEntries
+						.map((f) => f.path)
+						.filter((p) => p !== nextUnreviewed.path);
+					setCollapsedFiles(allOtherFiles);
 				} else {
-					sessionFiles[filePath] = patchHash;
+					// No more unreviewed files, collapse everything
+					setCollapsedFiles(diffEntries.map((f) => f.path));
 				}
-
-				return {
-					...prev,
-					[selectedSessionId]: sessionFiles,
-				};
-			});
+			}
 		},
-		[selectedSessionId, setReviewedFiles],
+		[
+			selectedSessionId,
+			reviewedFiles,
+			setReviewedFiles,
+			diffEntries,
+			collapsedFiles,
+		],
 	);
-
-	const expandAll = React.useCallback(() => {
-		setCollapsedFiles([]);
-	}, [setCollapsedFiles]);
-
-	const collapseAll = React.useCallback(() => {
-		const allPaths = diffEntries.map((f) => f.path);
-		setCollapsedFiles(allPaths);
-	}, [diffEntries, setCollapsedFiles]);
 
 	const markAllReviewed = React.useCallback(async () => {
 		if (!selectedSessionId) return;
@@ -434,9 +769,7 @@ export function ConsolidatedDiffView() {
 			...prev,
 			[selectedSessionId]: sessionFiles,
 		}));
-		// Also collapse all when marking all as reviewed
-		collapseAll();
-	}, [selectedSessionId, diffEntries, setReviewedFiles, collapseAll]);
+	}, [selectedSessionId, diffEntries, setReviewedFiles]);
 
 	const handleEditFile = React.useCallback(
 		(filePath: string) => {
@@ -471,7 +804,6 @@ export function ConsolidatedDiffView() {
 		);
 	}
 
-	const allExpanded = diffEntries.every((f) => !collapsedFilesSet.has(f.path));
 	// Note: We can't easily check if all are reviewed with current hashes without loading all diffs
 	// So we just check if all file paths have a stored hash (may be outdated)
 	const allReviewed = diffEntries.every((f) =>
@@ -525,14 +857,6 @@ export function ConsolidatedDiffView() {
 						variant="ghost"
 						size="sm"
 						className="h-6 text-xs"
-						onClick={allExpanded ? collapseAll : expandAll}
-					>
-						{allExpanded ? "Collapse All" : "Expand All"}
-					</Button>
-					<Button
-						variant="ghost"
-						size="sm"
-						className="h-6 text-xs"
 						onClick={markAllReviewed}
 						disabled={allReviewed}
 					>
@@ -543,7 +867,7 @@ export function ConsolidatedDiffView() {
 			</div>
 
 			{/* File diffs list */}
-			<div className="flex-1 overflow-y-auto">
+			<div className="flex-1 flex flex-col overflow-y-auto">
 				{diffEntries.map((file) => (
 					<FileDiffSection
 						key={file.path}

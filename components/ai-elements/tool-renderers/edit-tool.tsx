@@ -1,12 +1,23 @@
-import { parsePatchFiles } from "@pierre/diffs";
-import { FileDiff } from "@pierre/diffs/react";
-import * as Diff from "diff";
-import { CheckCircle, FileEdit, XCircle } from "lucide-react";
-import { useMemo } from "react";
+import { CheckCircle, FileEdit, Loader2, XCircle } from "lucide-react";
+import { useTheme } from "next-themes";
+import { lazy, Suspense, useMemo } from "react";
 import {
 	ToolInput as DefaultToolInput,
 	ToolOutput as DefaultToolOutput,
 } from "../tool";
+
+// Lazy-load Monaco DiffEditor
+const DiffEditor = lazy(() =>
+	import("@monaco-editor/react").then((mod) => ({ default: mod.DiffEditor })),
+);
+
+const DiffEditorLoader = () => (
+	<div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
+		<Loader2 className="h-4 w-4 animate-spin mr-2" />
+		Loading diff...
+	</div>
+);
+
 import type { ToolRendererProps } from "../tool-schemas";
 import {
 	type EditToolInput,
@@ -17,7 +28,7 @@ import {
 import { shortenPath } from "./index";
 
 /**
- * Renders a diff view using @pierre/diffs
+ * Renders a diff view using Monaco DiffEditor
  */
 function DiffView({
 	oldString,
@@ -30,47 +41,66 @@ function DiffView({
 	fileName: string;
 	isStreaming: boolean;
 }) {
-	const fileDiff = useMemo(() => {
-		// During streaming, defer expensive diff calculation to avoid infinite loops
-		// This prevents React from entering an update cycle while the input is changing
-		if (isStreaming) {
-			return null;
-		}
+	const { resolvedTheme } = useTheme();
 
-		// Create a unified diff patch using the diff library
-		const patch = Diff.createPatch(
-			fileName,
-			oldString,
-			newString,
-			"original",
-			"modified",
-		);
+	// Detect language from file name
+	const language = useMemo(() => {
+		const ext = fileName.split(".").pop()?.toLowerCase() || "";
+		const languageMap: Record<string, string> = {
+			js: "javascript",
+			jsx: "javascript",
+			ts: "typescript",
+			tsx: "typescript",
+			py: "python",
+			json: "json",
+			html: "html",
+			css: "css",
+			md: "markdown",
+		};
+		return languageMap[ext] || "plaintext";
+	}, [fileName]);
 
-		// Parse the patch using @pierre/diffs
-		const parsedPatches = parsePatchFiles(patch);
-
-		// Return the first file diff (there should only be one)
-		return parsedPatches[0]?.files[0];
-	}, [oldString, newString, fileName, isStreaming]);
-
-	if (!fileDiff) {
+	// During streaming, show loading state
+	if (isStreaming) {
 		return (
 			<div className="rounded-md border border-border bg-muted/20 p-3 text-muted-foreground text-sm">
-				{isStreaming ? "Loading changes..." : "No changes to display"}
+				Loading changes...
+			</div>
+		);
+	}
+
+	// If no changes, show message
+	if (oldString === newString) {
+		return (
+			<div className="rounded-md border border-border bg-muted/20 p-3 text-muted-foreground text-sm">
+				No changes to display
 			</div>
 		);
 	}
 
 	return (
-		<div className="rounded-md border border-border overflow-hidden [&_pre]:!m-0 [&_pre]:!border-0">
-			<FileDiff
-				fileDiff={fileDiff}
-				options={{
-					diffStyle: "unified",
-					overflow: "wrap",
-					disableFileHeader: true,
-				}}
-			/>
+		<div
+			className="rounded-md border border-border overflow-hidden"
+			style={{ height: "200px" }}
+		>
+			<Suspense fallback={<DiffEditorLoader />}>
+				<DiffEditor
+					key={`edit-tool-${fileName}`}
+					height="100%"
+					language={language}
+					original={oldString}
+					modified={newString}
+					theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+					options={{
+						readOnly: true,
+						renderSideBySide: false,
+						minimap: { enabled: false },
+						scrollBeyondLastLine: false,
+						automaticLayout: true,
+						fontSize: 12,
+					}}
+				/>
+			</Suspense>
 		</div>
 	);
 }

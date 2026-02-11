@@ -67,7 +67,6 @@ export const STORAGE_KEYS = {
 	ACTIVE_FILE_PATH: "discobot:activeFilePath",
 	FILE_VIEW_MODES: "discobot:fileViewModes",
 	// Consolidated diff view state
-	CONSOLIDATED_DIFF_EXPANDED: "discobot:consolidatedDiffExpanded",
 	CONSOLIDATED_DIFF_REVIEWED: "discobot:consolidatedDiffReviewed",
 	CONSOLIDATED_DIFF_STYLE: "discobot:consolidatedDiffStyle",
 	// Per-session chat width (use getSessionStorageKey to create full key)

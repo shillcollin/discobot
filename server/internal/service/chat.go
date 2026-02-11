@@ -348,10 +348,6 @@ func (c *ChatService) ReadFileFromBase(ctx context.Context, projectID, sessionID
 		return nil, fmt.Errorf("failed to get workspace: %w", err)
 	}
 
-	if workspace.SourceType != "git" {
-		return nil, fmt.Errorf("workspace is not a git repository")
-	}
-
 	// Use base commit from session if available, otherwise use workspace commit
 	var baseCommit string
 	if session.BaseCommit != nil {
