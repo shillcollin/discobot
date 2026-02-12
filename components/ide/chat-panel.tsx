@@ -12,7 +12,7 @@ import {
 } from "@/components/ide/chat-plan-queue";
 import { PromptInputWithHistory } from "@/components/ide/prompt-input-with-history";
 import { api } from "@/lib/api-client";
-import { getApiBase } from "@/lib/api-config";
+import { appendAuthToken, getApiBase } from "@/lib/api-config";
 import {
 	CommitStatus,
 	SessionStatus as SessionStatusConstants,
@@ -167,7 +167,8 @@ export function ChatPanel({
 						body.workspaceId = workspaceId;
 						body.agentId = agentId;
 
-						const response = await fetch(url, {
+						const authUrl = appendAuthToken(url as string);
+						const response = await fetch(authUrl, {
 							...options,
 							body: JSON.stringify(body),
 							signal: controller.signal,
@@ -184,7 +185,10 @@ export function ChatPanel({
 						return response;
 					}
 
-					return fetch(url, { ...options, signal: controller.signal });
+					return fetch(appendAuthToken(url as string), {
+						...options,
+						signal: controller.signal,
+					});
 				}) as typeof fetch,
 			}),
 		[onSessionCreated, sessionId],
