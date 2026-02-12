@@ -91,14 +91,11 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	h.JSON(w, http.StatusOK, map[string]any{"messages": messages})
 }
 
-// ListSessionsByWorkspace returns sessions for a workspace.
-// Query params:
-//   - includeClosed: if "true", include sessions with commitStatus = "completed" (default: false)
+// ListSessionsByWorkspace returns all sessions for a workspace.
 func (h *Handler) ListSessionsByWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "workspaceId")
-	includeClosed := r.URL.Query().Get("includeClosed") == "true"
 
-	sessions, err := h.sessionService.ListSessionsByWorkspace(r.Context(), workspaceID, includeClosed)
+	sessions, err := h.sessionService.ListSessionsByWorkspace(r.Context(), workspaceID)
 	if err != nil {
 		h.Error(w, http.StatusInternalServerError, "Failed to list sessions")
 		return

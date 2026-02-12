@@ -529,8 +529,7 @@ func TestListSessions_IncludesCommitStatus(t *testing.T) {
 	}
 
 	// List sessions and verify commit status is included
-	// Use includeClosed=true since commitStatus "completed" means the session is closed
-	resp := client.Get("/api/projects/" + project.ID + "/workspaces/" + workspace.ID + "/sessions?includeClosed=true")
+	resp := client.Get("/api/projects/" + project.ID + "/workspaces/" + workspace.ID + "/sessions")
 	defer resp.Body.Close()
 
 	AssertStatus(t, resp, http.StatusOK)

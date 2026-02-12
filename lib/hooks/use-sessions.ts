@@ -47,15 +47,10 @@ export function invalidateAllSessionsCaches() {
 	);
 }
 
-export function useSessions(
-	workspaceId: string | null,
-	options?: { includeClosed?: boolean },
-) {
-	const includeClosed = options?.includeClosed ?? false;
+export function useSessions(workspaceId: string | null) {
 	const { data, error, isLoading, mutate } = useSWR(
-		workspaceId ? `sessions-${workspaceId}-${includeClosed}` : null,
-		() =>
-			workspaceId ? api.getSessions(workspaceId, { includeClosed }) : null,
+		workspaceId ? `sessions-${workspaceId}` : null,
+		() => (workspaceId ? api.getSessions(workspaceId) : null),
 	);
 
 	return {

@@ -141,7 +141,7 @@ Features:
 
 ```typescript
 // Fetch sessions for a workspace
-const { sessions, isLoading, error } = useSessions(workspaceId, { includeClosed: false })
+const { sessions, isLoading, error } = useSessions(workspaceId)
 
 // Fetch a single session
 const { session, isLoading, error, updateSession } = useSession(sessionId)
@@ -428,7 +428,7 @@ Default SWR options:
 | Resource | Key Pattern |
 |----------|-------------|
 | Workspaces | `workspaces` |
-| Sessions list | `sessions-{workspaceId}-{includeClosed}` |
+| Sessions list | `sessions-{workspaceId}` |
 | Session | `session-{id}` |
 | Agents | `agents` |
 | Agent Types | `agent-types` |

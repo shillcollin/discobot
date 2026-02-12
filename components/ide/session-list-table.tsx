@@ -44,10 +44,6 @@ import { useMainContentContext } from "@/lib/contexts/main-content-context";
 import { useAgentTypes } from "@/lib/hooks/use-agent-types";
 import { useAgents } from "@/lib/hooks/use-agents";
 import {
-	STORAGE_KEYS,
-	usePersistedState,
-} from "@/lib/hooks/use-persisted-state";
-import {
 	useDeleteSession,
 	useSession,
 	useSessions,
@@ -80,15 +76,7 @@ export function SessionListTable() {
 			)
 		: "";
 
-	// Get show closed sessions preference
-	const [showClosedSessions] = usePersistedState(
-		STORAGE_KEYS.SHOW_CLOSED_SESSIONS,
-		false,
-	);
-
-	const { sessions, isLoading } = useSessions(workspaceId, {
-		includeClosed: showClosedSessions,
-	});
+	const { sessions, isLoading } = useSessions(workspaceId);
 
 	// Sorting state
 	type SortColumn = "status" | "name" | "agent" | "timestamp";

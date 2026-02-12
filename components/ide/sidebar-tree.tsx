@@ -2,8 +2,6 @@ import {
 	ChevronDown,
 	ChevronRight,
 	Circle,
-	Eye,
-	EyeOff,
 	Loader2,
 	MoreHorizontal,
 	Plus,
@@ -30,10 +28,6 @@ import {
 import type { Session, Workspace, WorkspaceStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useMainContentContext } from "@/lib/contexts/main-content-context";
-import {
-	STORAGE_KEYS,
-	usePersistedState,
-} from "@/lib/hooks/use-persisted-state";
 import {
 	useDeleteSession,
 	useSession,
@@ -80,10 +74,6 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 	const { workspaceDialog, deleteWorkspaceDialog } = useDialogContext();
 
 	const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
-	const [showClosedSessions, setShowClosedSessions] = usePersistedState(
-		STORAGE_KEYS.SHOW_CLOSED_SESSIONS,
-		false,
-	);
 
 	// Load expanded state from localStorage on mount
 	React.useEffect(() => {
@@ -110,20 +100,6 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 				<div className="flex items-center gap-0.5">
 					<button
 						type="button"
-						onClick={() => setShowClosedSessions(!showClosedSessions)}
-						className="p-1 rounded hover:bg-sidebar-accent transition-colors"
-						title={
-							showClosedSessions ? "Hide done sessions" : "Show done sessions"
-						}
-					>
-						{showClosedSessions ? (
-							<Eye className="h-3.5 w-3.5 text-muted-foreground" />
-						) : (
-							<EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
-						)}
-					</button>
-					<button
-						type="button"
 						onClick={() => workspaceDialog.open()}
 						className="p-1 rounded hover:bg-sidebar-accent transition-colors"
 						title="Add workspace"
@@ -147,7 +123,6 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 						onClearSelection={() =>
 							showNewSession({ workspaceId: workspace.id })
 						}
-						showClosedSessions={showClosedSessions}
 					/>
 				))}
 			</div>
@@ -165,7 +140,6 @@ const WorkspaceNode = React.memo(function WorkspaceNode({
 	onAddSession,
 	onDeleteWorkspace,
 	onClearSelection,
-	showClosedSessions,
 }: {
 	workspace: Workspace;
 	isExpanded: boolean;
@@ -176,7 +150,6 @@ const WorkspaceNode = React.memo(function WorkspaceNode({
 	onAddSession: (workspaceId: string) => void;
 	onDeleteWorkspace: (workspace: Workspace) => void;
 	onClearSelection: () => void;
-	showClosedSessions: boolean;
 }) {
 	const [menuOpen, setMenuOpen] = React.useState(false);
 	const [isRenaming, setIsRenaming] = React.useState(false);
@@ -185,10 +158,8 @@ const WorkspaceNode = React.memo(function WorkspaceNode({
 	const inputRef = React.useRef<HTMLInputElement>(null);
 
 	// Fetch sessions when workspace is expanded
-	// Server filters out closed sessions unless includeClosed is true
 	const { sessions, isLoading: sessionsLoading } = useSessions(
 		isExpanded ? workspace.id : null,
-		{ includeClosed: showClosedSessions },
 	);
 
 	// Focus input when entering rename mode
