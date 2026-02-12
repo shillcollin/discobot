@@ -2,6 +2,7 @@ import { AlertTriangle, Download, FileText, X } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import type { FileNode } from "@/lib/mock-data";
+import { openUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
 // Diff size thresholds (in lines)
@@ -79,7 +80,7 @@ function LargeDiffFallback({
 		// Create a temporary file viewer (simple text display)
 		const blob = new Blob([currentContent], { type: "text/plain" });
 		const url = URL.createObjectURL(blob);
-		window.open(url, "_blank");
+		openUrl(url);
 		setTimeout(() => URL.revokeObjectURL(url), 1000);
 	};
 

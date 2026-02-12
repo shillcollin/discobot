@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router";
 import { AppShell } from "@/components/app-shell";
+import { LinkHandler } from "@/components/link-handler";
 import { ResizeObserverFix } from "@/components/resize-observer-fix";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -16,6 +17,7 @@ export function App() {
 		>
 			<TooltipProvider delayDuration={700}>
 				<ResizeObserverFix />
+				<LinkHandler />
 				<AppShell>
 					<Routes>
 						<Route path="/" element={<HomePage />} />

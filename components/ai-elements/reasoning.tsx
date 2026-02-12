@@ -7,6 +7,7 @@ import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { createContext, memo, useContext, useEffect, useState } from "react";
 import { Streamdown } from "streamdown";
+import { LinkSafetyModal } from "@/components/ai-elements/link-safety-modal";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -195,7 +196,14 @@ export const ReasoningContent = memo(
 				)}
 				{...props}
 			>
-				<Streamdown plugins={plugins} {...props}>
+				<Streamdown
+					plugins={plugins}
+					linkSafety={{
+						enabled: true,
+						renderModal: (modalProps) => <LinkSafetyModal {...modalProps} />,
+					}}
+					{...props}
+				>
 					{children}
 				</Streamdown>
 			</CollapsibleContent>

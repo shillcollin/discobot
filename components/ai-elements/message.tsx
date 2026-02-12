@@ -13,6 +13,7 @@ import {
 	useState,
 } from "react";
 import { type PluginConfig, Streamdown } from "streamdown";
+import { LinkSafetyModal } from "@/components/ai-elements/link-safety-modal";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
 import {
@@ -341,6 +342,10 @@ export const MessageResponse = memo(
 					className,
 				)}
 				plugins={plugins}
+				linkSafety={{
+					enabled: true,
+					renderModal: (modalProps) => <LinkSafetyModal {...modalProps} />,
+				}}
 				{...props}
 			/>
 		);
