@@ -121,16 +121,22 @@ function FileDiffSection({
 		{ fromBase: true },
 	);
 
-	// Cache the original content - only recalculate when file path changes or initial load
+	// Cache the original content - only recalculate when file path or patch changes
 	const [cachedOriginal, setCachedOriginal] = React.useState<{
 		filePath: string;
+		patch: string;
 		content: string;
 	} | null>(null);
 
-	// Reconstruct original content from current content and patch (only once per file)
+	// Reconstruct original content from current content and patch
 	React.useEffect(() => {
 		if (!diff?.patch || !isExpanded) return;
-		if (cachedOriginal?.filePath === filePath) return;
+		// Only use cached version if BOTH file path AND patch match
+		if (
+			cachedOriginal?.filePath === filePath &&
+			cachedOriginal?.patch === diff.patch
+		)
+			return;
 
 		let original = "";
 
@@ -165,7 +171,7 @@ function FileDiffSection({
 		}
 
 		if (original) {
-			setCachedOriginal({ filePath, content: original });
+			setCachedOriginal({ filePath, patch: diff.patch, content: original });
 		}
 	}, [
 		currentContent,
