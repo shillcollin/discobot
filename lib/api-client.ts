@@ -33,6 +33,7 @@ import type {
 	OAuthAuthorizeResponse,
 	OAuthExchangeRequest,
 	OAuthExchangeResponse,
+	OAuthRefreshResponse,
 	ProviderStatus,
 	ProvidersResponse,
 	ReadSessionFileResponse,
@@ -398,6 +399,15 @@ class ApiClient {
 
 	async deleteCredential(providerId: string): Promise<void> {
 		await this.fetch(`/credentials/${providerId}`, { method: "DELETE" });
+	}
+
+	async refreshCredential(providerId: string): Promise<OAuthRefreshResponse> {
+		return this.fetch<OAuthRefreshResponse>(
+			`/credentials/${providerId}/refresh`,
+			{
+				method: "POST",
+			},
+		);
 	}
 
 	// Anthropic OAuth

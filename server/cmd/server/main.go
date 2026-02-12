@@ -1228,6 +1228,16 @@ func main() {
 					},
 				})
 
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{provider}/refresh",
+					Handler: h.RefreshCredential,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "Refresh OAuth tokens",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "provider", Example: "anthropic"}},
+					},
+				})
+
 				// Anthropic OAuth
 				credReg.Register(r, routes.Route{
 					Method: "POST", Pattern: "/anthropic/authorize",

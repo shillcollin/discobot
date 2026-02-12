@@ -109,6 +109,33 @@ func (h *Handler) DeleteCredential(w http.ResponseWriter, r *http.Request) {
 	h.JSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// RefreshCredential manually refreshes OAuth tokens for a credential
+func (h *Handler) RefreshCredential(w http.ResponseWriter, r *http.Request) {
+	projectID := middleware.GetProjectID(r.Context())
+	provider := chi.URLParam(r, "provider")
+
+	tokens, err := h.credentialService.RefreshOAuthTokens(r.Context(), projectID, provider)
+	if err != nil {
+		if errors.Is(err, service.ErrCredentialNotFound) {
+			h.Error(w, http.StatusNotFound, "Credential not found")
+			return
+		}
+		h.Error(w, http.StatusInternalServerError, "Failed to refresh token: "+err.Error())
+		return
+	}
+
+	// Return success response with new expiration time
+	response := map[string]any{
+		"success":   true,
+		"expiresAt": tokens.ExpiresAt,
+	}
+	if !tokens.ExpiresAt.IsZero() {
+		response["expiresIn"] = int(time.Until(tokens.ExpiresAt).Seconds())
+	}
+
+	h.JSON(w, http.StatusOK, response)
+}
+
 // AnthropicExchangeRequest is the request for exchanging code for tokens
 type AnthropicExchangeRequest struct {
 	Code         string `json:"code"`
@@ -127,7 +154,7 @@ func (h *Handler) AnthropicAuthorize(w http.ResponseWriter, _ *http.Request) {
 	h.JSON(w, http.StatusOK, authResp)
 }
 
-// AnthropicExchange exchanges code for tokens
+// AnthropicExchange exchanges code for tokens or accepts direct access tokens
 func (h *Handler) AnthropicExchange(w http.ResponseWriter, r *http.Request) {
 	projectID := middleware.GetProjectID(r.Context())
 
@@ -141,31 +168,49 @@ func (h *Handler) AnthropicExchange(w http.ResponseWriter, r *http.Request) {
 		h.Error(w, http.StatusBadRequest, "code is required")
 		return
 	}
-	if req.CodeVerifier == "" {
-		h.Error(w, http.StatusBadRequest, "verifier is required")
-		return
+
+	var oauthCred *service.OAuthCredential
+	var expiresAt time.Time
+
+	// Check if this is a direct access token from 'claude setup-token'
+	if strings.HasPrefix(req.Code, "sk-ant-oat0") {
+		// Direct access token - store it with 1 year expiration
+		expiresAt = time.Now().Add(365 * 24 * time.Hour)
+		oauthCred = &service.OAuthCredential{
+			AccessToken: req.Code,
+			TokenType:   "Bearer",
+			ExpiresAt:   expiresAt,
+			// No refresh token for direct tokens
+		}
+	} else {
+		// Regular OAuth flow - exchange authorization code for tokens
+		if req.CodeVerifier == "" {
+			h.Error(w, http.StatusBadRequest, "verifier is required for authorization code")
+			return
+		}
+
+		provider := oauth.NewAnthropicProvider(h.cfg.AnthropicClientID)
+		tokenResp, err := provider.Exchange(r.Context(), req.Code, req.CodeVerifier)
+		if err != nil {
+			// Return as JSON with success: false so frontend can display the error
+			h.JSON(w, http.StatusOK, map[string]any{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		expiresAt = tokenResp.ExpiresAt
+		oauthCred = &service.OAuthCredential{
+			AccessToken:  tokenResp.AccessToken,
+			RefreshToken: tokenResp.RefreshToken,
+			TokenType:    tokenResp.TokenType,
+			ExpiresAt:    tokenResp.ExpiresAt,
+			Scope:        tokenResp.Scope,
+		}
 	}
 
-	provider := oauth.NewAnthropicProvider(h.cfg.AnthropicClientID)
-	tokenResp, err := provider.Exchange(r.Context(), req.Code, req.CodeVerifier)
-	if err != nil {
-		// Return as JSON with success: false so frontend can display the error
-		h.JSON(w, http.StatusOK, map[string]any{
-			"success": false,
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	// Store the tokens as a credential
-	oauthCred := &service.OAuthCredential{
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: tokenResp.RefreshToken,
-		TokenType:    tokenResp.TokenType,
-		ExpiresAt:    tokenResp.ExpiresAt,
-		Scope:        tokenResp.Scope,
-	}
-
+	// Store the credential (works for both OAuth and direct tokens)
 	info, err := h.credentialService.SetOAuthTokens(r.Context(), projectID, service.ProviderAnthropic, "Anthropic OAuth", oauthCred)
 	if err != nil {
 		h.Error(w, http.StatusInternalServerError, "Failed to store credential")
@@ -176,10 +221,10 @@ func (h *Handler) AnthropicExchange(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{
 		"success":    true,
 		"credential": info,
-		"expiresAt":  tokenResp.ExpiresAt,
+		"expiresAt":  expiresAt,
 	}
-	if !tokenResp.ExpiresAt.IsZero() {
-		response["expiresIn"] = int(time.Until(tokenResp.ExpiresAt).Seconds())
+	if !expiresAt.IsZero() {
+		response["expiresIn"] = int(time.Until(expiresAt).Seconds())
 	}
 
 	h.JSON(w, http.StatusOK, response)

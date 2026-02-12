@@ -260,6 +260,7 @@ export interface CredentialInfo {
 	provider: string;
 	authType: CredentialAuthType;
 	isConfigured: boolean;
+	expiresAt?: string; // For OAuth credentials
 	updatedAt?: string;
 }
 
@@ -283,6 +284,12 @@ export interface OAuthExchangeResponse {
 export interface OAuthAuthorizeResponse {
 	url: string;
 	verifier: string;
+}
+
+export interface OAuthRefreshResponse {
+	success: boolean;
+	expiresAt?: string;
+	expiresIn?: number;
 }
 
 // GitHub Copilot OAuth types

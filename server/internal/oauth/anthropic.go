@@ -147,3 +147,67 @@ func (p *AnthropicProvider) Exchange(ctx context.Context, code, codeVerifier str
 
 	return &tokenResp, nil
 }
+
+// Refresh refreshes an access token using a refresh token.
+func (p *AnthropicProvider) Refresh(ctx context.Context, refreshToken string) (*TokenResponse, error) {
+	if refreshToken == "" {
+		return nil, fmt.Errorf("refresh token is required")
+	}
+
+	// Build refresh request as JSON
+	reqBody := map[string]string{
+		"grant_type":    "refresh_token",
+		"refresh_token": refreshToken,
+		"client_id":     p.ClientID,
+	}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", anthropicTokenURL, strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("refresh request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		// Parse error response to provide more details
+		var errResp struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
+		if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil && errResp.Error != "" {
+			return nil, fmt.Errorf("refresh failed: %s - %s", errResp.Error, errResp.ErrorDescription)
+		}
+		return nil, fmt.Errorf("refresh request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tokenResp TokenResponse
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return nil, fmt.Errorf("failed to parse token response: %w", err)
+	}
+
+	// Calculate expiration time if ExpiresIn is provided
+	if tokenResp.ExpiresIn > 0 {
+		tokenResp.ExpiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
+	}
+
+	// If no new refresh token was provided, keep the old one
+	if tokenResp.RefreshToken == "" {
+		tokenResp.RefreshToken = refreshToken
+	}
+
+	return &tokenResp, nil
+}
