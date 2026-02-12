@@ -703,8 +703,9 @@ func (p *LocalProvider) ApplyPatches(ctx context.Context, workspaceID string, pa
 
 	// Apply patches using git am
 	// --keep-cr preserves carriage returns (important for cross-platform)
+	// --no-gpg-sign disables GPG signing (GPG may not be available in sandboxed environments)
 	// We pipe the patches to stdin
-	if err := p.runGitWithStdin(ctx, workDir, patches, "am", "--keep-cr"); err != nil {
+	if err := p.runGitWithStdin(ctx, workDir, patches, "am", "--keep-cr", "--no-gpg-sign"); err != nil {
 		// Application failed - abort but do NOT reset to preserve local changes
 		_ = p.runGit(ctx, workDir, "am", "--abort")
 		return "", fmt.Errorf("failed to apply patches: %w", err)
