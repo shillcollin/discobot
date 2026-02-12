@@ -30,6 +30,12 @@ const SystemRequirementsDialog = lazy(() =>
 	})),
 );
 
+const SupportInfoDialog = lazy(() =>
+	import("./support-info-dialog").then((m) => ({
+		default: m.SupportInfoDialog,
+	})),
+);
+
 export function DialogLayer() {
 	const dialogs = useDialogContext();
 
@@ -79,6 +85,13 @@ export function DialogLayer() {
 					open={dialogs.systemRequirements.isOpen}
 					messages={dialogs.systemRequirements.messages}
 					onClose={dialogs.systemRequirements.close}
+				/>
+			</Suspense>
+
+			<Suspense fallback={null}>
+				<SupportInfoDialog
+					open={dialogs.supportInfoDialog.isOpen}
+					onClose={dialogs.supportInfoDialog.close}
 				/>
 			</Suspense>
 		</>

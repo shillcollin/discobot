@@ -350,6 +350,66 @@ export interface SystemStatusResponse {
 	messages: StatusMessage[];
 }
 
+/** Runtime information for debug/support */
+export interface RuntimeInfo {
+	os: string;
+	arch: string;
+	go_version: string;
+	num_cpu: number;
+	num_goroutine: number;
+}
+
+/** Disk usage information */
+export interface DiskUsageInfo {
+	total_bytes: number;
+	used_bytes: number;
+	available_bytes: number;
+	used_percent: number;
+	total_inodes: number;
+	used_inodes: number;
+	available_inodes: number;
+	inodes_used_percent: number;
+}
+
+/** VZ-specific configuration and disk usage */
+export interface VZInfo {
+	image_ref: string;
+	data_dir: string;
+	cpu_count: number;
+	memory_mb: number;
+	data_disk_gb: number;
+	disk_usage?: DiskUsageInfo;
+	kernel_path?: string;
+	initrd_path?: string;
+	base_disk_path?: string;
+}
+
+/** Configuration information for debug/support (sanitized, no secrets) */
+export interface ConfigInfo {
+	port: number;
+	database_driver: string;
+	auth_enabled: boolean;
+	workspace_dir: string;
+	sandbox_image: string;
+	tauri_mode: boolean;
+	ssh_enabled: boolean;
+	ssh_port: number;
+	dispatcher_enabled: boolean;
+	available_providers: string[];
+	vz?: VZInfo;
+}
+
+/** Support information response with diagnostic data */
+export interface SupportInfoResponse {
+	version: string;
+	runtime: RuntimeInfo;
+	config: ConfigInfo;
+	server_log: string;
+	log_path: string;
+	log_exists: boolean;
+	system_info: SystemStatusResponse;
+}
+
 /** Response from cancelling a chat completion */
 export interface CancelChatResponse {
 	success: boolean;

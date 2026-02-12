@@ -45,6 +45,7 @@ import type {
 	StopServiceResponse,
 	Suggestion,
 	SupportedAgentType,
+	SupportInfoResponse,
 	SystemStatusResponse,
 	TerminalExecuteResponse,
 	UpdateSessionRequest,
@@ -110,6 +111,10 @@ class ApiClient {
 	// System Status
 	async getSystemStatus(): Promise<SystemStatusResponse> {
 		return this.fetchRoot<SystemStatusResponse>("/status");
+	}
+
+	async getSupportInfo(): Promise<SupportInfoResponse> {
+		return this.fetchRoot<SupportInfoResponse>("/support-info");
 	}
 
 	// Providers

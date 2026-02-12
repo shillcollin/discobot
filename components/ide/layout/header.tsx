@@ -1,5 +1,6 @@
 import {
 	ChevronDown,
+	Info,
 	Key,
 	PanelLeft,
 	PanelLeftClose,
@@ -401,6 +402,16 @@ export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 				>
 					<Key className="h-4 w-4" />
 					<span className="sr-only">API Credentials</span>
+				</Button>
+				<Button
+					variant="ghost"
+					size="icon"
+					onClick={() => dialogs.supportInfoDialog.open()}
+					title="Support Information"
+					className="tauri-no-drag"
+				>
+					<Info className="h-4 w-4" />
+					<span className="sr-only">Support Information</span>
 				</Button>
 				{/* Hide theme toggle on macOS Tauri (follows system theme) */}
 				{!(isTauri() && isMac) && <ThemeToggle className="tauri-no-drag" />}

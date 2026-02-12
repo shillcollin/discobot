@@ -423,6 +423,12 @@ func main() {
 		Meta:    routes.Meta{Group: "Health", Description: "System status (Docker, Git checks)"},
 	})
 
+	reg.Register(r, routes.Route{
+		Method: "GET", Pattern: "/api/support-info",
+		Handler: h.GetSupportInfo,
+		Meta:    routes.Meta{Group: "Health", Description: "Diagnostic information for debugging (version, config, logs)"},
+	})
+
 	// API UI - serve the embedded static HTML file
 	r.Get("/api/ui", func(w http.ResponseWriter, _ *http.Request) {
 		content, err := static.Files.ReadFile("api-ui.html")

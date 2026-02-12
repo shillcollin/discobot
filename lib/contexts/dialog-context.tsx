@@ -38,6 +38,7 @@ interface DialogContextValue {
 	agentDialog: DialogControl<AgentDialogData>;
 	deleteWorkspaceDialog: DialogControl<Workspace>;
 	credentialsDialog: DialogControl<CredentialsDialogData>;
+	supportInfoDialog: DialogControl<Record<string, never>>;
 
 	// System requirements (special case - driven by API response)
 	systemRequirements: {
@@ -83,6 +84,7 @@ export function DialogProvider({ children }: DialogProviderProps) {
 	const agentDialog = useDialogControl<AgentDialogData>();
 	const deleteWorkspaceDialog = useDialogControl<Workspace>();
 	const credentialsDialog = useDialogControl<CredentialsDialogData>();
+	const supportInfoDialog = useDialogControl<Record<string, never>>();
 
 	// System status state (special case - populated by API)
 	const [systemStatusMessages, setSystemStatusMessages] = React.useState<
@@ -162,6 +164,7 @@ export function DialogProvider({ children }: DialogProviderProps) {
 			agentDialog,
 			deleteWorkspaceDialog,
 			credentialsDialog,
+			supportInfoDialog,
 
 			// System requirements
 			systemRequirements: {
@@ -184,6 +187,7 @@ export function DialogProvider({ children }: DialogProviderProps) {
 			agentDialog,
 			deleteWorkspaceDialog,
 			credentialsDialog,
+			supportInfoDialog,
 			showSystemRequirements,
 			systemStatusMessages,
 			closeSystemRequirements,
