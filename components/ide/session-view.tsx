@@ -208,8 +208,7 @@ export function SessionView({
 										<div
 											className={cn(
 												"absolute inset-0",
-												activeView !== "terminal" &&
-													"invisible pointer-events-none",
+												activeView !== "terminal" && "hidden",
 											)}
 										>
 											<TerminalView
@@ -228,8 +227,7 @@ export function SessionView({
 										<div
 											className={cn(
 												"absolute inset-0",
-												activeView !== "consolidated-diff" &&
-													"invisible pointer-events-none",
+												activeView !== "consolidated-diff" && "hidden",
 											)}
 										>
 											<ConsolidatedDiffView />
@@ -244,8 +242,7 @@ export function SessionView({
 													key={service.id}
 													className={cn(
 														"absolute inset-0",
-														activeServiceId !== service.id &&
-															"invisible pointer-events-none",
+														activeServiceId !== service.id && "hidden",
 													)}
 												>
 													<ServiceView
@@ -260,8 +257,7 @@ export function SessionView({
 										<div
 											className={cn(
 												"absolute inset-0 flex flex-col",
-												!activeFilePathFromView &&
-													"invisible pointer-events-none",
+												!activeFilePathFromView && "hidden",
 											)}
 										>
 											<DiffContent
