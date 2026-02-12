@@ -5,6 +5,7 @@ import {
 	FileDiff,
 	FolderGit2,
 	FolderOpen,
+	Loader2,
 	MessageSquare,
 	Network,
 	Plus,
@@ -32,6 +33,8 @@ interface WelcomeHeaderProps {
 	workspacesCount: number;
 	onAddAgent?: () => void;
 	onAddWorkspace?: (mode?: "git" | "local" | "generic") => void;
+	onAddSampleWorkspace?: () => void;
+	isCreatingSampleWorkspace?: boolean;
 }
 
 export function WelcomeHeader({
@@ -42,6 +45,8 @@ export function WelcomeHeader({
 	workspacesCount,
 	onAddAgent,
 	onAddWorkspace,
+	onAddSampleWorkspace,
+	isCreatingSampleWorkspace = false,
 }: WelcomeHeaderProps) {
 	if (!show) return null;
 
@@ -225,19 +230,25 @@ export function WelcomeHeader({
 
 						<button
 							type="button"
-							onClick={() => {
-								// TODO: Handle sample project creation
-								// This should clone a well-known repo and create a workspace
-								console.log("Try sample project - not yet implemented");
-								onAddWorkspace?.("git");
-							}}
-							className="flex items-start gap-3 p-4 rounded-lg bg-primary/10 border-2 border-primary/30 hover:border-primary/50 hover:bg-primary/15 transition-all text-left"
+							onClick={() => onAddSampleWorkspace?.()}
+							disabled={isCreatingSampleWorkspace}
+							className="flex items-start gap-3 p-4 rounded-lg bg-primary/10 border-2 border-primary/30 hover:border-primary/50 hover:bg-primary/15 transition-all text-left disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-primary/30 disabled:hover:bg-primary/10"
 						>
-							<Sparkles className="h-6 w-6 text-primary shrink-0 mt-0.5" />
+							{isCreatingSampleWorkspace ? (
+								<Loader2 className="h-6 w-6 text-primary shrink-0 mt-0.5 animate-spin" />
+							) : (
+								<Sparkles className="h-6 w-6 text-primary shrink-0 mt-0.5" />
+							)}
 							<div className="space-y-1 flex-1">
-								<div className="font-medium">Try a Sample Project</div>
+								<div className="font-medium">
+									{isCreatingSampleWorkspace
+										? "Creating Sample Project..."
+										: "Try a Sample Project"}
+								</div>
 								<div className="text-sm text-muted-foreground">
-									Quick start with a pre-configured demo project
+									{isCreatingSampleWorkspace
+										? "Cloning repository and setting up workspace"
+										: "Quick start with a pre-configured demo project"}
 								</div>
 							</div>
 						</button>

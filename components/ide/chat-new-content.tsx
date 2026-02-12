@@ -35,7 +35,8 @@ export function ChatNewContent({
 	onWorkspaceChange,
 	onAgentChange,
 }: ChatNewContentProps) {
-	const { agentDialog, workspaceDialog } = useDialogContext();
+	const { agentDialog, workspaceDialog, handleAddWorkspace } =
+		useDialogContext();
 	const { workspaces, isLoading: isLoadingWorkspaces } = useWorkspaces();
 	const { agents, isLoading: isLoadingAgents } = useAgents();
 	const { agentTypes } = useAgentTypes();
@@ -48,6 +49,10 @@ export function ChatNewContent({
 	// Initialize workspace state from prop
 	const [localSelectedWorkspaceId, setLocalSelectedWorkspaceId] =
 		React.useState<string | null>(initialWorkspaceId);
+
+	// Track loading state for sample workspace creation
+	const [isCreatingSampleWorkspace, setIsCreatingSampleWorkspace] =
+		React.useState(false);
 
 	// Track if we've notified parent of initial selections
 	const hasNotifiedWorkspaceRef = React.useRef(false);
@@ -195,6 +200,20 @@ export function ChatNewContent({
 		onWorkspaceChange(workspaceId);
 	};
 
+	const handleAddSampleWorkspace = React.useCallback(async () => {
+		setIsCreatingSampleWorkspace(true);
+		try {
+			await handleAddWorkspace({
+				path: "https://github.com/obot-platform/disco-example",
+				sourceType: "git",
+			});
+		} catch (error) {
+			console.error("Failed to create sample workspace:", error);
+		} finally {
+			setIsCreatingSampleWorkspace(false);
+		}
+	}, [handleAddWorkspace]);
+
 	if (!show) {
 		return null;
 	}
@@ -214,6 +233,8 @@ export function ChatNewContent({
 				workspacesCount={workspaces.length}
 				onAddAgent={() => agentDialog.open()}
 				onAddWorkspace={(mode) => workspaceDialog.open({ mode })}
+				onAddSampleWorkspace={handleAddSampleWorkspace}
+				isCreatingSampleWorkspace={isCreatingSampleWorkspace}
 			/>
 			<WelcomeSelectors
 				show={show}
