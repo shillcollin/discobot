@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -38,104 +37,6 @@ func setupTestStoreForPoller(t *testing.T) *store.Store {
 	}
 
 	return store.New(db)
-}
-
-// TestSessionStatusPoller_NoImmediateCheck verifies that the poller waits
-// for the poll interval before checking, preventing the race condition where
-// it checks before the agent API has started the completion.
-func TestSessionStatusPoller_NoImmediateCheck(t *testing.T) {
-	ctx := context.Background()
-	testStore := setupTestStoreForPoller(t)
-	logger := slog.Default()
-
-	// Track when status checks happen
-	var checkCount atomic.Int32
-
-	// Create mock agent API that tracks when /chat/status is called
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/chat/status" {
-			checkCount.Add(1)
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(sandboxapi.ChatStatusResponse{
-				IsRunning:    false,
-				CompletionID: nil,
-			})
-			return
-		}
-		http.NotFound(w, r)
-	})
-
-	mockProvider := &mockSandboxProvider{
-		secret:  "test-secret",
-		handler: handler,
-	}
-
-	cfg := &config.Config{}
-	eventPoller := events.NewPoller(testStore, events.DefaultPollerConfig())
-	eventBroker := events.NewBroker(testStore, eventPoller)
-
-	sandboxSvc := NewSandboxService(testStore, mockProvider, cfg, nil, eventBroker, nil)
-
-	// Create poller with very short intervals for testing
-	poller := &SessionStatusPoller{
-		store:       testStore,
-		sandboxSvc:  sandboxSvc,
-		eventBroker: eventBroker,
-		logger:      logger.With("component", "test_poller"),
-		kickChan:    make(chan struct{}, 1),
-		stopChan:    make(chan struct{}),
-	}
-
-	// Create a test session marked as running
-	project := &model.Project{ID: "test-project", Name: "Test"}
-	workspace := &model.Workspace{
-		ID:          "test-ws",
-		ProjectID:   project.ID,
-		Path:        "/test",
-		SourceType:  "local",
-		DisplayName: func() *string { s := "Test WS"; return &s }(),
-	}
-	session := &model.Session{
-		ID:          "test-session",
-		ProjectID:   project.ID,
-		WorkspaceID: workspace.ID,
-		Status:      model.SessionStatusRunning,
-	}
-
-	if err := testStore.CreateProject(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	if err := testStore.CreateWorkspace(ctx, workspace); err != nil {
-		t.Fatal(err)
-	}
-	if err := testStore.CreateSession(ctx, session); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create sandbox for this session
-	if _, err := mockProvider.Create(ctx, session.ID, sandbox.CreateOptions{}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Start the poller
-	pollerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	poller.Start(pollerCtx)
-	defer poller.Shutdown(ctx)
-
-	// Kick the poller
-	poller.Kick()
-
-	// Wait a short time (less than poll interval)
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify no checks happened immediately
-	if got := checkCount.Load(); got != 0 {
-		t.Errorf("Poller checked immediately after kick, want 0 checks, got %d", got)
-	}
-
-	// Note: We don't wait for the full poll interval here since that would
-	// make the test slow. The key assertion is that NO immediate check happens.
 }
 
 // TestSessionStatusPoller_MarksStaleSessions verifies that the poller

@@ -397,7 +397,7 @@ func main() {
 	r.Use(middleware.TauriAuth(cfg))
 
 	// Initialize handlers
-	h := handler.New(s, cfg, gitProvider, sandboxProvider, sandboxManager, eventBroker, jobQueue, sessionStatusPoller)
+	h := handler.New(s, cfg, gitProvider, sandboxProvider, sandboxManager, eventBroker, jobQueue)
 
 	// Wire up job queue notification to dispatcher for immediate execution
 	if disp != nil {

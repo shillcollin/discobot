@@ -23,8 +23,7 @@ const (
 var errSessionNotRunning = errors.New("session not running")
 
 // SessionStatusPoller monitors running sessions and verifies they're actually running
-// by checking the agent-api completion status. Starts polling when kicked and stops
-// automatically when no running sessions are found.
+// by checking the agent-api completion status. Polls continuously on a fixed interval.
 type SessionStatusPoller struct {
 	store        *store.Store
 	sandboxSvc   *SandboxService
@@ -33,7 +32,6 @@ type SessionStatusPoller struct {
 	mu           sync.Mutex
 	running      bool
 	stopChan     chan struct{}
-	kickChan     chan struct{}
 	wg           sync.WaitGroup
 	shutdownOnce sync.Once
 }
@@ -50,7 +48,6 @@ func NewSessionStatusPoller(
 		sandboxSvc:  sandboxSvc,
 		eventBroker: eventBroker,
 		logger:      logger.With("component", "session_status_poller"),
-		kickChan:    make(chan struct{}, 1), // Buffered to allow non-blocking kicks
 		stopChan:    make(chan struct{}),
 	}
 }
@@ -69,17 +66,6 @@ func (p *SessionStatusPoller) Start(ctx context.Context) {
 	go p.pollLoop(ctx)
 
 	p.logger.Info("session status poller started")
-}
-
-// Kick signals the poller to start checking for running sessions.
-// This should be called when a session status is set to "running".
-func (p *SessionStatusPoller) Kick() {
-	select {
-	case p.kickChan <- struct{}{}:
-		p.logger.Debug("poller kicked")
-	default:
-		// Channel already has a kick pending, no need to add another
-	}
 }
 
 // Shutdown gracefully stops the poller
@@ -107,14 +93,15 @@ func (p *SessionStatusPoller) Shutdown(ctx context.Context) error {
 	return err
 }
 
-// pollLoop is the main polling loop that runs in a goroutine
+// pollLoop is the main polling loop that runs in a goroutine.
+// Continuously polls for running sessions on a fixed interval.
 func (p *SessionStatusPoller) pollLoop(ctx context.Context) {
 	defer p.wg.Done()
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
-	polling := false // Whether we're actively polling
+	p.logger.Info("poll loop started, checking every 5 seconds")
 
 	for {
 		select {
@@ -124,26 +111,14 @@ func (p *SessionStatusPoller) pollLoop(ctx context.Context) {
 		case <-p.stopChan:
 			p.logger.Info("poll loop stopped: shutdown signal")
 			return
-		case <-p.kickChan:
-			// Start polling
-			if !polling {
-				p.logger.Debug("starting active polling")
-				polling = true
-				// Don't check immediately - wait for first poll interval
-				// This gives the completion time to actually start before we verify it
-			}
 		case <-ticker.C:
-			if polling {
-				hasRunning, err := p.checkRunningSessions(ctx)
-				if err != nil {
-					p.logger.Error("error checking running sessions", "error", err)
-					continue
-				}
-				// Stop polling if no running sessions found
-				if !hasRunning {
-					p.logger.Debug("no running sessions found, stopping active polling")
-					polling = false
-				}
+			hasRunning, err := p.checkRunningSessions(ctx)
+			if err != nil {
+				p.logger.Error("error checking running sessions", "error", err)
+				continue
+			}
+			if hasRunning {
+				p.logger.Debug("found running sessions, will check again in 5 seconds")
 			}
 		}
 	}

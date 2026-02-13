@@ -38,11 +38,10 @@ type Handler struct {
 	jobQueue            *jobs.Queue
 	eventBroker         *events.Broker
 	codexCallbackServer *CodexCallbackServer
-	sessionStatusPoller *service.SessionStatusPoller
 }
 
 // New creates a new Handler with the required git and sandbox providers.
-func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxProvider sandbox.Provider, sandboxManager *sandbox.Manager, eventBroker *events.Broker, jobQueue *jobs.Queue, sessionStatusPoller *service.SessionStatusPoller) *Handler {
+func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxProvider sandbox.Provider, sandboxManager *sandbox.Manager, eventBroker *events.Broker, jobQueue *jobs.Queue) *Handler {
 	credSvc, err := service.NewCredentialService(s, cfg)
 	if err != nil {
 		// This should only fail if the encryption key is invalid
@@ -75,7 +74,7 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 	}
 
 	// Create chat service
-	chatSvc := service.NewChatService(s, sessionSvc, jobQueue, eventBroker, sandboxSvc, gitSvc, sessionStatusPoller)
+	chatSvc := service.NewChatService(s, sessionSvc, jobQueue, eventBroker, sandboxSvc, gitSvc)
 
 	// Create remaining services
 	agentSvc := service.NewAgentService(s)
@@ -84,24 +83,23 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 	preferenceSvc := service.NewPreferenceService(s)
 
 	h := &Handler{
-		store:               s,
-		cfg:                 cfg,
-		authService:         service.NewAuthService(s, cfg),
-		credentialService:   credSvc,
-		gitService:          gitSvc,
-		gitProvider:         gitProvider,
-		sandboxProvider:     sandboxProvider,
-		sandboxManager:      sandboxManager,
-		sandboxService:      sandboxSvc,
-		sessionService:      sessionSvc,
-		chatService:         chatSvc,
-		agentService:        agentSvc,
-		workspaceService:    workspaceSvc,
-		projectService:      projectSvc,
-		preferenceService:   preferenceSvc,
-		sessionStatusPoller: sessionStatusPoller,
-		jobQueue:            jobQueue,
-		eventBroker:         eventBroker,
+		store:             s,
+		cfg:               cfg,
+		authService:       service.NewAuthService(s, cfg),
+		credentialService: credSvc,
+		gitService:        gitSvc,
+		gitProvider:       gitProvider,
+		sandboxProvider:   sandboxProvider,
+		sandboxManager:    sandboxManager,
+		sandboxService:    sandboxSvc,
+		sessionService:    sessionSvc,
+		chatService:       chatSvc,
+		agentService:      agentSvc,
+		workspaceService:  workspaceSvc,
+		projectService:    projectSvc,
+		preferenceService: preferenceSvc,
+		jobQueue:          jobQueue,
+		eventBroker:       eventBroker,
 	}
 
 	// Create Codex callback server (will be started on first use)

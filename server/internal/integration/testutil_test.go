@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -148,11 +147,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	// Create job queue early so it can be passed to services
 	jobQueue := jobs.NewQueue(s, cfg)
 
-	// Create session status poller (uses a temporary sandbox service)
-	pollerSandboxSvc := service.NewSandboxService(s, mockSandbox, cfg, nil, nil, nil)
-	sessionStatusPoller := service.NewSessionStatusPoller(s, pollerSandboxSvc, eventBroker, slog.Default())
-
-	h := handler.New(s, cfg, gitProvider, mockSandbox, sandboxManager, eventBroker, jobQueue, sessionStatusPoller)
+	h := handler.New(s, cfg, gitProvider, mockSandbox, sandboxManager, eventBroker, jobQueue)
 
 	// Create and start dispatcher for job processing
 	cfg.DispatcherEnabled = true
@@ -414,11 +409,7 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 	// Create job queue early so it can be passed to services
 	jobQueue := jobs.NewQueue(s, cfg)
 
-	// Create session status poller (uses a temporary sandbox service)
-	pollerSandboxSvc := service.NewSandboxService(s, mockSandbox, cfg, nil, nil, nil)
-	sessionStatusPoller := service.NewSessionStatusPoller(s, pollerSandboxSvc, eventBroker, slog.Default())
-
-	h := handler.New(s, cfg, gitProvider, mockSandbox, sandboxManager, eventBroker, jobQueue, sessionStatusPoller)
+	h := handler.New(s, cfg, gitProvider, mockSandbox, sandboxManager, eventBroker, jobQueue)
 
 	// Create and start dispatcher for job processing
 	cfg.DispatcherEnabled = true
