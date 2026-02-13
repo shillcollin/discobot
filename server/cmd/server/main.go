@@ -116,27 +116,8 @@ func main() {
 		return session.ProjectID, nil
 	}
 
-	// Initialize Docker provider (default)
-	if dockerProvider, dockerErr := docker.NewProvider(cfg, sessionProjectResolver, docker.WithSystemManager(systemManager)); dockerErr != nil {
-		log.Printf("Warning: Failed to initialize Docker sandbox provider: %v", dockerErr)
-	} else {
-		sandboxManager.RegisterProvider("docker", dockerProvider)
-		log.Printf("Docker sandbox provider initialized (image: %s)", cfg.SandboxImage)
-	}
-
-	// Initialize local provider (only if enabled via config)
-	if cfg.LocalProviderEnabled {
-		if localProvider, localErr := local.NewProvider(cfg); localErr != nil {
-			log.Printf("Warning: Failed to initialize local sandbox provider: %v", localErr)
-		} else {
-			sandboxManager.RegisterProvider("local", localProvider)
-			log.Printf("Local sandbox provider initialized")
-		}
-	}
-
-	// On darwin/arm64, try VZ (Virtualization.framework) as well
-	// VZ provider now supports auto-downloading images if paths are not configured
-	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+	if runtime.GOOS == "darwin" {
+		// On macOS, use VZ (Virtualization.framework) provider
 		vzCfg := &vm.Config{
 			DataDir:       cfg.VZDataDir,
 			ConsoleLogDir: cfg.VZConsoleLogDir,
@@ -158,6 +139,24 @@ func main() {
 			} else {
 				log.Printf("VZ sandbox provider registered (images downloading in background)")
 			}
+		}
+	} else {
+		// On non-macOS, use Docker provider
+		if dockerProvider, dockerErr := docker.NewProvider(cfg, sessionProjectResolver, docker.WithSystemManager(systemManager)); dockerErr != nil {
+			log.Printf("Warning: Failed to initialize Docker sandbox provider: %v", dockerErr)
+		} else {
+			sandboxManager.RegisterProvider("docker", dockerProvider)
+			log.Printf("Docker sandbox provider initialized (image: %s)", cfg.SandboxImage)
+		}
+	}
+	//
+	// Initialize local provider (only if enabled via config)
+	if cfg.LocalProviderEnabled {
+		if localProvider, localErr := local.NewProvider(cfg); localErr != nil {
+			log.Printf("Warning: Failed to initialize local sandbox provider: %v", localErr)
+		} else {
+			sandboxManager.RegisterProvider("local", localProvider)
+			log.Printf("Local sandbox provider initialized")
 		}
 	}
 

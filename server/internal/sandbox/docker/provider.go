@@ -87,6 +87,11 @@ type Provider struct {
 
 	// systemManager tracks startup tasks and system status (optional)
 	systemManager SystemManager
+
+	// ensureImage synchronization: only one pull happens, all callers wait on the same result
+	ensureImageOnce sync.Once
+	ensureImageDone chan struct{}
+	ensureImageErr  error
 }
 
 // SystemManager interface for tracking startup tasks
@@ -177,6 +182,7 @@ func NewProvider(cfg *config.Config, sessionProjectResolver SessionProjectResolv
 	}
 
 	p.client = cli
+	p.ensureImageDone = make(chan struct{})
 
 	// Verify connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -187,75 +193,23 @@ func NewProvider(cfg *config.Config, sessionProjectResolver SessionProjectResolv
 		return nil, fmt.Errorf("failed to connect to docker daemon: %w", err)
 	}
 
-	// Pull the sandbox image and cleanup old images in the background
-	// This prevents blocking server startup while still ensuring the image is available
+	// Kick off image pull in the background (non-blocking).
+	// EnsureImage is synchronized: the first caller triggers the pull, all others wait.
 	go func() {
-		// Register startup task if system manager is available
-		if p.systemManager != nil && !isLocalImage(cfg.SandboxImage) {
-			p.systemManager.RegisterTask("docker-pull", fmt.Sprintf("Pulling Docker sandbox image: %s", cfg.SandboxImage))
-			p.systemManager.StartTask("docker-pull")
-		}
+		_ = p.EnsureImage(context.Background())
 
-		// Check if the image is local-only (cannot be pulled from registry)
-		if isLocalImage(cfg.SandboxImage) {
-			// For local images, just verify they exist
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			_, err := p.client.ImageInspect(ctx, cfg.SandboxImage)
-			cancel()
-
-			if err == nil {
-				log.Printf("Local sandbox image exists: %s", cfg.SandboxImage)
-			} else {
-				log.Printf("Warning: Local sandbox image not found: %s", cfg.SandboxImage)
-				log.Printf("Local images must be built or loaded manually (e.g., via docker load)")
-			}
-			// Don't attempt to pull local images - skip to cleanup
-		} else {
-			// For remote images, pull with retry and exponential backoff
-			backoff := 5 * time.Second
-			maxBackoff := 5 * time.Minute
-			attempt := 1
-
-			for {
-				pullCtx, pullCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				err := p.pullSandboxImage(pullCtx, cfg.SandboxImage)
-				pullCancel()
-
-				if err == nil {
-					log.Printf("Successfully pulled sandbox image in background")
-					if p.systemManager != nil {
-						p.systemManager.CompleteTask("docker-pull")
-					}
-					break
-				}
-
-				log.Printf("Warning: Failed to pull sandbox image (attempt %d): %v", attempt, err)
-				log.Printf("Retrying in %v...", backoff)
-
-				time.Sleep(backoff)
-
-				// Exponential backoff with cap
-				backoff *= 2
-				if backoff > maxBackoff {
-					backoff = maxBackoff
-				}
-				attempt++
-			}
-		}
-
-		// Clean up old sandbox images with the discobot label
+		// Clean up old sandbox images after the pull completes
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cleanupCancel()
 
 		if err := p.cleanupOldSandboxImages(cleanupCtx, cfg.SandboxImage); err != nil {
 			log.Printf("Warning: Failed to clean up old sandbox images: %v", err)
-			// Don't fail initialization if cleanup fails - it's not critical
 		}
 
 		log.Printf("Docker provider background initialization complete")
 	}()
 
-	log.Printf("Docker provider initialized, image pull and cleanup running in background")
+	log.Printf("Docker provider initialized, image pull running in background")
 	return p, nil
 }
 
@@ -310,8 +264,8 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 	// Use the globally configured sandbox image
 	image := p.cfg.SandboxImage
 
-	// Ensure image is available (pull if missing)
-	if err := p.ensureImage(ctx, image); err != nil {
+	// Wait for image to be available (pulled on startup or by first caller)
+	if err := p.EnsureImage(ctx); err != nil {
 		return nil, fmt.Errorf("%w: %v", sandbox.ErrInvalidImage, err)
 	}
 
@@ -535,35 +489,89 @@ func VerifySecret(plaintext, hashedSecret string) bool {
 	return expectedHash == parts[1]
 }
 
-// ensureImage checks if an image exists locally and pulls it if not.
-func (p *Provider) ensureImage(ctx context.Context, image string) error {
-	// Check if image exists locally
-	_, err := p.client.ImageInspect(ctx, image)
-	if err == nil {
-		// Image exists locally
-		return nil
+// EnsureImage ensures the sandbox image is available locally. If the image needs to
+// be pulled, it blocks until the pull completes. Multiple callers are synchronized —
+// only one pull occurs and all callers wait on the same result. Progress is reported
+// via the system manager if configured.
+func (p *Provider) EnsureImage(ctx context.Context) error {
+	p.ensureImageOnce.Do(func() {
+		go p.doEnsureImage()
+	})
+	select {
+	case <-p.ensureImageDone:
+		return p.ensureImageErr
+	case <-ctx.Done():
+		return ctx.Err()
 	}
+}
 
-	// Local images (sha256 digests or discobot-local/ prefixed tags) cannot be pulled from a registry.
-	// They should have been loaded via ImageLoad. If they're missing, that's an error.
+// doEnsureImage performs the actual image check/pull with retry and progress tracking.
+// It closes ensureImageDone when complete and sets ensureImageErr on failure.
+func (p *Provider) doEnsureImage() {
+	defer close(p.ensureImageDone)
+
+	image := p.cfg.SandboxImage
+
+	// Local images can't be pulled from a registry. They are loaded externally
+	// (e.g., via ensureImageInVM in the VZ provider which transfers from host Docker).
+	// Don't set an error here — the image may be loaded after provider creation.
 	if isLocalImage(image) {
-		return fmt.Errorf("image %s not found locally and cannot be pulled (local image)", image)
+		checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, err := p.client.ImageInspect(checkCtx, image)
+		cancel()
+
+		if err == nil {
+			log.Printf("Local sandbox image exists: %s", image)
+		} else {
+			log.Printf("Local sandbox image not yet available: %s (expected to be loaded externally)", image)
+		}
+		return
 	}
 
-	// Image not found, pull it
-	reader, err := p.client.ImagePull(ctx, image, imageTypes.PullOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to pull image %s: %w", image, err)
-	}
-	defer func() { _ = reader.Close() }()
-
-	// Drain the reader to complete the pull (progress is discarded)
-	_, err = io.Copy(io.Discard, reader)
-	if err != nil {
-		return fmt.Errorf("failed to complete image pull for %s: %w", image, err)
+	// Check if image already exists — no task registration needed
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	_, err := p.client.ImageInspect(checkCtx, image)
+	checkCancel()
+	if err == nil {
+		log.Printf("Sandbox image already exists: %s", image)
+		return
 	}
 
-	return nil
+	// Image needs to be pulled — register startup task for UI progress
+	if p.systemManager != nil {
+		p.systemManager.RegisterTask("docker-pull", fmt.Sprintf("Pulling Docker sandbox image: %s", image))
+		p.systemManager.StartTask("docker-pull")
+	}
+
+	// Pull with retry and exponential backoff
+	backoff := 5 * time.Second
+	maxBackoff := 5 * time.Minute
+	attempt := 1
+
+	for {
+		pullCtx, pullCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		err := p.pullSandboxImage(pullCtx, image)
+		pullCancel()
+
+		if err == nil {
+			log.Printf("Successfully pulled sandbox image: %s", image)
+			if p.systemManager != nil {
+				p.systemManager.CompleteTask("docker-pull")
+			}
+			return
+		}
+
+		log.Printf("Warning: Failed to pull sandbox image (attempt %d): %v", attempt, err)
+		log.Printf("Retrying in %v...", backoff)
+
+		time.Sleep(backoff)
+
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+		attempt++
+	}
 }
 
 // isLocalImage checks if an image is a local image that cannot be pulled from a registry.

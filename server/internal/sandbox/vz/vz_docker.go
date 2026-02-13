@@ -74,14 +74,6 @@ type SystemManager interface {
 // This is the main entry point that matches the Provider interface.
 // The resolver function looks up the project ID for a session from the database.
 func NewProvider(cfg *config.Config, vmConfig *vm.Config, resolver SessionProjectResolver, systemManager SystemManager) (*DockerProvider, error) {
-	return NewDockerProvider(cfg, *vmConfig, resolver, systemManager)
-}
-
-// NewDockerProvider creates a new VZ+Docker hybrid provider.
-// If kernel and base disk paths are not configured, it starts an async download
-// from the container registry specified in vmConfig.ImageRef.
-// The resolver function looks up the project ID for a session from the database.
-func NewDockerProvider(cfg *config.Config, vmConfig vm.Config, resolver SessionProjectResolver, systemManager SystemManager) (*DockerProvider, error) {
 	p := &DockerProvider{
 		cfg:                    cfg,
 		dockerProviders:        make(map[string]*docker.Provider),
@@ -137,10 +129,11 @@ func NewDockerProvider(cfg *config.Config, vmConfig vm.Config, resolver SessionP
 						}
 
 						// Check if complete or failed
-						if progress.State == DownloadStateReady {
+						switch progress.State {
+						case DownloadStateReady:
 							p.systemManager.CompleteTask("vz-download")
 							return
-						} else if progress.State == DownloadStateFailed {
+						case DownloadStateFailed:
 							p.systemManager.FailTask("vz-download", fmt.Errorf("%s", progress.Error))
 							return
 						}
@@ -213,7 +206,7 @@ func NewDockerProvider(cfg *config.Config, vmConfig vm.Config, resolver SessionP
 				vmConfig.BaseDiskPath = baseDiskPath
 
 				// Create VM manager now that images are ready
-				vmManager, err := NewVMManager(vmConfig)
+				vmManager, err := NewVMManager(*vmConfig)
 				if err != nil {
 					errMsg := fmt.Errorf("failed to create VZ VM manager: %w", err)
 					log.Printf("%v", errMsg)
@@ -235,7 +228,7 @@ func NewDockerProvider(cfg *config.Config, vmConfig vm.Config, resolver SessionP
 	}
 
 	// Manual configuration - initialize immediately
-	vmManager, err := NewVMManager(vmConfig)
+	vmManager, err := NewVMManager(*vmConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VZ VM manager: %w", err)
 	}
@@ -723,15 +716,14 @@ func (p *DockerProvider) getHostDockerClient() (*dockerclient.Client, error) {
 }
 
 // ensureImageInVM loads the sandbox image from the host's Docker into the VM's Docker
-// when the image is a locally-built sha256 digest that cannot be pulled from a registry.
+// when the image is local (sha256 digest or discobot-local/ tag) and cannot be pulled from a registry.
 func (p *DockerProvider) ensureImageInVM(ctx context.Context, dockerProv *docker.Provider) error {
 	image := p.cfg.SandboxImage
 
 	// Only handle local images (sha256 digests or discobot-local/ prefixed tags)
 	// Registry images are pulled by ensureImage()
-	isLocalDigest := strings.HasPrefix(image, "sha256:")
 	isLocalTag := strings.HasPrefix(image, "discobot-local/")
-	if !isLocalDigest && !isLocalTag {
+	if !isLocalTag {
 		return nil
 	}
 
@@ -763,26 +755,44 @@ func (p *DockerProvider) ensureImageInVM(ctx context.Context, dockerProv *docker
 	imageSize := inspectResult.Size
 	log.Printf("Loading image %s (%d MB) from host Docker into VM Docker...", image[:19], imageSize/(1024*1024))
 
+	// Register system manager task for UI progress
+	if p.systemManager != nil {
+		p.systemManager.RegisterTask("docker-load", fmt.Sprintf("Loading Docker image into VM: %s", image[:19]))
+		p.systemManager.StartTask("docker-load")
+	}
+
 	// Stream image from host to VM: ImageSave → progressReader → ImageLoad
 	reader, err := hostClient.ImageSave(ctx, []string{image})
 	if err != nil {
+		if p.systemManager != nil {
+			p.systemManager.FailTask("docker-load", err)
+		}
 		return fmt.Errorf("failed to export image from host: %w", err)
 	}
 	defer reader.Close()
 
 	pr := &progressReader{
-		reader:   reader,
-		total:    imageSize,
-		logEvery: 100 * 1024 * 1024, // Log every 100MB
-		label:    image[:19],
+		reader:       reader,
+		total:        imageSize,
+		logEvery:     100 * 1024 * 1024, // Log every 100MB
+		label:        image[:19],
+		systemMgr:    p.systemManager,
+		systemTaskID: "docker-load",
 	}
 
 	resp, err := vmClient.ImageLoad(ctx, pr, dockerclient.ImageLoadWithQuiet(true))
 	if err != nil {
+		if p.systemManager != nil {
+			p.systemManager.FailTask("docker-load", err)
+		}
 		return fmt.Errorf("failed to load image into VM: %w", err)
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if p.systemManager != nil {
+		p.systemManager.CompleteTask("docker-load")
+	}
 
 	log.Printf("Successfully loaded image %s into VM Docker", image[:19])
 	return nil
@@ -808,11 +818,19 @@ func (p *DockerProvider) getOrCreateDockerProvider(ctx context.Context, projectI
 
 	log.Printf("Creating Docker provider for project VM: %s", projectID)
 
-	// Create Docker provider with VSOCK transport and session resolver for cache volumes
+	// Create Docker provider with VSOCK transport to the VM's Docker daemon.
+	// The provider kicks off image pull in the background on creation.
+	// We pass the system manager so the pull reports progress to the UI.
+	opts := []docker.Option{
+		docker.WithVsockDialer(pvm.DockerDialer()),
+	}
+	if p.systemManager != nil {
+		opts = append(opts, docker.WithSystemManager(p.systemManager))
+	}
 	dockerProv, err := docker.NewProvider(
 		p.cfg,
 		docker.SessionProjectResolver(p.sessionProjectResolver),
-		docker.WithVsockDialer(pvm.DockerDialer()),
+		opts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker provider: %w", err)
@@ -859,6 +877,11 @@ func (p *DockerProvider) startProxyContainer(ctx context.Context, projectID stri
 			log.Printf("Proxy container %s has stale config, recreating", name)
 		}
 		_ = cli.ContainerRemove(ctx, existing.ID, containerTypes.RemoveOptions{Force: true})
+	}
+
+	// Wait for the sandbox image to be available (pulled on provider startup).
+	if err := dockerProv.EnsureImage(ctx); err != nil {
+		return fmt.Errorf("failed to ensure sandbox image: %w", err)
 	}
 
 	containerConfig := &containerTypes.Config{
@@ -915,12 +938,14 @@ func (p *DockerProvider) getDockerProviderForSession(ctx context.Context, sessio
 
 // progressReader wraps an io.Reader and logs transfer progress.
 type progressReader struct {
-	reader     io.Reader
-	total      int64 // Total expected bytes (0 if unknown)
-	read       int64 // Bytes read so far
-	lastLogged int64 // Bytes read at last log
-	logEvery   int64 // Log every N bytes
-	label      string
+	reader       io.Reader
+	total        int64 // Total expected bytes (0 if unknown)
+	read         int64 // Bytes read so far
+	lastLogged   int64 // Bytes read at last log
+	logEvery     int64 // Log every N bytes
+	label        string
+	systemMgr    SystemManager // Optional system manager for UI progress
+	systemTaskID string        // Task ID for system manager updates
 }
 
 func (pr *progressReader) Read(p []byte) (int, error) {
@@ -937,6 +962,11 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 		} else {
 			log.Printf("Image load %s: %d MB transferred", pr.label, readMB)
 		}
+	}
+
+	// Report byte-level progress to system manager on every read
+	if pr.systemMgr != nil && pr.systemTaskID != "" && pr.total > 0 {
+		pr.systemMgr.UpdateTaskBytes(pr.systemTaskID, pr.read, pr.total)
 	}
 
 	return n, err
