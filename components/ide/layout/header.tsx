@@ -1,4 +1,10 @@
-import { ChevronDown, PanelLeft, PanelLeftClose, Plus } from "lucide-react";
+import {
+	ChevronDown,
+	PanelLeft,
+	PanelLeftClose,
+	Plus,
+	RotateCw,
+} from "lucide-react";
 import * as React from "react";
 import { DiscobotBrand } from "@/components/ide/discobot-brand";
 import { SessionDropdownItem } from "@/components/ide/session-dropdown-item";
@@ -386,7 +392,16 @@ export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 				</Button>
 			</div>
 			<div className="flex items-center gap-1 shrink-0 relative h-full">
-				<SettingsMenu className="tauri-no-drag" isMac={isMac} />
+				<Button
+					variant="ghost"
+					size="icon"
+					onClick={() => window.location.reload()}
+					className="tauri-no-drag"
+					title="Refresh page"
+				>
+					<RotateCw className="h-4 w-4" />
+				</Button>
+				<SettingsMenu className="tauri-no-drag" />
 				{/* Windows/Linux window controls on the right (macOS uses native) */}
 				{isTauri() && <WindowControls />}
 			</div>

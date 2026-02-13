@@ -18,17 +18,15 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { isTauri } from "@/lib/api-config";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useMainContentContext } from "@/lib/contexts/main-content-context";
 import { useThemeCustomization } from "@/lib/hooks/use-theme-customization";
 
 interface SettingsMenuProps {
 	className?: string;
-	isMac?: boolean;
 }
 
-export function SettingsMenu({ className, isMac = false }: SettingsMenuProps) {
+export function SettingsMenu({ className }: SettingsMenuProps) {
 	const dialogs = useDialogContext();
 	const { chatWidthMode, setChatWidthMode } = useMainContentContext();
 
@@ -56,8 +54,7 @@ export function SettingsMenu({ className, isMac = false }: SettingsMenuProps) {
 				</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="w-80">
-				{/* Hide theme controls on macOS Tauri (follows system theme) */}
-				{!(isTauri() && isMac) && themeMounted && (
+				{themeMounted && (
 					<>
 						<DropdownMenuLabel>Appearance</DropdownMenuLabel>
 						<div className="px-2 py-2 space-y-4">

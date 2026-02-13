@@ -406,10 +406,13 @@ export interface DiskUsageInfo {
 	used_bytes: number;
 	available_bytes: number;
 	used_percent: number;
-	total_inodes: number;
-	used_inodes: number;
-	available_inodes: number;
-	inodes_used_percent: number;
+}
+
+/** Size information for a sparse data disk file */
+export interface DataDiskFileInfo {
+	path: string;
+	apparent_bytes: number;
+	actual_bytes: number;
 }
 
 /** VZ-specific configuration and disk usage */
@@ -420,6 +423,7 @@ export interface VZInfo {
 	memory_mb: number;
 	data_disk_gb: number;
 	disk_usage?: DiskUsageInfo;
+	data_disks?: DataDiskFileInfo[];
 	kernel_path?: string;
 	initrd_path?: string;
 	base_disk_path?: string;

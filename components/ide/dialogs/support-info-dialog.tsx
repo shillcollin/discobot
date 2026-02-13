@@ -9,7 +9,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api-client";
 import type { SupportInfoResponse } from "@/lib/api-types";
 
@@ -79,7 +78,7 @@ export function SupportInfoDialog({ open, onClose }: SupportInfoDialogProps) {
 					</DialogDescription>
 				</DialogHeader>
 
-				<ScrollArea className="flex-1 -mx-6 px-6">
+				<div className="flex-1 min-h-0 -mx-6 px-6 overflow-y-auto">
 					{isLoading && (
 						<div className="py-8 text-center text-muted-foreground">
 							Loading...
@@ -237,23 +236,32 @@ export function SupportInfoDialog({ open, onClose }: SupportInfoDialogProps) {
 													supportInfo.config.vz.disk_usage.available_bytes,
 												)}
 											/>
-											<div className="pt-2 font-medium text-sm">
-												Inode Usage
-											</div>
-											<KeyValue
-												label="Total Inodes"
-												value={supportInfo.config.vz.disk_usage.total_inodes.toLocaleString()}
-											/>
-											<KeyValue
-												label="Used Inodes"
-												value={`${supportInfo.config.vz.disk_usage.used_inodes.toLocaleString()} (${supportInfo.config.vz.disk_usage.inodes_used_percent.toFixed(1)}%)`}
-											/>
-											<KeyValue
-												label="Available Inodes"
-												value={supportInfo.config.vz.disk_usage.available_inodes.toLocaleString()}
-											/>
 										</>
 									)}
+									{supportInfo.config.vz.data_disks &&
+										supportInfo.config.vz.data_disks.length > 0 && (
+											<>
+												<div className="pt-2 font-medium text-sm">
+													Data Disks
+												</div>
+												{supportInfo.config.vz.data_disks.map((disk) => (
+													<div key={disk.path} className="space-y-1.5">
+														<KeyValue
+															label="File"
+															value={disk.path.split("/").pop() || disk.path}
+														/>
+														<KeyValue
+															label="File Size"
+															value={formatBytes(disk.apparent_bytes)}
+														/>
+														<KeyValue
+															label="Actual Disk Usage"
+															value={formatBytes(disk.actual_bytes)}
+														/>
+													</div>
+												))}
+											</>
+										)}
 								</Section>
 							)}
 
@@ -308,7 +316,7 @@ export function SupportInfoDialog({ open, onClose }: SupportInfoDialogProps) {
 							</Section>
 						</div>
 					)}
-				</ScrollArea>
+				</div>
 
 				<DialogFooter className="gap-2">
 					<Button

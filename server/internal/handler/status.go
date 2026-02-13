@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/adrg/xdg"
@@ -66,27 +67,31 @@ type ConfigInfo struct {
 
 // VZInfo contains VZ-specific configuration and disk usage information
 type VZInfo struct {
-	ImageRef     string         `json:"image_ref"`
-	DataDir      string         `json:"data_dir"`
-	CPUCount     int            `json:"cpu_count"`
-	MemoryMB     int            `json:"memory_mb"`
-	DataDiskGB   int            `json:"data_disk_gb"`
-	DiskUsage    *DiskUsageInfo `json:"disk_usage,omitempty"`
-	KernelPath   string         `json:"kernel_path,omitempty"`
-	InitrdPath   string         `json:"initrd_path,omitempty"`
-	BaseDiskPath string         `json:"base_disk_path,omitempty"`
+	ImageRef     string             `json:"image_ref"`
+	DataDir      string             `json:"data_dir"`
+	CPUCount     int                `json:"cpu_count"`
+	MemoryMB     int                `json:"memory_mb"`
+	DataDiskGB   int                `json:"data_disk_gb"`
+	DiskUsage    *DiskUsageInfo     `json:"disk_usage,omitempty"`
+	DataDisks    []DataDiskFileInfo `json:"data_disks,omitempty"`
+	KernelPath   string             `json:"kernel_path,omitempty"`
+	InitrdPath   string             `json:"initrd_path,omitempty"`
+	BaseDiskPath string             `json:"base_disk_path,omitempty"`
 }
 
 // DiskUsageInfo contains filesystem usage statistics
 type DiskUsageInfo struct {
-	TotalBytes        uint64  `json:"total_bytes"`
-	UsedBytes         uint64  `json:"used_bytes"`
-	AvailableBytes    uint64  `json:"available_bytes"`
-	UsedPercent       float64 `json:"used_percent"`
-	TotalInodes       uint64  `json:"total_inodes"`
-	UsedInodes        uint64  `json:"used_inodes"`
-	AvailableInodes   uint64  `json:"available_inodes"`
-	InodesUsedPercent float64 `json:"inodes_used_percent"`
+	TotalBytes     uint64  `json:"total_bytes"`
+	UsedBytes      uint64  `json:"used_bytes"`
+	AvailableBytes uint64  `json:"available_bytes"`
+	UsedPercent    float64 `json:"used_percent"`
+}
+
+// DataDiskFileInfo contains size information for a sparse data disk file
+type DataDiskFileInfo struct {
+	Path          string `json:"path"`
+	ApparentBytes uint64 `json:"apparent_bytes"` // Logical file size
+	ActualBytes   uint64 `json:"actual_bytes"`   // Actual disk usage (sparse-aware)
 }
 
 // GetSupportInfo returns comprehensive diagnostic information for debugging
@@ -120,7 +125,7 @@ func (h *Handler) GetSupportInfo(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	// Add VZ info if on macOS
-	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+	if runtime.GOOS == "darwin" {
 		vzInfo := &VZInfo{
 			ImageRef:     h.cfg.VZImageRef,
 			DataDir:      h.cfg.VZDataDir,
@@ -136,6 +141,9 @@ func (h *Handler) GetSupportInfo(w http.ResponseWriter, _ *http.Request) {
 		if diskUsage := getDiskUsage(h.cfg.VZDataDir); diskUsage != nil {
 			vzInfo.DiskUsage = diskUsage
 		}
+
+		// Scan for data disk files
+		vzInfo.DataDisks = getDataDiskFiles(h.cfg.VZDataDir)
 
 		configInfo.VZ = vzInfo
 	}
@@ -176,7 +184,6 @@ func getDiskUsage(path string) *DiskUsageInfo {
 		return nil
 	}
 
-	// Calculate bytes
 	totalBytes := stat.Blocks * uint64(stat.Bsize)
 	availableBytes := stat.Bavail * uint64(stat.Bsize)
 	usedBytes := totalBytes - (stat.Bfree * uint64(stat.Bsize))
@@ -186,24 +193,50 @@ func getDiskUsage(path string) *DiskUsageInfo {
 		usedPercent = float64(usedBytes) / float64(totalBytes) * 100
 	}
 
-	// Calculate inodes
-	totalInodes := stat.Files
-	availableInodes := stat.Ffree
-	usedInodes := totalInodes - availableInodes
-
-	var inodesUsedPercent float64
-	if totalInodes > 0 {
-		inodesUsedPercent = float64(usedInodes) / float64(totalInodes) * 100
-	}
-
 	return &DiskUsageInfo{
-		TotalBytes:        totalBytes,
-		UsedBytes:         usedBytes,
-		AvailableBytes:    availableBytes,
-		UsedPercent:       usedPercent,
-		TotalInodes:       totalInodes,
-		UsedInodes:        usedInodes,
-		AvailableInodes:   availableInodes,
-		InodesUsedPercent: inodesUsedPercent,
+		TotalBytes:     totalBytes,
+		UsedBytes:      usedBytes,
+		AvailableBytes: availableBytes,
+		UsedPercent:    usedPercent,
 	}
+}
+
+// getDataDiskFiles scans for project data disk images and returns their size info.
+// Data disks are sparse files, so actual disk usage may be much less than apparent size.
+func getDataDiskFiles(dataDir string) []DataDiskFileInfo {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return nil
+	}
+
+	var disks []DataDiskFileInfo
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "project-") || !strings.HasSuffix(name, "-data.img") {
+			continue
+		}
+
+		path := filepath.Join(dataDir, name)
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		apparentBytes := uint64(info.Size())
+
+		// Get actual disk usage via stat blocks (sparse-aware)
+		var stat syscall.Stat_t
+		var actualBytes uint64
+		if err := syscall.Stat(path, &stat); err == nil {
+			actualBytes = uint64(stat.Blocks) * 512
+		}
+
+		disks = append(disks, DataDiskFileInfo{
+			Path:          path,
+			ApparentBytes: apparentBytes,
+			ActualBytes:   actualBytes,
+		})
+	}
+
+	return disks
 }
