@@ -16,7 +16,7 @@ import {
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { useLazyRender } from "@/lib/hooks/use-lazy-render";
 import { cn } from "@/lib/utils";
-import { MessagePart } from "./message-parts";
+import { CompactMessageParts } from "./compact-message-parts";
 
 interface ChatConversationProps {
 	/** Messages from useChat (consolidated list) */
@@ -56,16 +56,8 @@ const MessageItem = React.memo(function MessageItem({
 	return (
 		<Message from={message.role}>
 			<MessageContent>
-				{/* Render message parts in order */}
-				{message.parts.map((part, partIdx) => (
-					<MessagePart
-						key={`${message.id}-part-${partIdx}`}
-						message={message}
-						partIdx={partIdx}
-						part={part}
-						isStreaming={isStreaming}
-					/>
-				))}
+				{/* Render message parts with automatic compaction of tool calls */}
+				<CompactMessageParts message={message} isStreaming={isStreaming} />
 				{message.role === "assistant" && (
 					<MessageActions>
 						<MessageAction
