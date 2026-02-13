@@ -397,7 +397,7 @@ function SessionRow({
 			</TableCell>
 
 			{/* Session Name and Description */}
-			<TableCell className="max-w-0">
+			<TableCell className="max-w-0 whitespace-normal">
 				{isRenaming ? (
 					<div className="flex items-center gap-2">
 						<input
@@ -427,16 +427,16 @@ function SessionRow({
 						</button>
 					</div>
 				) : (
-					<div className="min-w-0 overflow-hidden">
+					<div className="min-w-0">
 						<button
 							type="button"
 							onClick={() => onSessionSelect(session)}
-							className="font-medium hover:underline text-left truncate block"
+							className="font-medium hover:underline text-left block break-words"
 						>
 							{displayName}
 						</button>
 						{session.description && (
-							<p className="text-sm text-muted-foreground truncate mt-0.5">
+							<p className="text-sm text-muted-foreground mt-0.5 break-words">
 								{session.description}
 							</p>
 						)}
