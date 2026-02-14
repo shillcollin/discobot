@@ -49,15 +49,6 @@ func TestVZProvider_InitWithoutPaths(t *testing.T) {
 		t.Error("Expected provider to not be ready immediately")
 	}
 
-	// Should have an image downloader
-	provider.downloadMu.RLock()
-	hasDownloader := provider.imageDownloader != nil
-	provider.downloadMu.RUnlock()
-
-	if !hasDownloader {
-		t.Error("Expected provider to have image downloader")
-	}
-
 	// Status should show downloading
 	status := provider.Status()
 	if status.State != "downloading" && status.State != "failed" {

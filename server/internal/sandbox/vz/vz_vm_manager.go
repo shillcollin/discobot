@@ -19,6 +19,8 @@ import (
 
 	"github.com/Code-Hex/vz/v3"
 
+	"github.com/obot-platform/discobot/server/internal/config"
+	"github.com/obot-platform/discobot/server/internal/sandbox"
 	"github.com/obot-platform/discobot/server/internal/sandbox/vm"
 )
 
@@ -76,11 +78,7 @@ type vzProjectVM struct {
 	socketDevice *vz.VirtioSocketDevice
 	dataDiskPath string   // Data disk (writable)
 	consoleLog   *os.File // Console log file
-
-	// Lifecycle
-	createdAt  time.Time
-	lastUsedAt time.Time
-	mu         sync.RWMutex
+	mu           sync.RWMutex
 }
 
 // ProjectID returns the project ID this VM serves.
@@ -163,50 +161,254 @@ type VMManager struct {
 	projectVMs  map[string]*vzProjectVM
 	projectVMMu sync.RWMutex
 
-	// Idle timeout before VM shutdown (0 = never shutdown)
-	idleTimeout time.Duration
+	// ready is closed when the manager is ready to create VMs.
+	ready chan struct{}
 
-	// sandboxCounter returns the number of running sandboxes for a project.
-	// Set via SetSandboxCounter after construction.
-	sandboxCounter func(projectID string) int
+	// initErr is set if initialization failed (only valid after ready is closed).
+	initErr error
+
+	// imageDownloader handles async download of VZ images (for Status reporting).
+	imageDownloader *ImageDownloader
+
+	// systemManager tracks startup tasks (optional).
+	systemManager vm.SystemManager
 
 	// Shutdown signal
 	stopCh chan struct{}
-	wg     sync.WaitGroup
 }
 
-// SetSandboxCounter sets the callback used to count running sandboxes per project.
-// This must be called before any idle cleanup runs (i.e., shortly after construction).
-func (m *VMManager) SetSandboxCounter(counter func(projectID string) int) {
-	m.sandboxCounter = counter
+// Ready returns a channel that is closed when the manager is ready to create VMs.
+func (m *VMManager) Ready() <-chan struct{} {
+	return m.ready
+}
+
+// Err returns any error that occurred during initialization.
+func (m *VMManager) Err() error {
+	return m.initErr
+}
+
+// Status returns the current status of the VZ VM manager.
+// Implements vm.StatusReporter.
+func (m *VMManager) Status() sandbox.ProviderStatus {
+	status := sandbox.ProviderStatus{
+		Available: true,
+	}
+	details := StatusDetails{}
+
+	// Check if we have a downloader (async download mode)
+	if m.imageDownloader != nil {
+		progress := m.imageDownloader.Status()
+		details.Progress = &progress
+
+		switch progress.State {
+		case DownloadStateDownloading, DownloadStateExtracting:
+			status.State = "downloading"
+			status.Message = "Downloading VZ kernel and base disk images"
+		case DownloadStateReady:
+			status.State = "ready"
+			if kernelPath, baseDiskPath, ok := m.imageDownloader.GetPaths(); ok {
+				memoryMB := int(getDefaultMemoryBytes() / (1024 * 1024))
+				if m.config.MemoryMB > 0 {
+					memoryMB = m.config.MemoryMB
+				}
+				cpuCount := runtime.NumCPU()
+				if m.config.CPUCount > 0 {
+					cpuCount = m.config.CPUCount
+				}
+				dataDiskGB := defaultDataDiskGB
+				if m.config.DataDiskGB > 0 {
+					dataDiskGB = m.config.DataDiskGB
+				}
+				details.Config = &ProviderConfigInfo{
+					KernelPath:   kernelPath,
+					BaseDiskPath: baseDiskPath,
+					MemoryMB:     memoryMB,
+					CPUCount:     cpuCount,
+					DataDiskGB:   dataDiskGB,
+				}
+			}
+		case DownloadStateFailed:
+			status.State = "failed"
+			status.Message = progress.Error
+		default:
+			status.State = "downloading"
+			status.Message = "Initializing download"
+		}
+	} else {
+		// Check readiness
+		select {
+		case <-m.ready:
+			if m.initErr != nil {
+				status.State = "failed"
+				status.Message = m.initErr.Error()
+			} else {
+				status.State = "ready"
+			}
+		default:
+			status.State = "initializing"
+			status.Message = "VM manager initializing"
+		}
+	}
+
+	if details.Progress != nil || details.Config != nil {
+		status.Details = details
+	}
+
+	return status
 }
 
 // NewVMManager creates a new VZ VM manager.
-func NewVMManager(config vm.Config) (*VMManager, error) {
-	// Parse idle timeout
-	idleTimeout := 30 * time.Minute // default
-	if config.IdleTimeout != "" {
-		parsed, err := time.ParseDuration(config.IdleTimeout)
-		if err != nil {
-			return nil, fmt.Errorf("invalid idle timeout: %w", err)
-		}
-		idleTimeout = parsed
-	}
-
+// If the config has KernelPath and BaseDiskPath set, the manager is ready immediately.
+// Otherwise, it starts an async download and the manager becomes ready when the download completes.
+func NewVMManager(cfg vm.Config, systemManager vm.SystemManager) (*VMManager, error) {
 	mgr := &VMManager{
-		config:      config,
-		projectVMs:  make(map[string]*vzProjectVM),
-		idleTimeout: idleTimeout,
-		stopCh:      make(chan struct{}),
+		config:        cfg,
+		projectVMs:    make(map[string]*vzProjectVM),
+		ready:         make(chan struct{}),
+		systemManager: systemManager,
+		stopCh:        make(chan struct{}),
 	}
 
-	// Start background cleanup goroutine if idle timeout is set
-	if idleTimeout > 0 {
-		mgr.wg.Add(1)
-		go mgr.cleanupIdleVMs()
+	needsDownload := cfg.KernelPath == "" || cfg.BaseDiskPath == ""
+	if needsDownload {
+		// Start async download
+		imageRef := cfg.ImageRef
+		if imageRef == "" {
+			imageRef = config.DefaultVZImage()
+		}
+
+		log.Printf("VZ kernel or base disk not configured, will download from %s", imageRef)
+
+		downloader := NewImageDownloader(DownloadConfig{
+			ImageRef: imageRef,
+			DataDir:  cfg.DataDir,
+		})
+		mgr.imageDownloader = downloader
+
+		// Register startup task if system manager is available
+		if systemManager != nil {
+			systemManager.RegisterTask("vz-download", "Downloading VZ kernel and base disk")
+			systemManager.StartTask("vz-download")
+		}
+
+		go mgr.downloadAndInit(imageRef)
+
+		log.Printf("VZ VM manager created, images downloading in background")
+	} else {
+		// Ready immediately
+		close(mgr.ready)
+		log.Printf("VZ VM manager initialized with manual configuration")
 	}
 
 	return mgr, nil
+}
+
+// downloadAndInit handles async image download with retry logic.
+// Closes the ready channel when complete (whether success or failure).
+func (m *VMManager) downloadAndInit(imageRef string) {
+	const maxRetries = 5
+	const baseDelay = 5 * time.Second
+
+	downloader := m.imageDownloader
+
+	// Poll download progress and update system manager
+	if m.systemManager != nil {
+		go func() {
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				progress := downloader.Status()
+
+				// Update system manager with progress
+				if progress.TotalBytes > 0 {
+					m.systemManager.UpdateTaskBytes("vz-download", progress.BytesDownloaded, progress.TotalBytes)
+				}
+				if progress.CurrentLayer != "" {
+					m.systemManager.UpdateTaskProgress("vz-download", 0, progress.CurrentLayer)
+				}
+
+				// Check if complete or failed
+				switch progress.State {
+				case DownloadStateReady:
+					m.systemManager.CompleteTask("vz-download")
+					return
+				case DownloadStateFailed:
+					m.systemManager.FailTask("vz-download", fmt.Errorf("%s", progress.Error))
+					return
+				}
+			}
+		}()
+	}
+
+	ctx := context.Background()
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Attempt download
+		if err := downloader.Start(ctx); err != nil {
+			log.Printf("VZ image download failed (attempt %d/%d): %v", attempt, maxRetries, err)
+
+			if attempt < maxRetries {
+				delay := baseDelay * time.Duration(1<<uint(attempt-1))
+				if delay > 5*time.Minute {
+					delay = 5 * time.Minute
+				}
+				log.Printf("Retrying in %v...", delay)
+				time.Sleep(delay)
+
+				// Reset downloader for retry
+				downloader = NewImageDownloader(DownloadConfig{
+					ImageRef: imageRef,
+					DataDir:  m.config.DataDir,
+				})
+				m.imageDownloader = downloader
+				continue
+			}
+
+			// Max retries exceeded
+			m.initErr = fmt.Errorf("download failed after %d attempts: %w", maxRetries, err)
+			downloader.RecordError(m.initErr)
+			log.Printf("VZ image download failed permanently after %d attempts", maxRetries)
+			close(m.ready)
+			return
+		}
+
+		// Get paths from downloader
+		kernelPath, baseDiskPath, ok := downloader.GetPaths()
+		if !ok {
+			err := fmt.Errorf("failed to get VZ image paths after download")
+			log.Printf("%v", err)
+
+			if attempt < maxRetries {
+				delay := baseDelay * time.Duration(1<<uint(attempt-1))
+				if delay > 5*time.Minute {
+					delay = 5 * time.Minute
+				}
+				log.Printf("Retrying in %v...", delay)
+				time.Sleep(delay)
+
+				downloader = NewImageDownloader(DownloadConfig{
+					ImageRef: imageRef,
+					DataDir:  m.config.DataDir,
+				})
+				m.imageDownloader = downloader
+				continue
+			}
+
+			m.initErr = err
+			downloader.RecordError(err)
+			close(m.ready)
+			return
+		}
+
+		// Update config with downloaded paths
+		m.config.KernelPath = kernelPath
+		m.config.BaseDiskPath = baseDiskPath
+
+		log.Printf("VZ VM manager initialized after image download")
+
+		close(m.ready)
+		return
+	}
 }
 
 // GetOrCreateVM returns an existing VM for the project or creates a new one.
@@ -216,10 +418,6 @@ func (m *VMManager) GetOrCreateVM(ctx context.Context, projectID string) (vm.Pro
 
 	pvm, exists := m.projectVMs[projectID]
 	if exists {
-		pvm.mu.Lock()
-		pvm.lastUsedAt = time.Now()
-		pvm.mu.Unlock()
-
 		return pvm, nil
 	}
 
@@ -247,6 +445,36 @@ func (m *VMManager) GetVM(projectID string) (vm.ProjectVM, bool) {
 	return pvm, true
 }
 
+// ListProjectIDs returns the IDs of all projects that currently have a VM.
+func (m *VMManager) ListProjectIDs() []string {
+	m.projectVMMu.RLock()
+	defer m.projectVMMu.RUnlock()
+
+	ids := make([]string, 0, len(m.projectVMs))
+	for id := range m.projectVMs {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// RemoveVM shuts down and removes the VM for the given project.
+func (m *VMManager) RemoveVM(projectID string) error {
+	m.projectVMMu.Lock()
+	defer m.projectVMMu.Unlock()
+
+	pvm, exists := m.projectVMs[projectID]
+	if !exists {
+		return nil
+	}
+
+	if err := pvm.Shutdown(); err != nil {
+		return fmt.Errorf("failed to shutdown VM for project %s: %w", projectID, err)
+	}
+
+	delete(m.projectVMs, projectID)
+	return nil
+}
+
 // Shutdown stops all project VMs and shuts down the manager.
 func (m *VMManager) Shutdown() {
 	close(m.stopCh)
@@ -261,9 +489,6 @@ func (m *VMManager) Shutdown() {
 	}
 	m.projectVMs = make(map[string]*vzProjectVM)
 	m.projectVMMu.Unlock()
-
-	// Wait for cleanup goroutine
-	m.wg.Wait()
 }
 
 // createProjectVM creates and starts a new VM for a project.
@@ -352,8 +577,6 @@ func (m *VMManager) createProjectVM(ctx context.Context, projectID string) (*vzP
 		socketDevice: socketDevice,
 		dataDiskPath: dataDiskPath,
 		consoleLog:   consoleLog,
-		createdAt:    time.Now(),
-		lastUsedAt:   time.Now(),
 	}
 
 	return pvm, nil
@@ -622,55 +845,6 @@ func (m *VMManager) waitForDocker(ctx context.Context, socketDevice *vz.VirtioSo
 
 			vsockConn.Close()
 			log.Printf("Project VM %s: waiting for Docker (status: %d)", projectID, resp.StatusCode)
-		}
-	}
-}
-
-// cleanupIdleVMs periodically checks for idle VMs and shuts them down.
-func (m *VMManager) cleanupIdleVMs() {
-	defer m.wg.Done()
-
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-m.stopCh:
-			return
-		case <-ticker.C:
-			m.projectVMMu.Lock()
-
-			for projectID, pvm := range m.projectVMs {
-				sandboxCount := 0
-				if m.sandboxCounter != nil {
-					sandboxCount = m.sandboxCounter(projectID)
-				}
-
-				pvm.mu.RLock()
-				lastUsed := pvm.lastUsedAt
-				pvm.mu.RUnlock()
-
-				if sandboxCount > 0 {
-					// VM is active — reset the idle timer
-					pvm.mu.Lock()
-					pvm.lastUsedAt = time.Now()
-					pvm.mu.Unlock()
-					continue
-				}
-
-				// No running sandboxes — check if idle timeout exceeded
-				if time.Since(lastUsed) > m.idleTimeout {
-					log.Printf("Shutting down idle project VM: %s (idle for %v)", projectID, time.Since(lastUsed))
-
-					if err := pvm.Shutdown(); err != nil {
-						log.Printf("Error stopping idle VM %s: %v", projectID, err)
-					}
-
-					delete(m.projectVMs, projectID)
-				}
-			}
-
-			m.projectVMMu.Unlock()
 		}
 	}
 }

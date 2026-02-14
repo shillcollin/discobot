@@ -6,6 +6,8 @@ package vm
 import (
 	"context"
 	"net"
+
+	"github.com/obot-platform/discobot/server/internal/sandbox"
 )
 
 // ProjectVM represents a VM instance that hosts Docker daemon for multiple sessions.
@@ -36,8 +38,30 @@ type ProjectVMManager interface {
 	// GetVM returns the VM for the given project, if it exists.
 	GetVM(projectID string) (ProjectVM, bool)
 
+	// ListProjectIDs returns the IDs of all projects that currently have a VM.
+	ListProjectIDs() []string
+
+	// RemoveVM shuts down and removes the VM for the given project.
+	// Returns nil if the project has no VM.
+	RemoveVM(projectID string) error
+
 	// Shutdown stops all VMs and cleans up resources.
 	Shutdown()
+
+	// Ready returns a channel that is closed when the manager is ready to create VMs.
+	// Implementations that need async initialization (e.g., downloading images)
+	// close this channel once initialization is complete.
+	Ready() <-chan struct{}
+
+	// Err returns any error that occurred during initialization.
+	// Should only be called after Ready() is closed.
+	Err() error
+}
+
+// StatusReporter is an optional interface that ProjectVMManager implementations
+// can implement to provide detailed status information (e.g., download progress).
+type StatusReporter interface {
+	Status() sandbox.ProviderStatus
 }
 
 // Config contains common configuration for VM managers.
