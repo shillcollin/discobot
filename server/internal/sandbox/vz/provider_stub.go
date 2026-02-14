@@ -127,11 +127,6 @@ func (p *DockerProvider) IsReady() bool {
 	return false
 }
 
-// WarmVM is a no-op on non-darwin platforms.
-func (p *DockerProvider) WarmVM(_ context.Context, _ string) error {
-	return fmt.Errorf("vz sandbox provider is only available on macOS")
-}
-
 // WaitForReady is a no-op on non-darwin platforms.
 func (p *DockerProvider) WaitForReady(_ context.Context) error {
 	return fmt.Errorf("vz sandbox provider is only available on macOS")

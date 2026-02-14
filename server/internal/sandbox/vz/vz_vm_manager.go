@@ -77,15 +77,6 @@ type vzProjectVM struct {
 	dataDiskPath string   // Data disk (writable)
 	consoleLog   *os.File // Console log file
 
-	// Session reference counting
-	sessions   map[string]bool
-	sessionsMu sync.RWMutex
-
-	// isWarm indicates this VM was pre-warmed at startup without sessions.
-	// Warm VMs are not subject to idle cleanup until a session has been
-	// added and then removed (at which point isWarm is cleared).
-	isWarm bool
-
 	// Lifecycle
 	createdAt  time.Time
 	lastUsedAt time.Time
@@ -95,33 +86,6 @@ type vzProjectVM struct {
 // ProjectID returns the project ID this VM serves.
 func (pvm *vzProjectVM) ProjectID() string {
 	return pvm.projectID
-}
-
-// AddSession registers a session with this VM.
-func (pvm *vzProjectVM) AddSession(sessionID string) {
-	pvm.sessionsMu.Lock()
-	defer pvm.sessionsMu.Unlock()
-
-	pvm.sessions[sessionID] = true
-	pvm.lastUsedAt = time.Now()
-	pvm.isWarm = false // No longer warm-only once a real session is added
-}
-
-// RemoveSession unregisters a session from this VM.
-func (pvm *vzProjectVM) RemoveSession(sessionID string) {
-	pvm.sessionsMu.Lock()
-	defer pvm.sessionsMu.Unlock()
-
-	delete(pvm.sessions, sessionID)
-	pvm.lastUsedAt = time.Now()
-}
-
-// SessionCount returns the number of active sessions using this VM.
-func (pvm *vzProjectVM) SessionCount() int {
-	pvm.sessionsMu.RLock()
-	defer pvm.sessionsMu.RUnlock()
-
-	return len(pvm.sessions)
 }
 
 // DockerDialer returns a VSOCK dialer function for Docker client.
@@ -202,9 +166,19 @@ type VMManager struct {
 	// Idle timeout before VM shutdown (0 = never shutdown)
 	idleTimeout time.Duration
 
+	// sandboxCounter returns the number of running sandboxes for a project.
+	// Set via SetSandboxCounter after construction.
+	sandboxCounter func(projectID string) int
+
 	// Shutdown signal
 	stopCh chan struct{}
 	wg     sync.WaitGroup
+}
+
+// SetSandboxCounter sets the callback used to count running sandboxes per project.
+// This must be called before any idle cleanup runs (i.e., shortly after construction).
+func (m *VMManager) SetSandboxCounter(counter func(projectID string) int) {
+	m.sandboxCounter = counter
 }
 
 // NewVMManager creates a new VZ VM manager.
@@ -236,23 +210,22 @@ func NewVMManager(config vm.Config) (*VMManager, error) {
 }
 
 // GetOrCreateVM returns an existing VM for the project or creates a new one.
-func (m *VMManager) GetOrCreateVM(ctx context.Context, projectID, sessionID string) (vm.ProjectVM, error) {
+func (m *VMManager) GetOrCreateVM(ctx context.Context, projectID string) (vm.ProjectVM, error) {
 	m.projectVMMu.Lock()
 	defer m.projectVMMu.Unlock()
 
 	pvm, exists := m.projectVMs[projectID]
 	if exists {
-		// Add session to existing VM
-		pvm.AddSession(sessionID)
-		sessionCount := pvm.SessionCount()
+		pvm.mu.Lock()
+		pvm.lastUsedAt = time.Now()
+		pvm.mu.Unlock()
 
-		log.Printf("Project VM %s: added session %s (total sessions: %d)", projectID, sessionID, sessionCount)
 		return pvm, nil
 	}
 
 	// Create new VM for project
 	log.Printf("Creating new project VM for project: %s", projectID)
-	pvm, err := m.createProjectVM(ctx, projectID, sessionID)
+	pvm, err := m.createProjectVM(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create project VM: %w", err)
 	}
@@ -272,50 +245,6 @@ func (m *VMManager) GetVM(projectID string) (vm.ProjectVM, bool) {
 		return nil, false
 	}
 	return pvm, true
-}
-
-// WarmVM creates a VM for the project without associating any sessions.
-// This is used at startup to pre-warm VMs so they're ready when sessions are created.
-func (m *VMManager) WarmVM(ctx context.Context, projectID string) (vm.ProjectVM, error) {
-	m.projectVMMu.Lock()
-	defer m.projectVMMu.Unlock()
-
-	if pvm, exists := m.projectVMs[projectID]; exists {
-		log.Printf("Project VM %s already exists, skipping warm", projectID)
-		return pvm, nil
-	}
-
-	log.Printf("Warming project VM for project: %s", projectID)
-	pvm, err := m.createProjectVM(ctx, projectID, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to warm project VM: %w", err)
-	}
-
-	m.projectVMs[projectID] = pvm
-	log.Printf("Project VM %s warmed successfully", projectID)
-	return pvm, nil
-}
-
-// RemoveSession removes a session from the project VM.
-func (m *VMManager) RemoveSession(projectID, sessionID string) error {
-	m.projectVMMu.RLock()
-	pvm, exists := m.projectVMs[projectID]
-	m.projectVMMu.RUnlock()
-
-	if !exists {
-		return fmt.Errorf("project VM not found: %s", projectID)
-	}
-
-	pvm.RemoveSession(sessionID)
-	sessionCount := pvm.SessionCount()
-
-	if sessionCount == 0 {
-		log.Printf("Project VM %s has no active sessions, will idle", projectID)
-	} else {
-		log.Printf("Project VM %s: removed session %s (%d sessions remaining)", projectID, sessionID, sessionCount)
-	}
-
-	return nil
 }
 
 // Shutdown stops all project VMs and shuts down the manager.
@@ -338,7 +267,7 @@ func (m *VMManager) Shutdown() {
 }
 
 // createProjectVM creates and starts a new VM for a project.
-func (m *VMManager) createProjectVM(ctx context.Context, projectID, sessionID string) (*vzProjectVM, error) {
+func (m *VMManager) createProjectVM(ctx context.Context, projectID string) (*vzProjectVM, error) {
 	// Root disk (read-only) - use the base disk directly, shared across all VMs
 	rootDiskPath := m.config.BaseDiskPath
 
@@ -346,6 +275,11 @@ func (m *VMManager) createProjectVM(ctx context.Context, projectID, sessionID st
 	dataDiskPath := filepath.Join(m.config.DataDir, fmt.Sprintf("project-%s-data.img", projectID))
 
 	log.Printf("Using shared base disk (read-only): %s", rootDiskPath)
+
+	// Ensure data disk directory exists
+	if err := os.MkdirAll(filepath.Dir(dataDiskPath), 0755); err != nil {
+		return nil, fmt.Errorf("failed to create data disk directory: %w", err)
+	}
 
 	// Create data disk if it doesn't exist
 	if _, err := os.Stat(dataDiskPath); os.IsNotExist(err) {
@@ -412,19 +346,12 @@ func (m *VMManager) createProjectVM(ctx context.Context, projectID, sessionID st
 
 	log.Printf("Docker daemon ready in VM: %s", projectID)
 
-	sessions := make(map[string]bool)
-	if sessionID != "" {
-		sessions[sessionID] = true
-	}
-
 	pvm := &vzProjectVM{
 		projectID:    projectID,
 		vm:           vzVM,
 		socketDevice: socketDevice,
 		dataDiskPath: dataDiskPath,
 		consoleLog:   consoleLog,
-		sessions:     sessions,
-		isWarm:       sessionID == "",
 		createdAt:    time.Now(),
 		lastUsedAt:   time.Now(),
 	}
@@ -714,16 +641,25 @@ func (m *VMManager) cleanupIdleVMs() {
 			m.projectVMMu.Lock()
 
 			for projectID, pvm := range m.projectVMs {
-				sessionCount := pvm.SessionCount()
+				sandboxCount := 0
+				if m.sandboxCounter != nil {
+					sandboxCount = m.sandboxCounter(projectID)
+				}
 
-				pvm.sessionsMu.RLock()
+				pvm.mu.RLock()
 				lastUsed := pvm.lastUsedAt
-				isWarm := pvm.isWarm
-				pvm.sessionsMu.RUnlock()
+				pvm.mu.RUnlock()
 
-				// If no sessions and idle timeout exceeded, shutdown VM.
-				// Skip warm VMs that have never had sessions.
-				if sessionCount == 0 && !isWarm && time.Since(lastUsed) > m.idleTimeout {
+				if sandboxCount > 0 {
+					// VM is active — reset the idle timer
+					pvm.mu.Lock()
+					pvm.lastUsedAt = time.Now()
+					pvm.mu.Unlock()
+					continue
+				}
+
+				// No running sandboxes — check if idle timeout exceeded
+				if time.Since(lastUsed) > m.idleTimeout {
 					log.Printf("Shutting down idle project VM: %s (idle for %v)", projectID, time.Since(lastUsed))
 
 					if err := pvm.Shutdown(); err != nil {

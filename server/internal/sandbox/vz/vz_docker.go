@@ -213,12 +213,19 @@ func NewProvider(cfg *config.Config, vmConfig *vm.Config, resolver SessionProjec
 					downloader.RecordError(errMsg)
 					return
 				}
+				vmManager.SetSandboxCounter(p.countRunningSandboxes)
 
 				p.downloadMu.Lock()
 				p.vmManager = vmManager
 				p.downloadMu.Unlock()
 
 				log.Printf("VZ VM manager initialized after image download")
+
+				// Pre-warm VM and Docker provider for the local project
+				if _, err := p.getOrCreateDockerProvider(context.Background(), "local"); err != nil {
+					log.Printf("failed to warm VM for local project: %v", err)
+				}
+
 				return
 			}
 		}()
@@ -232,9 +239,16 @@ func NewProvider(cfg *config.Config, vmConfig *vm.Config, resolver SessionProjec
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VZ VM manager: %w", err)
 	}
+	vmManager.SetSandboxCounter(p.countRunningSandboxes)
 
 	p.vmManager = vmManager
 	log.Printf("VZ VM manager initialized with manual configuration")
+
+	// Pre-warm VM and Docker provider for the local project
+	if _, err := p.getOrCreateDockerProvider(context.Background(), "local"); err != nil {
+		log.Printf("failed to warm VM for local project: %v", err)
+	}
+
 	return p, nil
 }
 
@@ -276,9 +290,8 @@ func (p *DockerProvider) Image() string {
 }
 
 // Create creates a new sandbox:
-// 1. Gets or creates the project VM
-// 2. Creates a Docker provider connected to that VM's Docker daemon via VSOCK
-// 3. Creates a container inside the VM using the Docker provider
+// 1. Gets or creates the project VM and Docker provider
+// 2. Creates a container inside the VM using the Docker provider
 func (p *DockerProvider) Create(ctx context.Context, sessionID string, opts sandbox.CreateOptions) (*sandbox.Sandbox, error) {
 	// Resolve project ID from the session in the database
 	projectID, err := p.sessionProjectResolver(ctx, sessionID)
@@ -286,25 +299,10 @@ func (p *DockerProvider) Create(ctx context.Context, sessionID string, opts sand
 		return nil, fmt.Errorf("failed to resolve project for session %s: %w", sessionID, err)
 	}
 
-	// Check if vmManager is ready
-	p.downloadMu.RLock()
-	vmManager := p.vmManager
-	p.downloadMu.RUnlock()
-
-	if vmManager == nil {
-		return nil, fmt.Errorf("VZ provider not ready, images still downloading")
-	}
-
 	log.Printf("Creating sandbox for session %s in project %s", sessionID, projectID)
 
-	// Get or create project VM
-	pvm, err := vmManager.GetOrCreateVM(ctx, projectID, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get/create project VM: %w", err)
-	}
-
-	// Get or create Docker provider for this project
-	dockerProv, err := p.getOrCreateDockerProvider(ctx, projectID, pvm)
+	// Get or create Docker provider (and VM if needed) for this project
+	dockerProv, err := p.getOrCreateDockerProvider(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get/create Docker provider: %w", err)
 	}
@@ -338,24 +336,13 @@ func (p *DockerProvider) Stop(ctx context.Context, sessionID string, timeout tim
 }
 
 // Remove removes a sandbox (container inside the project VM).
-// Also removes the session from the project VM reference count.
 func (p *DockerProvider) Remove(ctx context.Context, sessionID string, opts ...sandbox.RemoveOption) error {
-	projectID, dockerProv, err := p.getDockerProviderForSession(ctx, sessionID)
+	_, dockerProv, err := p.getDockerProviderForSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
 
-	// Remove container
-	if err := dockerProv.Remove(ctx, sessionID, opts...); err != nil {
-		return err
-	}
-
-	// Remove session from project VM
-	if err := p.vmManager.RemoveSession(projectID, sessionID); err != nil {
-		log.Printf("Warning: failed to remove session from project VM: %v", err)
-	}
-
-	return nil
+	return dockerProv.Remove(ctx, sessionID, opts...)
 }
 
 // Get returns sandbox information.
@@ -642,21 +629,6 @@ func (p *DockerProvider) IsReady() bool {
 	return p.vmManager != nil
 }
 
-// WarmVM pre-creates a VM for the given project without starting any containers.
-// Returns an error if the provider is not ready (images still downloading).
-func (p *DockerProvider) WarmVM(ctx context.Context, projectID string) error {
-	p.downloadMu.RLock()
-	vmManager := p.vmManager
-	p.downloadMu.RUnlock()
-
-	if vmManager == nil {
-		return fmt.Errorf("VZ provider not ready, images still downloading")
-	}
-
-	_, err := vmManager.WarmVM(ctx, projectID)
-	return err
-}
-
 // WaitForReady blocks until the VZ provider is ready (images downloaded and VM manager initialized).
 // Returns an error if the download fails or the context is cancelled.
 func (p *DockerProvider) WaitForReady(ctx context.Context) error {
@@ -799,8 +771,24 @@ func (p *DockerProvider) ensureImageInVM(ctx context.Context, dockerProv *docker
 }
 
 // getOrCreateDockerProvider gets or creates a Docker provider for the given project.
-// The Docker provider connects to the Docker daemon inside the project VM via VSOCK.
-func (p *DockerProvider) getOrCreateDockerProvider(ctx context.Context, projectID string, pvm vm.ProjectVM) (*docker.Provider, error) {
+// It ensures the project VM exists (creating one if needed) and sets up a Docker
+// provider connected to the VM's Docker daemon via VSOCK.
+func (p *DockerProvider) getOrCreateDockerProvider(ctx context.Context, projectID string) (*docker.Provider, error) {
+	// Check if vmManager is ready
+	p.downloadMu.RLock()
+	vmManager := p.vmManager
+	p.downloadMu.RUnlock()
+
+	if vmManager == nil {
+		return nil, fmt.Errorf("VZ provider not ready, images still downloading")
+	}
+
+	// Get or create the project VM
+	pvm, err := vmManager.GetOrCreateVM(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get/create project VM: %w", err)
+	}
+
 	p.dockerProvidersMu.RLock()
 	if prov, exists := p.dockerProviders[projectID]; exists {
 		p.dockerProvidersMu.RUnlock()
@@ -934,6 +922,31 @@ func (p *DockerProvider) getDockerProviderForSession(ctx context.Context, sessio
 	}
 
 	return projectID, dockerProv, nil
+}
+
+// countRunningSandboxes returns the number of running sandboxes for a project.
+// Used by VMManager for idle detection.
+func (p *DockerProvider) countRunningSandboxes(projectID string) int {
+	p.dockerProvidersMu.RLock()
+	dockerProv, exists := p.dockerProviders[projectID]
+	p.dockerProvidersMu.RUnlock()
+
+	if !exists {
+		return 0
+	}
+
+	sandboxes, err := dockerProv.List(context.Background())
+	if err != nil {
+		return 0
+	}
+
+	count := 0
+	for _, sb := range sandboxes {
+		if sb.Status == sandbox.StatusRunning {
+			count++
+		}
+	}
+	return count
 }
 
 // progressReader wraps an io.Reader and logs transfer progress.

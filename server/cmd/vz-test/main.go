@@ -100,7 +100,7 @@ func main() {
 
 	// Create VM
 	log.Printf("Creating VM for project: %s", *projectID)
-	pvm, err := vmManager.GetOrCreateVM(ctx, *projectID, "test-session")
+	pvm, err := vmManager.GetOrCreateVM(ctx, *projectID)
 	if err != nil {
 		log.Fatalf("Failed to create VM: %v", err)
 	}

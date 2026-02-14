@@ -13,15 +13,6 @@ type ProjectVM interface {
 	// ProjectID returns the project ID this VM serves.
 	ProjectID() string
 
-	// AddSession registers a session with this VM.
-	AddSession(sessionID string)
-
-	// RemoveSession unregisters a session from this VM.
-	RemoveSession(sessionID string)
-
-	// SessionCount returns the number of active sessions using this VM.
-	SessionCount() int
-
 	// DockerDialer returns a dialer function for connecting to Docker daemon inside the VM.
 	// The dialer is used to create a Docker client with custom transport.
 	DockerDialer() func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -40,19 +31,10 @@ type ProjectVM interface {
 // isolation via Docker containers.
 type ProjectVMManager interface {
 	// GetOrCreateVM returns an existing VM for the project or creates a new one.
-	// The sessionID is registered with the returned VM for reference counting.
-	GetOrCreateVM(ctx context.Context, projectID, sessionID string) (ProjectVM, error)
+	GetOrCreateVM(ctx context.Context, projectID string) (ProjectVM, error)
 
 	// GetVM returns the VM for the given project, if it exists.
 	GetVM(projectID string) (ProjectVM, bool)
-
-	// WarmVM creates a VM for the project without associating any sessions.
-	// This is used at startup to pre-warm VMs so they're ready when sessions are created.
-	WarmVM(ctx context.Context, projectID string) (ProjectVM, error)
-
-	// RemoveSession removes a session from the project VM.
-	// The VM may be shut down based on idle timeout policies.
-	RemoveSession(projectID, sessionID string) error
 
 	// Shutdown stops all VMs and cleans up resources.
 	Shutdown()
