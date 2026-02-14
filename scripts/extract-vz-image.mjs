@@ -24,8 +24,7 @@ const resourcesDir = join(projectRoot, "src-tauri", "resources");
 
 // Parse arguments
 const imageRef = process.argv[2];
-const arch =
-	process.argv[3] || (process.arch === "arm64" ? "arm64" : "amd64");
+const arch = process.argv[3] || (process.arch === "arm64" ? "arm64" : "amd64");
 
 if (!imageRef) {
 	console.error("Error: Image reference is required");
