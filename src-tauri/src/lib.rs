@@ -206,7 +206,7 @@ fn start_server(
         use tauri::Manager;
         if let Ok(resource_dir) = app.path().resource_dir() {
             let vz_dir = resource_dir.join("vz");
-            let kernel_path = vz_dir.join("vmlinuz");
+            let kernel_path = vz_dir.join("vmlinux");
             let rootfs_path = vz_dir.join("discobot-rootfs.squashfs");
 
             // Check if both files exist
@@ -217,7 +217,10 @@ fn start_server(
 
                 sidecar = sidecar
                     .env("VZ_KERNEL_PATH", kernel_path.to_string_lossy().to_string())
-                    .env("VZ_BASE_DISK_PATH", rootfs_path.to_string_lossy().to_string());
+                    .env(
+                        "VZ_BASE_DISK_PATH",
+                        rootfs_path.to_string_lossy().to_string(),
+                    );
             } else {
                 println!("No bundled VZ resources found, will download from registry");
             }
@@ -292,7 +295,11 @@ pub fn run() {
     #[cfg(not(debug_assertions))]
     let port = find_available_port();
     #[cfg(not(debug_assertions))]
-    let ssh_port = find_available_port();
+    let ssh_port = if TcpListener::bind("127.0.0.1:3333").is_ok() {
+        3333
+    } else {
+        find_available_port()
+    };
 
     let secret = generate_secret();
 
