@@ -5,7 +5,8 @@ package logfile
 import (
 	"fmt"
 	"os"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // RedirectStdoutStderr redirects both stdout and stderr to the given file path.
@@ -18,10 +19,10 @@ func RedirectStdoutStderr(path string) error {
 	}
 
 	fd := int(f.Fd())
-	if err := syscall.Dup2(fd, int(os.Stdout.Fd())); err != nil {
+	if err := unix.Dup2(fd, int(os.Stdout.Fd())); err != nil {
 		return fmt.Errorf("dup2 stdout: %w", err)
 	}
-	if err := syscall.Dup2(fd, int(os.Stderr.Fd())); err != nil {
+	if err := unix.Dup2(fd, int(os.Stderr.Fd())); err != nil {
 		return fmt.Errorf("dup2 stderr: %w", err)
 	}
 

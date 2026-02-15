@@ -33,6 +33,7 @@ require (
 	github.com/klauspost/compress v1.18.3
 	github.com/ulikunitz/xz v0.5.15
 	golang.org/x/crypto v0.45.0
+	golang.org/x/sys v0.41.0
 )
 
 require (
@@ -273,7 +274,6 @@ require (
 	golang.org/x/exp/typeparams v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/tools v0.40.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
