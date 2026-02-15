@@ -64,7 +64,13 @@ func TestVZProvider_InitWithPaths(t *testing.T) {
 		t.Skip("Skipping VZ tests")
 	}
 
-	tempDir := t.TempDir()
+	// Use manual temp dir because NewProvider spawns a background goroutine
+	// that creates a data disk file; t.TempDir() cleanup races with that goroutine.
+	tempDir, err := os.MkdirTemp("", "TestVZProvider_InitWithPaths")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
 
 	// Create dummy kernel and disk files
 	kernelPath := tempDir + "/vmlinuz"
@@ -96,7 +102,10 @@ func TestVZProvider_InitWithPaths(t *testing.T) {
 
 	// This will fail to create VM manager (needs actual macOS VZ framework),
 	// but we can verify it tried to initialize immediately vs async download
-	_, err := NewProvider(cfg, &vmConfig, resolver, nil)
+	provider, err := NewProvider(cfg, &vmConfig, resolver, nil)
+	if provider != nil {
+		defer provider.Close()
+	}
 
 	// We expect an error because we can't actually create a VM in tests,
 	// but the error should be from VM creation, not download
