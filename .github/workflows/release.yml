@@ -170,6 +170,9 @@ jobs:
           TAURI_TARGET_TRIPLE: ${{ matrix.target }}
           TAURI_BUNDLER_DMG_IGNORE_CI: false
           DISCOBOT_VERSION: ${{ steps.version.outputs.full }}
+          # Tauri updater signing
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # macOS code signing
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -183,6 +186,8 @@ jobs:
           releaseBody: 'See the assets below for download links.'
           releaseDraft: true
           prerelease: false
+          updaterJsonPath: latest.json
+          updaterJsonKeepUniversal: true
           args: >-
             --target ${{ matrix.target }}
             --config '{"version":"${{ steps.version.outputs.tauri }}"}'
