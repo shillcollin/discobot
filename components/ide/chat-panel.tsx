@@ -237,6 +237,16 @@ export function ChatPanel({
 	// Updates at most once every 50ms to improve performance during streaming
 	const throttledMessages = useThrottle(messages, 50);
 
+	// Abort ongoing fetch connections when component unmounts (e.g., user switches sessions).
+	// This frees browser connection slots — browsers limit HTTP/1.1 to 6 per origin,
+	// and stale SSE connections can exhaust the pool, blocking new requests like GET /messages.
+	React.useEffect(() => {
+		return () => {
+			abortControllerRef.current?.abort();
+			abortControllerRef.current = null;
+		};
+	}, []);
+
 	// Register resumeStream for external use (e.g., after commit starts)
 	React.useEffect(() => {
 		onRegisterResumeStream?.(resumeStream);

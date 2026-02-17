@@ -130,26 +130,35 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pass through raw SSE lines from sandbox
-	for line := range sseCh {
-		if line.Done {
-			// Container sent [DONE] signal
-			log.Printf("[Chat] Received [DONE] signal from sandbox")
-			_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
-			flusher.Flush()
+	for {
+		select {
+		case <-ctx.Done():
+			// Client disconnected
+			log.Printf("[Chat] Client disconnected, stopping SSE stream")
 			return
+		case line, ok := <-sseCh:
+			if !ok {
+				// Channel closed without explicit DONE
+				_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+			if line.Done {
+				// Container sent [DONE] signal
+				log.Printf("[Chat] Received [DONE] signal from sandbox")
+				_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+			// Log error events for debugging
+			if strings.Contains(line.Data, `"type":"error"`) {
+				log.Printf("[Chat] Passing through error event: %s", line.Data)
+			}
+			// Pass through raw data line without parsing
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", line.Data)
+			flusher.Flush()
 		}
-		// Log error events for debugging
-		if strings.Contains(line.Data, `"type":"error"`) {
-			log.Printf("[Chat] Passing through error event: %s", line.Data)
-		}
-		// Pass through raw data line without parsing
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", line.Data)
-		flusher.Flush()
 	}
-
-	// Send done signal if channel closed without explicit DONE
-	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
-	flusher.Flush()
 }
 
 // ChatStream handles resuming an in-progress chat stream.
@@ -228,20 +237,29 @@ func (h *Handler) ChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pass through remaining SSE lines from sandbox
-	for line := range sseCh {
-		if line.Done {
-			log.Printf("[ChatStream] Received [DONE] signal from sandbox")
-			_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
-			flusher.Flush()
+	for {
+		select {
+		case <-ctx.Done():
+			// Client disconnected
+			log.Printf("[ChatStream] Client disconnected, stopping SSE stream")
 			return
+		case line, ok := <-sseCh:
+			if !ok {
+				// Channel closed without explicit DONE
+				_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+			if line.Done {
+				log.Printf("[ChatStream] Received [DONE] signal from sandbox")
+				_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", line.Data)
+			flusher.Flush()
 		}
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", line.Data)
-		flusher.Flush()
 	}
-
-	// Send done signal if channel closed without explicit DONE
-	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
-	flusher.Flush()
 }
 
 // writeSSEError sends an error SSE event in UIMessage Stream format.
