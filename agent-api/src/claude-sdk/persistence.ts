@@ -147,9 +147,10 @@ export async function discoverSessions(
  * Load messages from a Claude SDK session file.
  * Tool results are merged into their corresponding dynamic-tool parts.
  *
- * Note: Claude Code writes partial/incremental updates to JSONL files. Multiple
- * records can have the same message.id but different uuid. We merge these records
- * by message.id to reconstruct complete messages.
+ * Note: Claude Code writes partial/incremental updates to JSONL files during streaming.
+ * Multiple records can have the same message.id but different uuid (representing the
+ * message at different points during streaming). We deduplicate these by keeping only
+ * the most recent record for each message.id, which contains the complete content.
  */
 export async function loadSessionMessages(
 	sessionId: string,
@@ -186,15 +187,31 @@ export async function loadSessionMessages(
 		// Accumulate assistant records for the current turn
 		let currentAssistantRecords: SDKAssistantMessage[] = [];
 		let currentAssistantMessageId: string | null = null;
+		// Track message.id → record index to deduplicate partial updates
+		const messageIdToRecordIndex = new Map<string, number>();
 
 		for (const record of records) {
 			if (record.type === "assistant") {
-				// Accumulate assistant records
-				// Use the first assistant message's ID for the merged message
-				if (currentAssistantMessageId === null) {
-					currentAssistantMessageId = record.message.id;
+				// Deduplicate: if we've seen this message.id before, replace the old record
+				// This handles partial/incremental updates during streaming where multiple
+				// records have the same message.id but different content
+				const existingIndex = messageIdToRecordIndex.get(record.message.id);
+				if (existingIndex !== undefined) {
+					// Replace the old record with the new one (more complete version)
+					currentAssistantRecords[existingIndex] = record;
+				} else {
+					// First time seeing this message.id
+					// Use the first assistant message's ID for the merged message
+					if (currentAssistantMessageId === null) {
+						currentAssistantMessageId = record.message.id;
+					}
+					// Track the index of this record for deduplication
+					messageIdToRecordIndex.set(
+						record.message.id,
+						currentAssistantRecords.length,
+					);
+					currentAssistantRecords.push(record);
 				}
-				currentAssistantRecords.push(record);
 			} else if (record.type === "user" && record.uuid) {
 				// Check if this user message has actual content (not just tool_results)
 				const hasTextContent = userMessageHasTextContent(record);
@@ -213,6 +230,7 @@ export async function loadSessionMessages(
 						}
 						currentAssistantRecords = [];
 						currentAssistantMessageId = null;
+						messageIdToRecordIndex.clear();
 					}
 
 					// Add the user message
